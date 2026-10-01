@@ -135,12 +135,13 @@ hosts:
       hops:
         - { ssh: 'ops@jump.example.com', auth: { type: agent }, knownHosts: tofu }
         - { ssh: 'deploy@10.0.0.7',     auth: { type: password, passwordRef: env:DEPLOY_PASSWORD } }
-    become:
+    become:                 # 可选。type: none = 纯普通用户，同样受支持
       type: sudo            # none | sudo | su | doas | custom
       user: root
       method: auto          # auto | nopasswd | stdin | pty
       passwordRef: env:SUDO_PASSWORD
       preserveEnv: false
+    layout: auto            # auto | system | user。路径由能力推导，不写死系统路径
     transport:
       strategy: auto        # auto | rsync | tar-ssh | sftp | local
       delete: false
@@ -152,6 +153,10 @@ hosts:
 
   local-box: { local: true }        # 本机目标
 ```
+
+> **不假设 root。** `sshUser` 一律是普通账号，`become` 只是可选项而非必经步骤（`type: none` 是一等公民）。
+> 目标机上的路径 —— 状态目录、systemd unit 位置、confd —— **都不是配置项**：由实测能力推导出
+> `system | hybrid | user` 三种布局之一，并在 plan 里打印出来供核对。完整模型见 `privilege.md`。
 
 **设计要点**：`hosts` 描述「怎么过去」，`target` 描述「到了之后怎么生效」，两者正交。所以同一份 nginx 配置，挂 `prod-bastion` 就是远端部署，挂 `local-box` 就是本机部署 —— target 的代码一行不用改。
 
@@ -370,7 +375,7 @@ transport.strategy = auto ← defaults（本次协商结果：tar-ssh）
 | 层级 | 关键字段 |
 | --- | --- |
 | `defaults` / `profiles` | `hosts`、`projects`、`release`、`transport`、`crypto`、`timeouts` |
-| `hosts.*` | `ssh`（含 `hops[]`）、`local`、`become`、`transport`、`crypto`、`knownHosts`、`timeouts`、`retry` |
+| `hosts.*` | `ssh`（含 `hops[]`）、`local`、`become`、`layout`、`transport`、`crypto`、`knownHosts`、`timeouts`、`retry` |
 | `projects.*.source` | `root`、`include`、`exclude`、`files`、`dotfiles`、`prepare`（本机前置命令） |
 | `projects.*.build` | `where`、`buildHost`、`platform`、`strategy`、`command`、`env`、`artifact` |
 | `projects.*.release` | `root`、`keep`、`shared[]`、`owner`、`dirMode`、`fileMode`、`switchStrategy` |

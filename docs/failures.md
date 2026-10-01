@@ -27,7 +27,7 @@
 
 ### 2.1 目标机状态日志 `state journal`
 
-路径：`/var/lib/dp/state/<project>/journal.jsonl`，append-only，每步一行。
+路径：`<状态目录>/state/<project>/journal.jsonl`，append-only，每步一行。状态目录**随布局而定**（system 布局 `/var/lib/dp/`，user 布局 `$XDG_STATE_HOME/dp/`），见 `privilege.md` §2。
 
 ```jsonl
 {"ts":"...","deployId":"d-7f3a","step":"transfer","status":"begin","host":"web-01"}
@@ -188,7 +188,7 @@ pass 条件: afterFree >= max(minFreeBytes, total × minFreePercent)
 |---|---|---|
 | 前提 | SSH 还能连上 | SSH 已连不上（sshd 被 OOM 杀、机器夯死） |
 | 机制 | `dp rescue` 走单条 `exec` | 目标机本地 timer/cron 触发落盘脚本 |
-| 目标机需要预置？ | **不需要任何东西** | 需要 root 预置脚本 + timer |
+| 目标机需要预置？ | **不需要任何东西** | 需要**布局所有者**预置脚本 + timer，**且不是每种布局都支持** |
 | 新增提权面？ | 无 | **有**（见下） |
 
 带内的要求：不启动交互 shell、单条 `exec`、超时 5s，能做四件事 —— mask 新服务 / 切回上一版 / 删除 trial guard / 强制释放租约。
@@ -202,40 +202,50 @@ dp rescue <host> --mask-service | --rollback | --release-lock
 早期版本写的是 `/var/lib/dp/rescue.sh`。**这个位置是错的，两重错**：
 
 1. **违反 FHS**：`/var/lib` 是可变**数据**目录，不是放可执行代码的地方。可执行代码属于 `/usr/libexec/<pkg>`（RHEL/Fedora 系）或 `/usr/lib/<pkg>`（Debian 系）。
-2. **制造本地提权面（严重）**：带外脚本要被 **root 的** systemd timer 在无人值守时执行。而 `/var/lib/dp` 天然要被**部署身份**写（否则 journal 和租约锁写不进去）。于是「数据目录必须可写」和「被 root 执行的脚本必须不可写」这两个需求撞在同一个目录上 —— **任何能部署的人，都能改写下次以 root 执行的脚本内容**（CWE-732 / CWE-426）。
+2. **制造本地提权面（严重）**：带外脚本要被 systemd timer 在无人值守时执行，而状态目录天然要被**部署身份**写（否则 journal 和租约锁写不进去）。于是「数据目录必须可写」和「被定时执行的脚本必须不可写」这两个需求撞在同一个目录上 —— **任何能部署的人，都能改写下次被执行的代码内容**（CWE-732 / CWE-426）。
 
-讽刺的是：为了让普通用户也能部署，我们恰恰最倾向于把 `/var/lib/dp` 设成对部署用户可写 —— 那正是这个漏洞最容易被触发的时刻。
+讽刺的是：为了让普通用户也能部署，我们恰恰最倾向于把状态目录设成对部署用户可写 —— 那正是这个漏洞最容易被触发的时刻。
 
-**修法是代码/数据分离：**
+**修法是代码/数据分离，两个域的路径随布局走**（布局定义见 `privilege.md` §2）：
 
-| 类别 | 位置 | owner:group | mode | 能否被部署身份写 |
-|---|---|---|---|---|
-| **代码（不可变）** | `/usr/libexec/dp/rescue.sh`<br/>（Debian 系 `/usr/lib/dp/rescue.sh`，由 Facts 探测决定） | `root:root` | `0755` | **绝不可** |
-| **数据（可变）** | `/var/lib/dp/state/<project>/`<br/>`journal.jsonl` `lock.json` `current` | `root:root`（root 部署）<br/>`dp:dp`（普通用户部署） | `0700` / `0750` | ✅ 只能写 |
+| 布局 | 代码域（不可被部署身份写） | 数据域（可写） |
+|---|---|---|
+| **system** | `/usr/libexec/dp/rescue.sh`（Debian 系 `/usr/lib/dp/`）<br/>`root:root 0755` | `/var/lib/dp/state/<project>/` |
+| **user** | `$XDG_DATA_HOME/dp/rescue.sh` `0755` | `$XDG_STATE_HOME/dp/<project>/` |
+| **hybrid** | **不启用带外救援** | `$XDG_STATE_HOME/dp/<project>/` |
 
 配套四条硬约束：
 
-- **目录链逐层校验**：`/` → `/usr` → `/usr/libexec` → `/usr/libexec/dp` 每一级都必须 root 拥有且**非 group/other 可写**；任一级不满足 → 报 `DP.SEC.RESCUE_UNSAFE_PATH` 并**拒绝安装**（这是预检关口的一部分，不是警告）
-- **脚本自校验**：脚本内嵌自身 sha256，执行前先校验，不符则立即退出并告警 —— 防投递后被篡改
-- **数据永不当代码求值**：`rescue.sh` 只**读**状态文件；取出的 releaseId / 路径只能作为**引用过的参数**传入，必须过 allowlist 校验，绝不 `eval`、绝不拼进未引用的 shell 字符串
-- **默认关闭**：落盘脚本 + root timer 属于**环境准备**，不是应用部署。必须由 `dp host prepare --with-rescue` 显式安装；每次部署顺手装一个以 root 定时运行的东西是不能接受的
+- **目录链逐层校验**：每一级 owner 必须**等于布局所有者**且**非 group/other 可写**；任一级不满足 → 报 `DP.SEC.RESCUE_UNSAFE_PATH` 并**拒绝安装**（预检关口，不是警告）
+- **脚本自校验**：内嵌自身 sha256，执行前校验，不符则立即退出 —— 防投递后被篡改
+- **数据永不当代码求值**：只**读**状态；取出的 releaseId / 路径只能作**引用过的参数** + allowlist 校验，绝不 `eval`、绝不拼进未引用的 shell 字符串
+- **默认关闭**：落盘脚本 + timer 属于**环境准备**，不是应用部署。`dp host prepare --with-rescue` 才装
 
-### 7.2 无 root 时的降级（必须如实告知）
+### 7.2 各布局下的真实能力（必须如实告知）
 
-部署身份是普通用户且无法提权时，装不了 root timer，**带外救援根本不存在**。此时：
+前提：`/usr/libexec`、`/etc/systemd/system` 这类系统路径**普通用户根本写不了**，所以下表不是"降级选项"，而是**现实**。
 
-- 只能退到用户级 cron + 用户 own 的脚本，且该脚本**只能做该用户权限内的事**（改自己目录下 symlink 切回上一版），**不能 mask service**
-- `dp status` / plan 输出必须明确标注本次能力为 `rescue: inband-only` 并告警 —— 不能让用户以为自己有兜底
+| 布局 | 带外救援 | 能做 | 不能做 |
+|---|---|---|---|
+| **system** | ✅ 系统级 timer | mask/停用系统服务 · 切回上一版 · 清租约 | — |
+| **user** | ⚠️ 用户级 timer | 切回上一版（改自己目录的 symlink）· 清自己的租约 | **不能 mask 系统服务** · 不能动系统 unit |
+| **hybrid** | ❌ 不存在 | 只有带内救援 | — |
+
+`dp status` / plan 必须标注本次能力（`rescue: full | user-level | inband-only`）并告警 —— 不能让人以为自己有兜底。
+
+user 布局还有个连带问题：没有 linger 时用户一注销，timer 本身也停了（见 `privilege.md` §3.3）。**带外救援在纯用户模式下几乎不可靠**，这点要写进文档，不能含糊。
 
 ### 7.3 三种身份要分清（否则权限一定配错）
 
-| 身份 | 例子 | 对 `/var/lib/dp` 的权限 |
+| 身份 | 例子 | 对状态目录的权限 |
 |---|---|---|
-| **登录/传输身份** | `deploy` | 属于它的组时 `0750`，否则 `0700`+提权 |
-| **提权后身份** | `root` | owner |
+| **登录/传输身份** | `deploy` | 布局所有者时 `0700` / `0750` |
+| **提权后身份** | `root`（仅当 become 成功） | owner（仅 system 布局） |
 | **服务运行身份** | `www-data` / `app` | **无任何权限** |
 
 服务身份若需要读取状态（如当前 releaseId），只能读**单独导出的只读子集**（`0644`），不能因此给它写权限。
+
+**布局一致性**：同一项目前后用不同身份部署，会让状态目录 owner 错乱（今天 root、明天 deploy）→ 报 `DP.LAYOUT.MISMATCH` 并中止（见 `privilege.md` §2.2）。
 
 ### 7.4 SELinux
 

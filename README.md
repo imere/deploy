@@ -22,6 +22,7 @@ docs/
   diagrams.md    ★ 图集：全景 / 分层 / 数据流 / 状态机 / 各决策链（结构与流程以这里为准）
   DESIGN.md     总体设计：分层、管线、release 布局、并发隔离、扩展点、安全、里程碑
   transport.md  多跳 SSH / sudo·su 提权 / 无 sshpass / rsync 走自建隧道
+  privilege.md  ★ 不假设 root：能力集实证、三种布局推导、普通用户模式的能与不能
   config.md     配置模型：最简形态、多环境、集群扇出、容器构建推拉、交叉编译、自动识别
   security.md   威胁模型、抗量子密钥协商、凭据、命令注入、供应链
   transaction.md 全局事务：撤销补偿、状态自愈、不可逆操作的分类与拦截
