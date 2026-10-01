@@ -4,6 +4,34 @@
 
 ---
 
+## 0 · 永不交互（最高优先级，压过下面所有条）
+
+**起因**：一次 push 用了不含 token 的 remote，触发 Git Credential Manager 弹 GUI 让用户手点。这是不可接受的——**任何弹窗都意味着那次"自动化"根本不是自动化**，且在 CI 里会表现为永久挂起。
+
+**决策**：deploy-kit 自身、以及本项目开发过程，**都不允许出现任何等待人类输入的行为**。
+
+三条落地机制：
+
+1. **凭据必须带外提供，绝不依赖交互提示**
+   - git：所有远程操作加 `GIT_TERMINAL_PROMPT=0` → 缺凭据时**立刻失败**而不是弹窗
+   - ssh 走密钥：`-o BatchMode=yes -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=0`
+   - ssh 走密码：`SSH_ASKPASS=<我们生成的助手> SSH_ASKPASS_REQUIRE=force` + stdin 重定向到 null
+   - 两者都不满足 → **直接报错，不去尝试提示**
+
+2. **远端命令的 prompt 嗅探**（这是产品级能力，不只是开发纪律）
+   远端若吐出提示符而我们没预期，`dp` 必须杀掉进程并报结构化错误，而不是一直等：
+   ```
+   DP.INTERACTIVE_PROMPT_DETECTED  匹配到 "Password:" / "[sudo] password" / "Are you sure you want to continue connecting"
+   ```
+   检测模式可由用户扩展（不同发行版 `su` 措辞不同，我们不穷举）。
+
+3. **一切子进程必须有超时兜底**
+   连接、exec、传输、验收、hook 全部带 `timeout`。挂起 = 失败，不允许"可能一直在等"。
+
+**推论**：`sudo` 一律先 `sudo -n` 探测是否免密，需要密码时用 `sudo -S -p ''` **主动投喂**，绝不等它问。主机密钥策略必须预置（`strict` 或显式 `accept-new`），不允许出现 `yes/no` 确认。
+
+---
+
 ## 3 · Java / Python 部署；systemd 与 initrc 可同时设置
 
 **决策**：引入 **runtime profile（运行时画像）** 与 **supervisor（进程管理层）** 两个正交维度。

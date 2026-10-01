@@ -5,6 +5,12 @@ pnpm 单仓多包，包名前缀 `@dp/*`。**Node ≥ 24**。
 
 ## 铁律
 
+0. **永不交互。** 任何命令都不允许等待人类输入——弹窗 = 这次自动化是假的，且在 CI 里表现为永久挂起。
+   - git 远程操作一律 `GIT_TERMINAL_PROMPT=0`；**推送必须显式带凭据**，不要先把 token 从 remote 摘掉再 push
+   - ssh 走密钥：`-o BatchMode=yes -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=0`
+   - ssh 走密码：`SSH_ASKPASS=<助手> SSH_ASKPASS_REQUIRE=force` + `< /dev/null`
+   - 所有子进程必须有 `timeout` 兜底
+
 1. **不臆测能力，先实测。** 目标机上"看起来有"的东西不等于能用（例：`command -v su` 有，但 busybox su 缺 suid 位，实际失败）。
 2. **歧义靠拒绝，不靠默认值。** source 路径写法、多 target 命中 —— 无法判定时报错并给出可选写法，绝不猜。
 3. **安全不让步**：路径归一化 + 允许根校验、显式 mode、传输后哈希校验、主机密钥默认 strict、凭据不进日志。

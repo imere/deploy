@@ -88,6 +88,8 @@ deploy  ──►  以 trial 态启动  ──►  健康检查连续通过  ─
 |---|---|---|---|---|
 | `DP.CONN.*` | 连接 | ✅ | abort（零副作用） | `@dp/transport` |
 | `DP.AUTH.*` | 认证/提权 | ✅ | abort | `@dp/transport` |
+| `DP.INTERACTIVE_PROMPT_DETECTED` | 任意 | ✅ | **立即杀进程并 abort** | `@dp/transport` |
+| `DP.TIMEOUT.*` | 任意 | ❌ | abort（挂起=失败） | 全局超时兜底 |
 | `DP.DISK.INSUFFICIENT` | 预检 | ✅ | abort | `@dp/preflight` |
 | `DP.DISK.INODE_EXHAUSTED` | 预检 | ✅ | abort | `@dp/preflight` |
 | `DP.DISK.NOT_WRITABLE` | 预检 | ✅ | abort | `@dp/preflight`（**实证写入**） |
@@ -172,6 +174,12 @@ pass 条件: afterFree >= max(minFreeBytes, total × minFreePercent)
 | `security.md` | 故障响应中的凭据处理、救援通道的鉴权 |
 
 ---
+
+### 为什么"等待输入"要当成故障处理
+
+远端吐出 `Password:` 而我们没预期时，进程会一直挂着——在 CI 里就是永久挂起，在桌面端就是弹窗让人手点。两者都不可接受。
+
+所以 prompt 嗅探不是"锦上添花"，它和超时兜底一样是**把静默挂起转成显式失败**的机制：匹配到提示符 → 杀进程 → 报 `DP.INTERACTIVE_PROMPT_DETECTED` → 提示用户该配什么（比如"给 sudo 配 NOPASSWD，或提供 sudo 密码"）。
 
 ## 待确认
 
