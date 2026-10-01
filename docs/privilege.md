@@ -135,6 +135,93 @@ host: defineHost({
 
 ---
 
-## 6. 一句话
+## 6. release 目录推导（规则明示）
 
-**把「路径」从输入变成输出。** 配置里只写"我是谁、我能提权到哪"，剩下的路径由实测能力推导出来 —— 这样同一份配置在 root 机器和普通机器上都能用，区别只是推导出的布局不同。
+`release.root` 也可以不写。但**推导必须透明** —— 规则摊开、过程可核对、随时可覆盖。
+
+### 6.1 五条原则
+
+1. **规则公开**：候选序列是代码里的导出常量（`RELEASE_ROOT_CANDIDATES`），本文档列全，不藏在实现里
+2. **有序 + 实证**：按序试探 `canWrite`（建临时文件后立刻删），取**第一个通过**的
+3. **过程可核对**：plan 打印候选序列 → 每个跳过的**原因** → 最终选择 → 理由
+4. **永不静默回退**：选定后写进状态索引，后续沿用；要换必须显式迁移
+5. **随时可覆盖**：`release.root: '/custom/path'`，覆盖后**照样实证**（该报错还是报错）
+
+### 6.2 候选序列表
+
+| 平台 | 布局 | 候选序列（有序，取首个可写者） |
+|---|---|---|
+| linux | system | `/srv/<name>` → `/opt/<name>` → `/var/www/<name>` |
+| linux | user | `~/apps/<name>` → `$XDG_DATA_HOME/<name>` |
+| darwin | system | `/opt/<name>` → `/usr/local/var/<name>` → `/usr/local/opt/<name>` |
+| darwin | user | `~/Applications/<name>` → `$XDG_DATA_HOME/<name>` |
+| win32 | system | `%ProgramFiles%\<Vendor>\<Name>` → `%ProgramData%\<Name>` |
+| win32 | user | `%LOCALAPPDATA%\<Name>` → `~/<Name>` |
+| freebsd | system | `/usr/local/<name>` → `/usr/local/www/<name>` → `/opt/<name>` |
+| freebsd | user | `~/apps/<name>` → `$XDG_DATA_HOME/<name>` |
+
+**每条为什么这么排**（这是"明示"的核心，不能只有结论）：
+
+- **linux system 首选 `/srv`**：FHS 3.0 定义 `/srv` 为"本系统对外提供服务的数据"，正是自研应用该待的地方；`/opt` 语义是第三方附加软件包，作次选；`/var/www` 只在 nginx target 下合理，放最后
+- **darwin 不用 `/srv`**：macOS 无此约定。且 **SIP 保护 `/usr`、`/System`、`/bin`**（`/usr/local` 除外），所以候选只能落在 `/opt` 或 `/usr/local` 下
+- **win32 system 首选 `ProgramFiles`**：独立软件的标准安装位置；`ProgramData` 是程序生成数据的共享位置，作次选
+- **win32 user 首选 `LOCALAPPDATA`**：无需管理员即可写，是 Windows 上用户级安装的事实标准
+- **freebsd 首选 `/usr/local`**：ports/packages 的根，第三方软件的标准位置；`/opt` 在 BSD 上只是兼容位
+
+target 类型只做**提示加权**，不改序列：nginx target 会提示 Debian 系 `/var/www/<name>`、RHEL 系 `/usr/share/nginx/html`、brew 版 nginx 在 macOS 上是 `/usr/local/var/www`。
+
+### 6.3 选定后的内部结构（跨平台一致）
+
+```
+<root>/releases/<releaseId>/      # 每版一个目录，永不覆盖
+<root>/shared/                    # 跨版本共享（上传、日志、.env）
+<root>/current -> releases/<id>   # 指向当前版本
+```
+
+Windows 上 `current` 软链可能需要特权 → 退化到 `copy` 并**明确告知不再是原子切换**（已有设计）。
+
+---
+
+## 7. 跨平台路径差异（远不止分隔符）
+
+平台差异不能只当成"把 `/` 换成 `\\`"——下面每一条都能让部署静默出错。
+
+| 维度 | Linux / BSD | macOS | Windows |
+|---|---|---|---|
+| 分隔与根 | `/`，单根 | `/`，单根 | `\`，驱动器号 + UNC |
+| 大小写 | **敏感** | 默认不敏感 | 不敏感 |
+| 保留名 | 无 | 无 | **NUL CON AUX PRN COM1-9 LPT1-9**（含带扩展名变体，如 `aux.txt`） |
+| 非法字符 | 仅 `/` 和 NUL 字节 | `/`（UI 层还有 `:`） | `< > : " \| ? *` 与控制字符 0-31 |
+| 路径长度上限 | 4096 | 1024 | **260（MAX_PATH）**，需 `\\?\` 前缀或 `LongPathsEnabled` |
+| 符号链接 | 原生 | 原生 | 需开发者模式或管理员 → 退化到 copy |
+| 系统目录可写 | 需 root | **SIP 保护** `/usr` `/System` `/bin`（`/usr/local` 除外） | 需管理员 / UAC |
+| home | `/home/<u>`（root 为 `/root`） | `/Users/<u>` | `%USERPROFILE%` = `C:\Users\<u>` |
+| 临时目录 | `/tmp` | `$TMPDIR`（`/var/folders/...`） | `%TEMP%` |
+| 服务定义位置 | `/etc/systemd/system` · OpenRC `/etc/init.d` · FreeBSD `/usr/local/etc/rc.d` | `/Library/LaunchDaemons`（系统）、`~/Library/LaunchAgents`（用户） | Windows Service（注册表，借 `sc` / NSSM / WinSW） |
+
+### 7.1 四条必须预检拦截的（**本机就能查，不用连目标机**）
+
+| 检查 | 错误码 | 后果 |
+|---|---|---|
+| 源里存在仅大小写不同的路径 | `DP.PATH.CASE_COLLISION` | Linux 上是两个文件，Windows/macOS 上**互相覆盖 = 静默丢文件** |
+| 源里存在 Windows 保留名 | `DP.PATH.RESERVED_NAME` | `NUL`、`CON`、`aux.txt` 落到 Windows 直接废掉 —— **我们自己就在 `NUL` 上栽过** |
+| 路径超过目标平台上限 | `DP.PATH.TOO_LONG` | Windows 260 最常见 |
+| 含目标平台非法字符 | `DP.PATH.ILLEGAL_CHAR` | Windows 的 `<>:"\|?*` |
+
+**这四条都能在传第一个字节之前发现** —— 这正是预检关口存在的意义：发现问题的时候还没有任何副作用。
+
+### 7.2 WSL 是个混合体
+
+本质是 Linux，但 `/mnt/c`、`/mnt/d` 这类挂载点继承 Windows 语义：`chmod` 无效、大小写不敏感、权限一律显示 777。
+
+→ release root 落在 `/mnt/<drive>` 下时，**按 Windows 规则校验**，并告警权限不可控（`DP.PATH.WSL_MOUNT`）。
+
+### 7.3 测试矩阵要覆盖
+
+`docs/testing.md` 的矩阵层扩展为 `{linux, darwin, win32, freebsd} × {system, hybrid, user} × {release.root 显式 / 推导}`，并对 §7.1 四条各配**纯单元夹具**（不需要真机器）。
+
+---
+
+## 8. 一句话
+
+**把「路径」从输入变成输出，但把「规则」从实现搬到文档。** 配置里只写"我是谁、我能提权到哪"，路径由实测能力推导 —— 推导规则公开、选择过程可打印、结果可覆盖。这样同一份配置在 root 机器、普通用户机器、Windows 上都能用，区别只是推导出的布局与候选序列不同。

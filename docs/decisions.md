@@ -253,7 +253,7 @@ commands: {
 
 6. **故障注入层**：用 podman 靶机真实注入——`AllowTcpForwarding no`、`busybox su`、磁盘写满、只读目录、服务 crash loop、网络中断
 7. **契约层**：把 spike 的结论固化成回归测试——rsync `--rsh` argv 契约、`%h` 不替换、不经 shell、scp `-O` 兼容
-8. **矩阵层**：`{linux, darwin, win32} × {systemd, sysvinit, openrc, none} × {rsync, tar-ssh, sftp, scp} × {sudo, su, root, none}`
+8. **矩阵层**：`{linux, darwin, win32, freebsd} × {systemd, sysvinit, openrc, launchd, winsvc, none} × {rsync, tar-ssh, sftp, scp} × {become: sudo|su|none} × {layout: system|hybrid|user} × {release.root: 显式|推导}` —— 组合数大，但每一项都是注入 Facts 的纯函数，不需要真机器
 
 覆盖率产物 → `build/coverage/`。
 
@@ -328,6 +328,29 @@ dev  build  test  lint [--fix]  typecheck  format [--check]  doc  release
 
 **理由**：部署工具关心的是"产物"，不是"用什么构建"。识别 + 给正确的 build 命令就够了，成本极低。
 **做不到也不做的部分**：把 deploy-kit 自身跑在 deno/bun 上——不承诺。
+
+---
+
+## 25 · release 目录推导与跨平台路径
+
+**推导，但规则明示**（见 `privilege.md` §6）：
+
+- 候选序列是**导出常量**，文档列全 —— 不藏在实现里
+- 有序试探 `canWrite`，取首个通过者；plan 打印**候选 + 跳过原因 + 最终选择 + 理由**
+- 选定后写进状态索引，后续沿用，**永不静默回退**；`release.root` 可随时覆盖且覆盖后照样实证
+
+**跨平台差异**（`privilege.md` §7）不能简化成"换分隔符"。除路径分隔符外至少还有：大小写敏感性、Windows 保留名、非法字符集、路径长度上限（Windows 260）、软链权限、SIP（macOS）、home/临时目录位置、服务定义位置。
+
+**四条必须预检拦截**，且**本机就能查、不需要连目标机**：
+
+| 错误码 | 场景 |
+|---|---|
+| `DP.PATH.CASE_COLLISION` | 源里仅大小写不同的路径 → 在不敏感目标上静默互相覆盖 |
+| `DP.PATH.RESERVED_NAME` | Windows 保留名（`NUL` / `CON` / `aux.txt`）→ 落地即废 |
+| `DP.PATH.TOO_LONG` | 超目标平台长度上限 |
+| `DP.PATH.ILLEGAL_CHAR` | 含目标平台非法字符 |
+
+WSL 的 `/mnt/<drive>` 挂载点按 **Windows 规则**校验（`DP.PATH.WSL_MOUNT`）。
 
 ---
 

@@ -55,6 +55,28 @@ flowchart TB
 | `core` 编排 | releaseId 幂等、keep N、回滚指向、锁逻辑 | 同内容两次部署 releaseId 相同；`keep: 2` 时 pruned 列表正确且永不含 current/previous |
 | `template` | nginx conf 渲染、变量求值、危险字符 | 反代 location 自动带齐 `Host`/`X-Forwarded-*`；`su -c` 的引用转义正确 |
 
+### 3.1 路径推导：纯单元，不需要任何机器
+
+布局推导和 release 目录推导都是 `(platform, layout, capabilities) → path` 的**纯函数**，天然可全量覆盖：
+
+| 断言 | 说明 |
+| --- | --- |
+| `deriveLayout(facts)` | `{linux,darwin,win32,freebsd} × {root, sudo, none}` 各给一组注入 facts，断言布局正确 |
+| `pickReleaseRoot(...)` | 候选序列**逐条 mock `canWrite`**，断言取首个通过者；全不可写时报 `DP.PATH.*` 而不是静默挑一个 |
+| 推导过程可打印 | 断言 plan 输出里含**跳过原因**（"`/srv/x` 不可写：只读挂载"），不是只有最终值 |
+| 覆盖优先 | 显式 `release.root` 时**不调用**推导，但仍走 `canWrite` 实证 |
+
+**跨平台路径校验**（`privilege.md` §7.1 那四条）同样纯单元，用夹具文件树即可：
+
+```ts
+it('拒绝仅大小写不同的路径', () =>
+  expect(() => checkPaths(['a.js', 'A.js'], 'win32')).toThrow('DP.PATH.CASE_COLLISION'))
+it('拒绝 Windows 保留名', () =>
+  expect(() => checkPaths(['aux.txt'], 'win32')).toThrow('DP.PATH.RESERVED_NAME'))
+```
+
+各平台各配一组夹具，**不需要真的 Windows 机器** —— 这正是把校验放进预检而非运行时的收益。
+
 关键技巧 —— **plan 的矩阵快照**：
 
 ```ts
