@@ -70,7 +70,9 @@ flowchart TB
 | 可创建符号链接 | 在 tmp 里 `ln -s` 再删 | Windows 或受限环境可能不允许 → 提前决定 `switchStrategy` |
 | 可否 `chown` 到目标 owner | `getent passwd www-data` 存在性 + 试 chown 一个自己建的临时文件 | **目标是先把 owner 存在性查出来**，否则部署到一半才发现改不了属主 |
 | 提权可用性 | `sudo -n true` / `su -c 'true'` 的成败 | 决定这条部署会不会需要密码 |
-| confd 可写 | 目标目录写 ετυμη option?— 用一个必将被删除的临时文件名试探 | 常见坑：confd 是只读挂载、或属于别的用户 |
+| confd 可写 | 用带随机后缀、必将被删除的临时文件名试探 | 常见坑：confd 是只读挂载、或属于别的用户 |
+| **状态目录链可写且未被抢占** | 逐层校验 `/var` → `/var/lib` → `/var/lib/dp` 的 owner 与写权限 | 租约锁若可被他人伪造，等于永久阻塞所有部署（可用性攻击，不只是权限问题） |
+| **带外脚本目录链安全**（仅 `--with-rescue`） | 逐层校验 `/` → `/usr` → `/usr/libexec` → `/usr/libexec/dp` 均为 root 拥有且非 group/other 可写 | **不合格即拒绝安装**，报 `DP.SEC.RESCUE_UNSAFE_PATH`；这是提权面，不能降级为警告（见 `failures.md` §7.1） |
 
 试探文件必须在同一个 try 里创建并删除，且路径带随机后缀，避免留下垃圾。
 

@@ -289,7 +289,7 @@ flowchart TB
     class WARN warn
 ```
 
-有一条硬规则：**交叉编译出来的产物不能在本机验证**。因此 `strategy: cross | buildx` 且没配 healthcheck 时，給出警告（不阻断，但要用户知情）——这是为避免「推上去了才发现跑不起在 düzeltme h中间ā的架构」。
+有一条硬规则：**交叉编译出来的产物不能在本机验证**。因此 `strategy: cross | buildx` 且没配 healthcheck 时，給出警告（不阻断，但要用户知情）——这是为避免「推上去了才发现跑在错误的架构上」。
 
 ---
 

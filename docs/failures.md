@@ -180,16 +180,66 @@ pass 条件: afterFree >= max(minFreeBytes, total × minFreePercent)
 
 ---
 
-## 7. 带外救援 `dp rescue`
+## 7. 救援通道 `dp rescue`
 
-机器半死时，正常部署链路已经走不通了。需要一条**极简、低资源、短超时**的通道：
+先分清两条**性质完全不同**的通道——混在一起是早期设计最大的错：
 
-- 不启动交互 shell（省资源、省时间）
-- 单条 `exec`，超时 5s
-- 能做四件事：mask 新服务 / 切回上一版 / 删除 trial guard / 强制释放租约
-- **部署开始前就先把 `/var/lib/dp/rescue.sh` 投到目标机**——这样即使部署中途机器失控，脚本已经在那里了，可以借 cron/systemd timer/甚至手动执行来救命
+| | **带内救援（默认，首选）** | **带外救援（可选，需显式开启）** |
+|---|---|---|
+| 前提 | SSH 还能连上 | SSH 已连不上（sshd 被 OOM 杀、机器夯死） |
+| 机制 | `dp rescue` 走单条 `exec` | 目标机本地 timer/cron 触发落盘脚本 |
+| 目标机需要预置？ | **不需要任何东西** | 需要 root 预置脚本 + timer |
+| 新增提权面？ | 无 | **有**（见下） |
 
-命令形态：`dp rescue <host> --mask-service` / `--rollback` / `--release-lock`。
+带内的要求：不启动交互 shell、单条 `exec`、超时 5s，能做四件事 —— mask 新服务 / 切回上一版 / 删除 trial guard / 强制释放租约。
+
+```
+dp rescue <host> --mask-service | --rollback | --release-lock
+```
+
+### 7.1 带外救援：路径改了，且默认关闭
+
+早期版本写的是 `/var/lib/dp/rescue.sh`。**这个位置是错的，两重错**：
+
+1. **违反 FHS**：`/var/lib` 是可变**数据**目录，不是放可执行代码的地方。可执行代码属于 `/usr/libexec/<pkg>`（RHEL/Fedora 系）或 `/usr/lib/<pkg>`（Debian 系）。
+2. **制造本地提权面（严重）**：带外脚本要被 **root 的** systemd timer 在无人值守时执行。而 `/var/lib/dp` 天然要被**部署身份**写（否则 journal 和租约锁写不进去）。于是「数据目录必须可写」和「被 root 执行的脚本必须不可写」这两个需求撞在同一个目录上 —— **任何能部署的人，都能改写下次以 root 执行的脚本内容**（CWE-732 / CWE-426）。
+
+讽刺的是：为了让普通用户也能部署，我们恰恰最倾向于把 `/var/lib/dp` 设成对部署用户可写 —— 那正是这个漏洞最容易被触发的时刻。
+
+**修法是代码/数据分离：**
+
+| 类别 | 位置 | owner:group | mode | 能否被部署身份写 |
+|---|---|---|---|---|
+| **代码（不可变）** | `/usr/libexec/dp/rescue.sh`<br/>（Debian 系 `/usr/lib/dp/rescue.sh`，由 Facts 探测决定） | `root:root` | `0755` | **绝不可** |
+| **数据（可变）** | `/var/lib/dp/state/<project>/`<br/>`journal.jsonl` `lock.json` `current` | `root:root`（root 部署）<br/>`dp:dp`（普通用户部署） | `0700` / `0750` | ✅ 只能写 |
+
+配套四条硬约束：
+
+- **目录链逐层校验**：`/` → `/usr` → `/usr/libexec` → `/usr/libexec/dp` 每一级都必须 root 拥有且**非 group/other 可写**；任一级不满足 → 报 `DP.SEC.RESCUE_UNSAFE_PATH` 并**拒绝安装**（这是预检关口的一部分，不是警告）
+- **脚本自校验**：脚本内嵌自身 sha256，执行前先校验，不符则立即退出并告警 —— 防投递后被篡改
+- **数据永不当代码求值**：`rescue.sh` 只**读**状态文件；取出的 releaseId / 路径只能作为**引用过的参数**传入，必须过 allowlist 校验，绝不 `eval`、绝不拼进未引用的 shell 字符串
+- **默认关闭**：落盘脚本 + root timer 属于**环境准备**，不是应用部署。必须由 `dp host prepare --with-rescue` 显式安装；每次部署顺手装一个以 root 定时运行的东西是不能接受的
+
+### 7.2 无 root 时的降级（必须如实告知）
+
+部署身份是普通用户且无法提权时，装不了 root timer，**带外救援根本不存在**。此时：
+
+- 只能退到用户级 cron + 用户 own 的脚本，且该脚本**只能做该用户权限内的事**（改自己目录下 symlink 切回上一版），**不能 mask service**
+- `dp status` / plan 输出必须明确标注本次能力为 `rescue: inband-only` 并告警 —— 不能让用户以为自己有兜底
+
+### 7.3 三种身份要分清（否则权限一定配错）
+
+| 身份 | 例子 | 对 `/var/lib/dp` 的权限 |
+|---|---|---|
+| **登录/传输身份** | `deploy` | 属于它的组时 `0750`，否则 `0700`+提权 |
+| **提权后身份** | `root` | owner |
+| **服务运行身份** | `www-data` / `app` | **无任何权限** |
+
+服务身份若需要读取状态（如当前 releaseId），只能读**单独导出的只读子集**（`0644`），不能因此给它写权限。
+
+### 7.4 SELinux
+
+脚本须带正确类型（`bin_t`，安装后 `restorecon`），状态目录 `var_lib_t`。RHEL 系上标签错了会静默拒执行 —— 这类"看着装上了其实不会跑"的失败，预检必须 `restorecon` 后实测一次（与 `verify.md` 的 SELinux 检查同一套）。
 
 ---
 

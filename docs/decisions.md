@@ -242,6 +242,8 @@ commands: {
 - **完整性**：传输后校验 sha256，不匹配即整体作废（staging 丢弃，不动 current）
 - **凭据**：不落盘、不进日志（见第 7 条脱敏）、SSH_ASKPASS 助手文件 `0700` 且用完即删
 - **主机密钥**：默认 `strict`，`knownHosts: none` 必须显式打开并被 `dp check --security` 列出
+- **目录链逐层校验**：不只看目标路径本身的 mode，要**从根逐级校验 owner + 可写性**。两处必检：① 带外脚本路径 `/usr/libexec/dp/`（提权面，`DP.SEC.RESCUE_UNSAFE_PATH` → 拒绝）② 状态路径 `/var/lib/dp/`（伪造租约锁 = 可用性攻击）。**这是预检项，不是运行时警告**
+- **代码/数据分离**：被 root 定时执行的代码与可变数据**不得同目录**。状态文件取出的值只作引用过的参数 + allowlist 校验，永不 `eval`。详见 `security.md` §6.2 与 `failures.md` §7.1
 
 ---
 
