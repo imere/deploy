@@ -1,7 +1,7 @@
 # Spike 实测结论
 
 > 「先测」的产物。所有结论都来自真机实测，不是读文档推断。
-> 复现脚本在 `.tmp/spikes/`，靶机用 podman 容器（见 `agents/skills/dp-spike-env/SKILL.md`）。
+> 复现脚本在 `.tmp/spikes/`，靶机用 podman 容器（见 `.agents/skills/dp-spike-env/SKILL.md`）。
 
 ## 环境
 

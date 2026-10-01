@@ -301,7 +301,7 @@ dev  build  test  lint [--fix]  typecheck  format [--check]  doc  release
 ## 22 · AGENTS.md 与 agents/skills
 
 - 根目录 `AGENTS.md`：仓库约定、命令、目录职责、提交规范（**保持 <100 行**）
-- `agents/skills/`：**只放真正可复用的操作流程**（如 `dp-spike-env` 靶机环境搭建），不堆积说明性文档
+- `.agents/skills/`：**只放真正可复用的操作流程**（如 `dp-spike-env` 靶机环境搭建），不堆积说明性文档
 
 ---
 

@@ -33,7 +33,7 @@ pnpm doc        # 文档/图集
 ```
 packages/       @dp/* 各包（schema / ports / core / transport / transfer / target-* 等）
 docs/           设计文档（★ 优先读：spikes.md failures.md decisions.md diagrams.md）
-agents/skills/  可复用的操作流程
+.agents/skills/  可复用的操作流程
 .tmp/           临时物（已 gitignore）
 build/          构建与测试产物（已 gitignore）
 ```
@@ -53,4 +53,4 @@ build/          构建与测试产物（已 gitignore）
 
 ## 测试靶机
 
-需要真 SSH 目标时用 podman 起容器，见 `agents/skills/dp-spike-env/SKILL.md`。
+需要真 SSH 目标时用 podman 起容器，见 `.agents/skills/dp-spike-env/SKILL.md`。
