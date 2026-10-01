@@ -1,0 +1,33 @@
+# 临时物
+.tmp/
+
+# 产物
+build/
+dist/
+coverage/
+
+# 依赖
+node_modules/
+
+# 日志
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# 密钥（测试用私钥也绝不入库）
+*.pem
+id_rsa
+id_ed25519
+id_ed25519.pub
+.env
+.env.*
+
+# 编辑器/系统
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Git Bash 下 ssh UserKnownHostsFile=/dev/null 产生的副作用文件
+NUL
+nul
