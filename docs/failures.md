@@ -60,6 +60,36 @@ deploy  ──►  以 trial 态启动  ──►  健康检查连续通过  ─
 
 配套的 `dp-trial-guard` 定时器随服务一起投递，是独立的兜底——即使 `dp` 进程本身挂了，它也会在超时后自动回滚。
 
+#### `autoPromote` 的完整定义（配置项在这，未配时的行为也在这）
+
+```ts
+service: defineService({
+  healthCheck: { http: { path: '/healthz', expectStatus: 200 } },  // 有没有它，决定 autoPromote 能否生效
+
+  activation: {
+    mode: 'trial-promote',          // 默认。另一选项 'direct'（不用 trial，仅本地/一次性目标用）
+    trialTimeout: '10m',            // 默认 10 分钟：trial 未 promote 则 guard 自动停用并切回
+    autoPromote: 'when-healthcheck-passes',   // 默认
+    promoteConsecutivePasses: 3,    // 默认连续 3 次通过
+    promoteWindow: '30s',           // 且必须落在这个时间窗内
+  },
+})
+```
+
+`autoPromote` 取值：
+
+| 值 | 行为 | 何时用 |
+|---|---|---|
+| `'when-healthcheck-passes'`（**默认**） | 健康检查在 `promoteWindow` 内连续通过 `promoteConsecutivePasses` 次 → 自动 promote | 绝大多数场景 |
+| `'never'` | 必须人工执行 `dp promote <deployId>`；否则 trial 到期由 guard 回滚 | 重大发布、想亲眼看一眼 |
+| `true` | 启动成功即 promote，**跳过验证** | 不推荐；仅在健康检查无从实现时，且你必须显式写 `true` |
+
+**一条硬规则**：当没有配置 `healthCheck` 时，`'when-healthcheck-passes'` **退化为 `'never'` 并告警** `DP.VERIFY.NO_HEALTHCHECK`。
+
+理由：没有健康检查就不存在"验证通过"这回事，此时自动 promote 等于把"没验证"当成"通过了"——那跟直接把风险版本 enable 上没有任何区别。想跳过验证必须显式写 `autoPromote: true`，是自己的选择，不是默认值替你选的。
+
+相关命令：`dp promote <deployId>`、`dp status`（显示 trial 剩余时间与 promote 条件满足情况）。
+
 ---
 
 ## 3. 资源护栏注入（让 OOM 杀不掉机器）
@@ -181,7 +211,14 @@ pass 条件: afterFree >= max(minFreeBytes, total × minFreePercent)
 
 所以 prompt 嗅探不是"锦上添花"，它和超时兜底一样是**把静默挂起转成显式失败**的机制：匹配到提示符 → 杀进程 → 报 `DP.INTERACTIVE_PROMPT_DETECTED` → 提示用户该配什么（比如"给 sudo 配 NOPASSWD，或提供 sudo 密码"）。
 
-## 待确认
+## 已定默认值
 
-1. `trialTimeout` 默认给多少？我倾向 **10 分钟**——够人发现不对劲，又不至于让坏版本活太久。
-2. `autoPromote` 默认开还是关？开着更顺手，但意味着"健康检查通过"被当作充分条件。你信你的健康检查吗？
+| 字段 | 默认值 | 依据 |
+|---|---|---|
+| `trialTimeout` | `10m` | 够人发现不对劲，又不至于让坏版本活太久（已确认） |
+| `autoPromote` | `'when-healthcheck-passes'` | 见 §2.3；无健康检查时退化为 `'never'` 并告警 |
+| `promoteConsecutivePasses` / `promoteWindow` | `3` / `30s` | 抖一次不算过，持续通过才算 |
+
+## 仍开放
+
+- P0 动手顺序：`schema`（所有包依赖它）还是 `transport`（spike 暴露的最大不确定性）。倾向后者。
