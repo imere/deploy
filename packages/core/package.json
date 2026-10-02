@@ -1,0 +1,20 @@
+{
+  "name": "@dp/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "纯编排：plan() / 布局推导 / 发布目录推导 / 跨平台路径校验。零 IO。",
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": {
+    ".": { "types": "./build/index.d.ts", "default": "./build/index.js" }
+  },
+  "files": ["build"],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@dp/ports": "workspace:*",
+    "@dp/schema": "workspace:*"
+  }
+}

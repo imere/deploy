@@ -1,0 +1,19 @@
+{
+  "name": "@dp/schema",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "配置 schema：define* 辅助、归一化、偏好链、带路径的校验错误、JSON Schema 导出",
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": {
+    ".": { "types": "./build/index.d.ts", "default": "./build/index.js" }
+  },
+  "files": ["build"],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@dp/ports": "workspace:*"
+  }
+}

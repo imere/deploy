@@ -1,0 +1,14 @@
+packages:
+  - packages/*
+
+# 【临时方案，见 docs/troubleshooting.md】
+# 本机未开启 Windows 开发者模式 → 创建 symlink 报 EPERM（实测 junction 可用）。
+# pnpm 12.6.0 在本机不会自动回退到 junction，isolated 布局的顶层链接会**静默缺失**：
+# 包在 node_modules/.pnpm 里完整，但 node_modules/<pkg> 不存在，tsc 找不到模块。
+# 已验证无效的尝试：.npmrc 的 node-linker / symlink（pnpm 12 不读 .npmrc 的这两项）。
+#
+# 永久解法：开启「设置 → 开发者选项 → 开发人员模式」，然后删掉下面这行，改回默认 isolated。
+nodeLinker: hoisted
+
+# 构建脚本白名单（供应链）。pnpm 默认阻断全部，必须显式放行。当前依赖均无构建脚本。
+allowBuilds: {}

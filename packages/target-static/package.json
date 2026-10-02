@@ -1,0 +1,30 @@
+{
+  "name": "@dp/target-static",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "静态投放目标：releases/<id> + current 原子切换 + keep N + 回滚",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "default": "./build/index.js"
+    }
+  },
+  "files": [
+    "build"
+  ],
+  "scripts": {},
+  "dependencies": {
+    "@dp/ports": "workspace:*"
+  },
+  "devDependencies": {
+    "@dp/local": "workspace:*",
+    "typescript": "^5.9.0"
+  }
+}

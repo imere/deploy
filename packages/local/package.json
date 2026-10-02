@@ -1,0 +1,29 @@
+{
+  "name": "@dp/local",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "本地 Runner：本机的命令执行 · 文件系统 · 能力实证",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "default": "./build/index.js"
+    }
+  },
+  "files": [
+    "build"
+  ],
+  "scripts": {},
+  "dependencies": {
+    "@dp/ports": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

@@ -2,7 +2,7 @@
 
 > 一个用 pnpm 单仓多包写的部署工具：**把目录或文件，通过 rsync / scp / ssh / 未来的任何手段，部署到 nginx / docker / 未来的任何目标；目标可以在远端，也可以在本机。**
 >
-> 当前阶段：**设计完成，尚未动工。** README 描述的是要建的东西。
+> 设计完成，**骨架与首条纵向链路已落地并跑通本机端到端**。README 描述目标形态，当前实现见下文「当前进度」。
 
 真正的一键式：
 
@@ -15,9 +15,37 @@ dp rollback        # 回到上一个版本
 
 ---
 
+## 当前进度
+
+已实现并可跑：
+
+| 包 | 状态 | 说明 |
+| --- | --- | --- |
+| `@dp/ports` | ✅ | 零依赖纯类型：Facts / Capabilities / Layout / Runner / SourceEntry / Target / DpError |
+| `@dp/schema` | ✅ | schema DSL（类型推导 + 路径定位 + JSON Schema 导出）、`define*` 辅助、偏好链 |
+| `@dp/core` | ✅ | `makePlan()` 纯函数：跨平台路径校验、布局推导、release root 候选推导、step 生成 |
+| `@dp/local` | ✅ | 本机 Runner：能力**实证**、命令执行包装（不经 shell / 不交互 / 不无限等待）、源枚举 |
+| `@dp/target-static` | ✅ | 静态投放：releases/\<id\> + current 原子切换 + keep N + 自动回退与 rollback |
+
+纵向链路已接通：**配置 → `makePlan()` → 本机真实部署 → 版本号切换 → 回滚**（`packages/core/src/slice.test.ts`）。
+
+尚未实现：`@dp/transport`（rsync / tar-ssh / sftp / scp 与多跳 SSH）、`@dp/cli`、`@dp/target-nginx`、`@dp/target-docker`。
+
+```bash
+pnpm verify      # build + test + 覆盖率（产物落在 build/，lcov 在 build/coverage/）
+```
+
+---
+
 ## 目录地图
 
 ```
+packages/
+  ports/        纯类型与错误码
+  schema/       配置 DSL 与 define* 辅助
+  core/         plan 纯函数（布局推导、路径校验、step 生成）
+  local/        本机 Runner（能力实证、命令执行、源枚举）
+  target-static/静态投放目标
 docs/
   diagrams.md    ★ 图集：全景 / 分层 / 数据流 / 状态机 / 各决策链（结构与流程以这里为准）
   DESIGN.md     总体设计：分层、管线、release 布局、并发隔离、扩展点、安全、里程碑
@@ -35,6 +63,7 @@ docs/
   spikes.md     ★ 实测结论：ssh2 不支持抗量子 / SSH_ASKPASS / 多跳降级 / rsync --rsh 契约
   failures.md   ★ 故障分类学与护栏层：两阶段激活、租约锁、资源护栏、带外救援
   decisions.md  ★ 决策清单（第 3–24 条）：偏好链、define*、日志、hook、SELinux、scp、CLI
+  troubleshooting.md  本机环境坑：pnpm 链接 / esbuild / 覆盖率落盘 / NUL 文件 / 容器代理
 ```
 
 ---

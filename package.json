@@ -1,0 +1,22 @@
+{
+  "name": "deploy-kit",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "把目录或文件部署到 nginx / docker / 其他目标：rsync·scp·ssh 自动兼容，多跳 + 提权，事务性发布",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "tsc -b && node -e \"require('fs').mkdirSync('build/coverage',{recursive:true})\" && node --test --experimental-test-coverage --test-coverage-include=packages/*/build/**/*.js --test-reporter=spec --test-reporter-destination=stderr --test-reporter=lcov --test-reporter-destination=stdout \"packages/*/build/**/*.test.js\" > build/coverage/lcov.info",
+    "verify": "pnpm build && pnpm test",
+    "clean": "tsc -b --clean",
+    "postinstall": "node scripts/link-workspace.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

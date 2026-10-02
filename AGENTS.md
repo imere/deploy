@@ -21,21 +21,30 @@ pnpm 单仓多包，包名前缀 `@dp/*`。**Node ≥ 24**。
 ## 命令
 
 ```
-pnpm build      # 构建，产物 build/packages/<pkg>/dist
-pnpm test       # 测试 + 覆盖率 → build/coverage
-pnpm lint --fix # lint（--fix 是 flag，不另建脚本）
-pnpm typecheck
-pnpm doc        # 文档/图集
+pnpm build    # tsc -b，产物 packages/<pkg>/build
+pnpm test     # 构建 + node --test + 覆盖率 → build/coverage/lcov.info
+pnpm verify   # build + test
+pnpm clean    # tsc -b --clean
 ```
+
+Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：esbuild 的平台二进制在本机装不上（见 `docs/troubleshooting.md` §2），
+而 Node 24 内置测试运行器够用且零依赖。
+
+测试文件与源码同目录（`src/*.test.ts`），经 `tsc -b` 落到 `build/` 后由 `node --test` 执行；
+覆盖率只统计 `packages/*/build/**`。写新能力时同步补三样：纯函数夹具测试、真实 IO 测试、一条能指导下一步的错误路径断言。
+
+本机 pnpm 的 isolated 布局会因缺开发者模式而静默丢链接，`postinstall` 里的
+`scripts/link-workspace.mjs` 用 junction 补上。**不要为了绕坑改成 hoisted** ——
+那等于丢掉 pnpm 的核心价值。解除条件见 `docs/troubleshooting.md` §1。
 
 ## 目录
 
 ```
-packages/       @dp/* 各包（schema / ports / core / transport / transfer / target-* 等）
-docs/           设计文档（★ 优先读：spikes.md failures.md decisions.md diagrams.md）
-.agents/skills/  可复用的操作流程
+packages/       @dp/* 各包（ports / schema / core / local / target-static 已实现）
+docs/           设计文档（★ 优先读：spikes.md failures.md decisions.md privilege.md）
+.agents/skills/ 可复用的操作流程
 .tmp/           临时物（已 gitignore）
-build/          构建与测试产物（已 gitignore）
+build/          覆盖率产物所在根目录（已 gitignore）
 ```
 
 ## 架构要点（改动前先读）

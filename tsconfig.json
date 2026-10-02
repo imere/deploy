@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/ports" },
+    { "path": "./packages/schema" },
+    { "path": "./packages/core" },
+    { "path": "./packages/local" },
+    { "path": "./packages/target-static" }
+  ]
+}
