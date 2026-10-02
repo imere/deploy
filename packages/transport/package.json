@@ -1,0 +1,34 @@
+{
+  "name": "@dp/transport",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "传输层：按两端 Facts 协商传输方式（rsync-ssh / tar-ssh / scp / sftp / local-copy），构造 argv 并执行",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "default": "./build/index.js"
+    }
+  },
+  "files": [
+    "build"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@dp/ports": "workspace:*",
+    "@dp/log": "workspace:*",
+    "@dp/ssh": "workspace:*",
+    "@dp/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

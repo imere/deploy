@@ -8,6 +8,7 @@
     { "path": "./packages/target-static" },
     { "path": "./packages/log" },
     { "path": "./packages/ssh" },
+    { "path": "./packages/transport" },
     { "path": "./packages/cli" }
   ]
 }
