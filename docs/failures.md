@@ -148,10 +148,14 @@ service: defineService({
 | `DP.DOCKER.COMPOSE_FILE_INVALID` | 装配 | ✅ | abort（绝对路径 / `..` 逃逸 / 反斜杠 / 空段） | `@dp/target-docker` |
 | `DP.DOCKER.PS_PARSE_FAILED` | 验收 | ❌ | **abort 而非判通过**（读不出结论 ≠ 健康；空输出/坏行一律报错） | `@dp/target-docker` |
 | `DP.DOCKER.NO_PREVIOUS` | 回滚 | ✅ | abort（首次部署无可回退版本，**不返回假成功**） | `@dp/target-docker` |
+| `DP.DOCKER.FILE_MISSING` | 装配（install） | ❌ | abort（compose 文件/envFile 由 `stat` 实证不在 release 目录里，一次列全） | `@dp/target-docker` |
+| `DP.DOCKER.PULL_FAILED` | 激活 | ❌ | abort（**不回滚**：只动镜像缓存，跑着的仍是上一版） | `@dp/target-docker` |
+| `DP.DOCKER.PLAN_MISMATCH` | 任意 | — | 当作**代码错误**抛（plan 与执行器不同步）；不是部署失败，按失败去回滚只会回滚一个零副作用的部署 | `@dp/target-docker` |
 | `DP.TRANSFER.INTERRUPTED` | 传输 | ❌ | 幂等重试 → abort | `@dp/transfer` |
 | `DP.TRANSFER.CHECKSUM_MISMATCH` | 传输 | ❌ | abort（staging 作废） | `@dp/transfer` |
 | `DP.ACTIVATE.START_FAILED` | 激活 | ❌ | 回滚到上一版 | `@dp/target-service` |
 | `DP.VERIFY.HEALTH_TIMEOUT` | 验收 | ❌ | 回滚（trial 自动过期） | `@dp/verify` |
+| `DP.VERIFY.FAILED` | 验收 | ❌ | abort + 带上读到的实际状态；**回不回滚由上层决定**（`dp apply` 看这个码） | `@dp/target-docker`（首个实际使用方） |
 | `DP.RESOURCE.OOM_KILLED` | 运行期 | ❌ | 由护栏兜底 + 通知 | guard |
 | `DP.GUARD.TRIAL_EXPIRED` | 运行期 | ❌ | 自动停用 + 切回 | guard timer |
 | `DP.DISK.FULL_RUNTIME` | 运行期 | ❌ | 通知 + 可选自动 prune | guard |

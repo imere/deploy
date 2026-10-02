@@ -101,6 +101,8 @@ build/          覆盖率产物所在根目录（已 gitignore）
   **读不出结论就报错，绝不判通过**；`services` 的判定范围也收口在 `parseComposePs` 里。
   回滚 = 用上一版 compose 重新 up 且**不 pull**；首次部署报 `DP.DOCKER.NO_PREVIOUS`
   而不是假成功，也不自动 `down`（那会连停掉目标机上同名的其它项目）
+  执行器**不自动补偿**：up 失败既不停容器也不自动 up 上一版（后者是 `dp rollback` 的职责，
+  自动做会把「失败」与「已回滚」两个语义混成一个），只把可执行的 `healing` 命令交给用户
 - **`dp apply` 的三段顺序是 install → deploy → activate**，不是随手排的：install 碰的是影子
   目录，能在动任何生产路径之前挡掉坏 conf；conf 的 `root` 用 `${release.current}` **软链**
   所以先切版本再换 conf 安全（反过来会留下指向未就绪目录的 conf）。activate 失败

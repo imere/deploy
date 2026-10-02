@@ -127,6 +127,19 @@ export type DpErrorCode =
   | 'DP.DOCKER.COMPOSE_FILE_INVALID'
   | 'DP.DOCKER.PS_PARSE_FAILED'
   | 'DP.DOCKER.NO_PREVIOUS'
+  // ↓ docker 执行器（@dp/target-docker）追加。这三个与上面那组**处置方式相反**：
+  // 上面全部是配置期可判定的「改配置重来」，而这三个是「配置过了、命令真的跑了」。
+  // FILE_MISSING 靠 stat 实证（compose 文件本该由传输层搬上来，缺了是上游漏了，
+  // 不是配置写错）；PULL_FAILED 靠真跑一次 pull 才成立（改配置对它是无效动作）；
+  // PLAN_MISMATCH 单列的理由是它根本不是部署失败 —— 计划与执行器不同步是代码错误，
+  // 按部署失败去回滚只会回滚一个其实没有任何副作用的部署。
+  | 'DP.DOCKER.FILE_MISSING'
+  | 'DP.DOCKER.PULL_FAILED'
+  | 'DP.DOCKER.PLAN_MISMATCH'
+  // ↓ 激活失败（failures.md §4 在册，但类型里一直缺这一条）。它单列而不是复用
+  // DP.VERIFY.FAILED：处置方向相反 —— 验收没过是「已经起来了但状态不对」，
+  // 激活失败是「根本没起来」，上层 `dp apply` 据此决定回滚与否。
+  | 'DP.ACTIVATE.START_FAILED'
 
 export interface DpErrorOptions {
   /** 出错的配置路径，如 `projects.web.source` */

@@ -61,13 +61,22 @@ mcode 不在默认 PATH，绝对路径是 `<全局 bin 目录>/mcode`（0.6.2）
 
 ## 5. 验收（orchestrator 自己做，不看它的自述）
 
+**第一步永远是 `pnpm build`**（不是 `node --test`）。实测过一次：子代理汇报「全部完成、
+错误码都齐了」，而 `tsc -b` 有 16 个错 —— 它新加的错误码没进 `DpErrorCode` 联合，
+它自己根本没跑通编译。**自述里的「已完成」不算数。**
+
 ```bash
-node_modules/.bin/tsc -b
+pnpm build                                    # 0 error 才算开始
 node --test "packages/*/build/**/*.test.js"   # fail 必须为 0
 ```
 
 再抽查：
 - 禁项 grep：`console.log` / 静态 `import 'ssh2'` / `execShell` / `node:fs`（纯包里）
+  ——**先把注释剥掉再 grep**：包头的纪律说明里往往就写着「本包不 import `node:fs`、不读 `process.env`」，
+  直接全文件匹配必然误报。用 `/\/\*[\s\S]*?\*\//g` + 行注释过滤后再匹配。
+- **「plan 里带了、但没人消费」的字段**：翻一遍新加的 `detail.*`，逐个确认有代码真的读它。
+  实测抓到 `onlyServices` 只进了 `detail`、全仓无人消费 —— 下一轮执行器就会自己另写一套判定，
+  于是「哪些服务算数」有两处实现。判定要**收口在纯函数侧**，执行器只传参。
 - 私有环境没被写进代码或注释（见 §7）
 - **写一份独立验收脚本**断言行为，不采信它的测试（`.tmp/accept-*.mjs`）
 - 注释是"解释为什么"还是"复述代码"——后者要删
