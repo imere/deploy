@@ -31,6 +31,7 @@ dp rollback        # 回到上一个版本
 | `@dp/cli` | ✅ | 命令行：`plan` / `facts` / `schema` / `apply`，配置发现与冲突检测、退出码契约 |
 | `@dp/transport` | ✅ | 传输协商与执行：`rsync-ssh` / `tar-ssh` / `sftp` / `scp` / `local-copy`，全部 argv-only；远端 `apply` 已走它 |
 | `@dp/template` | ✅ | 纯模板渲染：`${env.NAME}` / `${git.*}` / `${release.*}` 展开 + 按落点分档的危险字符校验。零 IO，`$host` 之类原样保留 |
+| `@dp/target-nginx` | ⚠️ | nginx 目标：**conf 渲染与步骤规划已具备**（反代默认头、影子校验、所有权保护、两步 `-t`），执行器与 CLI 接线待做 |
 
 远端 `apply` 的接线方式：**只把「把源搬进 staging」交给传输层**，`releases/<id>.incoming` →
 rename → 换 `current` → 健康检查 → 保留 N 版这条链仍由 `@dp/target-static` 独占 —— 补偿逻辑只有一份。
@@ -54,7 +55,7 @@ dp rollback --json      # 切回上一版并复查；只切换，不删任何版
 
 纵向链路已接通：**配置 → `makePlan()` → 本机真实部署 → 版本号切换 → 回滚**（`packages/core/src/slice.test.ts`）。
 
-尚未实现：`@dp/target-nginx`、`@dp/target-docker`（以及 `dp deploy` 这个「什么都不写也能用」的一键入口）。
+尚未实现：`@dp/target-nginx` 的**执行器与 CLI 接线**（渲染与步骤规划已就绪）、`@dp/target-docker`（以及 `dp deploy` 这个「什么都不写也能用」的一键入口）。
 
 三条运维命令已接线，语义刻意分开：
 
@@ -88,6 +89,7 @@ packages/
   local/        本机 Runner（能力实证、命令执行、源枚举）
   target-static/静态投放目标
   template/     纯模板渲染（变量展开 + 按落点分档校验，零 IO）
+  target-nginx/ nginx 目标：conf 渲染 + 步骤规划（执行器待做）
   log/          结构化日志（JSONL + 出口脱敏）
   ssh/          远端 Runner（驱动偏好链 · 主机密钥 · 能力实证）
   cli/          命令行：配置发现 · plan / facts / schema · 退出码

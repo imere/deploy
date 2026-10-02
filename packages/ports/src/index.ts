@@ -99,6 +99,14 @@ export type DpErrorCode =
   | 'DP.TPL.MISSING_VALUE'
   | 'DP.TPL.SYNTAX'
   | 'DP.TPL.UNSAFE_VALUE'
+  // ↓ nginx 目标（@dp/target-nginx）追加。conf 相关的问题单列一组：它们全部
+  // 可在 plan 期判定、且处置方式是「改配置」，与 DP.TPL.*（变量本身不成立）
+  // 分开是为了让调用方能区分「变量错了」与「把变量放进这个位置是错的」。
+  | 'DP.NGX.CONF_INVALID'
+  | 'DP.NGX.NOT_MANAGED'
+  | 'DP.NGX.UNSAFE_VALUE'
+  | 'DP.NGX.RELOAD_CMD_INVALID'
+  | 'DP.NGX.NO_PREVIOUS'
 
 export interface DpErrorOptions {
   /** 出错的配置路径，如 `projects.web.source` */

@@ -1,0 +1,32 @@
+{
+  "name": "@dp/target-nginx",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "nginx 目标：结构化配置渲染 conf、# managed by dp 所有权保护、shadow 校验与 plan 步骤。零 IO。",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "default": "./build/index.js"
+    }
+  },
+  "files": [
+    "build"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@dp/ports": "workspace:*",
+    "@dp/template": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

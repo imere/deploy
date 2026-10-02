@@ -133,6 +133,11 @@ service: defineService({
 | `DP.TPL.MISSING_VALUE` | 配置渲染 | ✅ | abort（同上：路径塌成 `/srv//` 要到中途才暴露） | `@dp/template` |
 | `DP.TPL.SYNTAX` | 配置渲染 | ✅ | abort（未闭合 / 嵌套） | `@dp/template` |
 | `DP.TPL.UNSAFE_VALUE` | 配置渲染 | ✅ | abort（按落点 text/path/shell/conf 分档） | `@dp/template` |
+| `DP.NGX.CONF_INVALID` | conf 渲染 | ✅ | abort（**不产出 conf**，更不写目标机） | `@dp/target-nginx` |
+| `DP.NGX.NOT_MANAGED` | conf 覆盖 | ✅ | abort（同名文件不带 `# managed by dp`，需 `force`） | `@dp/target-nginx` |
+| `DP.NGX.UNSAFE_VALUE` | conf 渲染 | ✅ | abort（值带 conf 边界字符 = 注入指令） | `@dp/target-nginx` |
+| `DP.NGX.RELOAD_CMD_INVALID` | conf 生效 | ✅ | abort（命令不是 argv[]，照传会静默改变语义） | `@dp/target-nginx` |
+| `DP.NGX.NO_PREVIOUS` | 回滚 | ✅ | abort（首次部署无上一版可还原，不报假成功） | `@dp/target-nginx` |
 | `DP.TRANSFER.INTERRUPTED` | 传输 | ❌ | 幂等重试 → abort | `@dp/transfer` |
 | `DP.TRANSFER.CHECKSUM_MISMATCH` | 传输 | ❌ | abort（staging 作废） | `@dp/transfer` |
 | `DP.ACTIVATE.START_FAILED` | 激活 | ❌ | 回滚到上一版 | `@dp/target-service` |

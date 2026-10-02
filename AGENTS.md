@@ -40,7 +40,7 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：esbuild 的平台二进制�
 ## 目录
 
 ```
-packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / cli 已实现）
+packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / cli 已实现）
 docs/           设计文档（★ 优先读：spikes.md failures.md decisions.md privilege.md）
 .agents/skills/ 可复用的操作流程（dp-spike-env / dp-subagent-dispatch）
 .tmp/           临时物（已 gitignore）
@@ -82,6 +82,11 @@ build/          覆盖率产物所在根目录（已 gitignore）
   `$host` / `$request_uri` / `$1` 之类**必须原样保留**（吃掉它们产出的 nginx conf 直接废掉），
   要字面量 `${x}` 写 `$${x}`。包本身零 IO：环境变量、git 状态、时钟都由调用方注入，
   否则 `makePlan()` 就不再是纯函数。缺值与空值一律报 `DP.TPL.*`，**绝不留下 `${x}` 原文**
+- **nginx**：conf 不手写，由 `@dp/target-nginx` 从结构化配置生成；反代头是**默认正确**而不是
+  「记得才写」。值里的 `;` `{` `}` 一律拒（一个分号就多出一条指令）；`proxy_pass` 末尾斜杠的
+  两种语义不同，**报错而不替用户选**；只覆盖带 `# managed by dp` 的文件，遇同名未标记文件报错。
+  生效顺序固定：写候选 → 影子校验 → 原子替换 → `nginx -t` 复验 → reload（两步 `-t` 是刻意的）。
+  目标机路径（`confd`）**不是配置项**，由实测 layout 推导后注入
 
 ## 提交
 
