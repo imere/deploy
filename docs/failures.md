@@ -141,6 +141,13 @@ service: defineService({
 | `DP.NGX.NO_PREVIOUS` | 回滚 | ✅ | abort（首次部署无上一版可还原，不报假成功） | `@dp/target-nginx` |
 | `DP.NGX.TEST_FAILED` | conf 生效 | ✅ | 还原备份并**再验一次**；原话进 stderr（处置：按它改配置重来） | `@dp/target-nginx` |
 | `DP.NGX.RELOAD_FAILED` | reload | ❌ | **不回滚**：盘上 conf 已过 `-t`，重跑 reload 即收敛（与上一行处置相反，故单列） | `@dp/target-nginx` |
+| `DP.DOCKER.MODE_UNSUPPORTED` | 装配 | ✅ | abort（**不按 remote-cli 静默降级** —— 那会让人以为镜像构建过了） | `@dp/target-docker` |
+| `DP.DOCKER.PROJECT_NAME_INVALID` | 装配 | ✅ | abort（项目名会成为容器名/网络名前缀，字符集由 compose 收紧） | `@dp/target-docker` |
+| `DP.DOCKER.COMPOSE_FILES_EMPTY` | 装配 | ✅ | abort（不带 `-f` 的 up 会去当前工作目录找文件） | `@dp/target-docker` |
+| `DP.DOCKER.COMPOSE_FILE_DUPLICATED` | 装配 | ✅ | abort（重复 `-f` 后面的覆盖前面的，生效顺序取决于数组） | `@dp/target-docker` |
+| `DP.DOCKER.COMPOSE_FILE_INVALID` | 装配 | ✅ | abort（绝对路径 / `..` 逃逸 / 反斜杠 / 空段） | `@dp/target-docker` |
+| `DP.DOCKER.PS_PARSE_FAILED` | 验收 | ❌ | **abort 而非判通过**（读不出结论 ≠ 健康；空输出/坏行一律报错） | `@dp/target-docker` |
+| `DP.DOCKER.NO_PREVIOUS` | 回滚 | ✅ | abort（首次部署无可回退版本，**不返回假成功**） | `@dp/target-docker` |
 | `DP.TRANSFER.INTERRUPTED` | 传输 | ❌ | 幂等重试 → abort | `@dp/transfer` |
 | `DP.TRANSFER.CHECKSUM_MISMATCH` | 传输 | ❌ | abort（staging 作废） | `@dp/transfer` |
 | `DP.ACTIVATE.START_FAILED` | 激活 | ❌ | 回滚到上一版 | `@dp/target-service` |

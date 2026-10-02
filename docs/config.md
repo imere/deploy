@@ -362,6 +362,45 @@ projects:
 需要 `force` 才继续。`dp apply` 里的位置是 install → deploy → activate，activate 失败
 **不回滚发布**（版本是好的，旧 conf 指向 `current` 软链所以服务没断）。
 
+### docker：`target.docker`
+
+本轮只实现 **`remote-cli`**：compose 文件随 release 上传，然后在目标机上跑
+`docker compose`。`build-push` / `build-load` / `image-only` 需要本机 docker 与镜像仓库，
+**显式报 `DP.DOCKER.MODE_UNSUPPORTED`**，不按 remote-cli 静默降级。
+
+```yaml
+projects:
+  api:
+    source: { root: './deploy' }        # compose 文件在这里，随 release 一起上传
+    release: { root: '/srv/api' }
+    target:
+      type: docker
+      docker:
+        mode: remote-cli
+        compose:
+          files: ['docker-compose.yml', 'docker-compose.prod.yml']  # 相对 release 目录，按顺序生效
+          projectName: 'api'            # compose -p：容器名/网络名前缀，只允许 [a-z0-9_-]
+          envFile: '.env.prod'          # 可选 → --env-file
+          pull: true                    # 默认 true：浮动 tag 不 pull 等于部署上一轮的镜像
+          wait: true                    # 默认 true：up --wait，关掉后 verify 是唯一一道关
+        healthcheck:
+          services: ['api']             # 可选，空 = ps 输出里每个服务都要通过
+          expectStates: ['running', 'healthy']
+```
+
+**compose 文件里的变量不由 dp 解释**：compose 自己用 `${VAR}` 插值、`$$` 转义，dp 再
+解释一遍就是两份引擎互吃（tag 变空或 `variable is not set`）。镜像 tag 的注入另开回合，
+方向是 `${dp.image}` 白名单前缀 —— 两套变量不共享，`${dp.*}` 之外的原文原样保留。
+
+路径一律相对 release 目录：绝对路径、`..`、反斜杠都会被 `DP.DOCKER.COMPOSE_FILE_INVALID`
+顶回 —— 它们会让「这次部署的 compose 文件」变成盘上任意一个文件。验收用
+`docker compose ps --format json`（不是 `docker ps`：后者列的是这台机器上所有容器）。
+**stdout 读不出结论就报错，绝不判通过**（空输出 / 坏行 → `DP.DOCKER.PS_PARSE_FAILED`）。
+
+回滚 = 用上一版 release 目录里的 compose 重新 up（**不 pull**：浮动 tag 再拉一次会把
+上一版换成新镜像）。首次部署没有上一版 → `DP.DOCKER.NO_PREVIOUS`，**不返回假成功**；
+也不自动 `down`（那会连停掉目标机上同名的其它项目）。
+
 ### delegate：项目自带部署方式
 
 很多项目已经有自己的部署脚本/compose/Makefile，我们不该抢活。此时本项目的角色变成：**在一旁提供版本布局、锁、日志、回滚与验证**。
@@ -422,6 +461,7 @@ transport.strategy = auto ← defaults（本次协商结果：tar-ssh）
 | `projects.*.rollout` | `strategy`、`batch`、`pauseMs`、`failPolicy`、`healthWaitMs` |
 | `projects.*.target` | `type`、`pick`、`confd`、`service` + 各 target 自有段（`target.nginx.*` / `docker.image` / ...） |
 | `projects.*.target.nginx` | `server`（块或块数组）、`filename`、`force`、`reload`（argv[] 或 `false`）。见 §8 |
+| `projects.*.target.docker` | `mode`（仅 `remote-cli`）、`compose.{files[],projectName,envFile,pull,wait}`、`healthcheck.{services[],expectStates[]}`。见 §8 |
 | `projects.*.healthcheck` | `command` / `http` / `tcp` / `fileExists` |
 | `projects.*.hooks` | `before|after × prepare|transfer|install|activate|verify`，每条带 `where: local|remote` |
 | `projects.*.rollback` | `enabled`、`onFailure: auto|ask|never` |

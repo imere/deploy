@@ -101,6 +101,19 @@ importers:
         specifier: ^5.9.0
         version: 5.9.3
 
+  packages/target-docker:
+    dependencies:
+      '@dp/ports':
+        specifier: workspace:*
+        version: link:../ports
+      '@dp/template':
+        specifier: workspace:*
+        version: link:../template
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
   packages/target-nginx:
     dependencies:
       '@dp/ports':

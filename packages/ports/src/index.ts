@@ -116,6 +116,17 @@ export type DpErrorCode =
   // 调用方就只能对两种相反的处置一律回滚。
   | 'DP.NGX.TEST_FAILED'
   | 'DP.NGX.RELOAD_FAILED'
+  // ↓ docker 目标（@dp/target-docker）追加。全部是**配置期可判定**的问题：
+  // 它们要么在拼 argv 之前就被顶回（项目名字符集、compose 文件路径、mode），
+  // 要么是「命令跑了但输出读不出结论」（ps 解析）。后者单独一组的理由是
+  // 处置方式相反：前者改配置重来，后者要先确认远端 compose 可用，重跑没用。
+  | 'DP.DOCKER.MODE_UNSUPPORTED'
+  | 'DP.DOCKER.PROJECT_NAME_INVALID'
+  | 'DP.DOCKER.COMPOSE_FILES_EMPTY'
+  | 'DP.DOCKER.COMPOSE_FILE_DUPLICATED'
+  | 'DP.DOCKER.COMPOSE_FILE_INVALID'
+  | 'DP.DOCKER.PS_PARSE_FAILED'
+  | 'DP.DOCKER.NO_PREVIOUS'
 
 export interface DpErrorOptions {
   /** 出错的配置路径，如 `projects.web.source` */

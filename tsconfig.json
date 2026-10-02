@@ -7,6 +7,7 @@
     { "path": "./packages/local" },
     { "path": "./packages/target-static" },
     { "path": "./packages/target-nginx" },
+    { "path": "./packages/target-docker" },
     { "path": "./packages/log" },
     { "path": "./packages/ssh" },
     { "path": "./packages/transport" },

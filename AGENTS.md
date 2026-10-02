@@ -40,7 +40,7 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：esbuild 的平台二进制�
 ## 目录
 
 ```
-packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / cli 已实现）
+packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / cli 已实现；target-docker 已完成纯函数侧）
 docs/           设计文档（★ 优先读：spikes.md failures.md decisions.md privilege.md）
 .agents/skills/ 可复用的操作流程（dp-spike-env / dp-subagent-dispatch）
 .tmp/           临时物（已 gitignore）
@@ -91,6 +91,16 @@ build/          覆盖率产物所在根目录（已 gitignore）
   `canWrite` 里没有那个键就是不可写 —— 当成「可能可写」去猜是这类 bug 的标准形状。
   两份 facts 来源（`@dp/ssh` 与 `@dp/local`）的探测候选**必须一致**，否则同一份配置会
   在远端推得出来、本机推不出来
+- **docker**：compose 的每条 argv **只在 `compose.ts` 里写一次**，plan 与执行器各写一份 =
+  计划说一套、真跑另一套。校验覆盖面按「值被拼进什么」数：进 argv 的都要过
+  `@dp/template` 的 shell 档，项目名另过字符集（它成为容器名/网络名前缀）。
+  compose 文件随 release 上传，路径一律相对 release 目录（绝对路径 / `..` / 反斜杠全拒）。
+  **compose 文件里的变量不由 dp 解释** —— compose 自己有一套 `${VAR}` 与 `$$`，
+  两份引擎互吃的后果是 tag 变空或 `variable is not set`。
+  验收用 `compose ps --format json`（不是 `docker ps`：后者列的是这台机器上所有容器），
+  **读不出结论就报错，绝不判通过**；`services` 的判定范围也收口在 `parseComposePs` 里。
+  回滚 = 用上一版 compose 重新 up 且**不 pull**；首次部署报 `DP.DOCKER.NO_PREVIOUS`
+  而不是假成功，也不自动 `down`（那会连停掉目标机上同名的其它项目）
 - **`dp apply` 的三段顺序是 install → deploy → activate**，不是随手排的：install 碰的是影子
   目录，能在动任何生产路径之前挡掉坏 conf；conf 的 `root` 用 `${release.current}` **软链**
   所以先切版本再换 conf 安全（反过来会留下指向未就绪目录的 conf）。activate 失败

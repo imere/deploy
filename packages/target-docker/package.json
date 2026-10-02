@@ -1,0 +1,32 @@
+{
+  "name": "@dp/target-docker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "docker 目标（remote-cli）：compose argv 构造 + ps 健康判定 + plan 步骤。零 IO。",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "default": "./build/index.js"
+    }
+  },
+  "files": [
+    "build"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@dp/ports": "workspace:*",
+    "@dp/template": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}
