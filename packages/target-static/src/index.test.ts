@@ -253,6 +253,65 @@ describe('static target · deploy', () => {
   })
 })
 
+describe('static target · transfer 钩子', () => {
+  it('给了钩子就不再逐条 writeFile：换向/校验照常走完', async () => {
+    const runner = new MemoryRunner(makeFacts())
+    // read() 是惰性的（ports 的 SourceFile 契约），所以它就是「逐条写」有没有发生的探针
+    let reads = 0
+    const spy = (content: string) => ({
+      kind: 'file' as const,
+      relativePath: 'index.html',
+      read: async () => {
+        reads += 1
+        return new TextEncoder().encode(content)
+      },
+    })
+
+    const result = await deploy({
+      runner,
+      ctx: makeCtx(),
+      entries: [spy('from-entries')],
+      transfer: async (staging) => {
+        // 钩子只管搬文件到 staging，换向/verify/prune 不归它
+        assert.equal(staging, '/app/releases/r1.incoming', '钩子必须拿到 .incoming，而不是版本目录')
+        await runner.mkdir(staging)
+        await runner.writeFile(`${staging}/index.html`, 'from-transfer')
+        return { filesWritten: 1, warnings: ['来自传输层的告警'] }
+      },
+    })
+
+    assert.equal(reads, 0, '有钩子时绝不能再读源条目')
+    assert.equal(result.filesWritten, 1)
+    assert.match(result.warnings.join(), /来自传输层的告警/, '传输的 warning 必须进 DeployResult')
+    assert.equal(await runner.readFile('/app/releases/r1/index.html'), 'from-transfer')
+    assert.equal(await runner.resolvedCurrent('/app'), 'r1')
+  })
+
+  it('钩子搬了 0 个文件 → 抛 DP.SOURCE.EMPTY，且 staging 被清掉', async () => {
+    const runner = new MemoryRunner(makeFacts())
+    await assert.rejects(
+      deploy({
+        runner,
+        ctx: makeCtx(),
+        entries: [fileEntry('index.html', 'x')],
+        transfer: async (staging) => {
+          await runner.mkdir(staging)
+          return { filesWritten: 0 }
+        },
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof DpError)
+        assert.equal(err.code, 'DP.SOURCE.EMPTY')
+        return true
+      },
+    )
+    // 关键：传输「看起来成功」但一个文件都没搬，和 source 为空是同一类事故 ——
+    // current 指向空目录 = 线上 404，所以必须零副作用地失败
+    assert.equal(await runner.stat('/app/releases/r1.incoming'), null, 'staging 必须被清掉')
+    assert.equal(await runner.stat('/app/current'), null)
+  })
+})
+
 describe('static target · prune 与 rollback', () => {
   it('保留 keep 个版本，且永不清理当前版本与上一版', async () => {
     const runner = new MemoryRunner(makeFacts())

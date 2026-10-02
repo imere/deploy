@@ -110,8 +110,12 @@ export function parseSshTarget(value: string, path: string): { host: string; use
  *  - DP_SSH_KEY 指向的密钥文件 → key
  *  - 否则 ~/.ssh 下存在的常规私钥 → key
  *  - 都没有 → agent（交给系统 ssh 决定；没有 agent 时它会立刻失败，不会等输入）
+ *
+ * 导出：apply 的传输层要构造自己的 ssh argv（rsync 的 -e / tar 的远端命令），
+ * 必须用**同一套**判定 —— 另立一套就会出现「探测用密钥 A、传输用 agent」
+ * 这种探测成功但传输要密码的死锁。
  */
-function resolveAuth(env: NodeJS.ProcessEnv, path: string): SshConnectionOptions['auth'] {
+export function resolveAuth(env: NodeJS.ProcessEnv, path: string): SshConnectionOptions['auth'] {
   const explicit = env['DP_SSH_KEY']
   if (explicit !== undefined && explicit !== '') {
     return { type: 'key', identityFile: explicit }

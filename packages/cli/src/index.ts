@@ -28,6 +28,7 @@ import {
   renderErrorPretty,
 } from './output.js'
 import { createContext, parseLogFormat, parseLogLevel, type ResolvedFlags, type RunContext } from './run.js'
+import type { ApplyDeps } from './deps.js'
 import { runPlan } from './commands/plan.js'
 import { runApply } from './commands/apply.js'
 import { runFacts } from './commands/facts.js'
@@ -120,6 +121,8 @@ export interface MainOptions {
   readonly write?: (text: string) => void
   readonly writeErr?: (text: string) => void
   readonly isTTY?: boolean
+  /** 测试注入的 apply 依赖（假的 facts / 假的 transfer）。生产不传 */
+  readonly deps?: ApplyDeps
 }
 
 export async function main(argv: readonly string[], options: MainOptions = {}): Promise<number> {
@@ -178,6 +181,7 @@ export async function main(argv: readonly string[], options: MainOptions = {}): 
     ...(options.write !== undefined ? { write: options.write } : {}),
     ...(options.writeErr !== undefined ? { writeErr: options.writeErr } : {}),
     ...(options.isTTY !== undefined ? { isTTY: options.isTTY } : {}),
+    ...(options.deps !== undefined ? { deps: options.deps } : {}),
   })
 
   try {

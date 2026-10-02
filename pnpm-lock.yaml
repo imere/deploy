@@ -15,6 +15,37 @@ importers:
         specifier: ^5.9.0
         version: 5.9.3
 
+  packages/cli:
+    dependencies:
+      '@dp/core':
+        specifier: workspace:*
+        version: link:../core
+      '@dp/local':
+        specifier: workspace:*
+        version: link:../local
+      '@dp/log':
+        specifier: workspace:*
+        version: link:../log
+      '@dp/ports':
+        specifier: workspace:*
+        version: link:../ports
+      '@dp/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@dp/ssh':
+        specifier: workspace:*
+        version: link:../ssh
+      '@dp/target-static':
+        specifier: workspace:*
+        version: link:../target-static
+      '@dp/transport':
+        specifier: workspace:*
+        version: link:../transport
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
   packages/core:
     dependencies:
       '@dp/ports':
@@ -34,6 +65,12 @@ importers:
         specifier: ^5.9.0
         version: 5.9.3
 
+  packages/log:
+    dependencies:
+      '@dp/ports':
+        specifier: workspace:*
+        version: link:../ports
+
   packages/ports: {}
 
   packages/schema:
@@ -41,6 +78,22 @@ importers:
       '@dp/ports':
         specifier: workspace:*
         version: link:../ports
+
+  packages/ssh:
+    dependencies:
+      '@dp/core':
+        specifier: workspace:*
+        version: link:../core
+      '@dp/log':
+        specifier: workspace:*
+        version: link:../log
+      '@dp/ports':
+        specifier: workspace:*
+        version: link:../ports
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
 
   packages/target-static:
     dependencies:
@@ -51,6 +104,25 @@ importers:
       '@dp/local':
         specifier: workspace:*
         version: link:../local
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
+  packages/transport:
+    dependencies:
+      '@dp/core':
+        specifier: workspace:*
+        version: link:../core
+      '@dp/log':
+        specifier: workspace:*
+        version: link:../log
+      '@dp/ports':
+        specifier: workspace:*
+        version: link:../ports
+      '@dp/ssh':
+        specifier: workspace:*
+        version: link:../ssh
+    devDependencies:
       typescript:
         specifier: ^5.9.0
         version: 5.9.3

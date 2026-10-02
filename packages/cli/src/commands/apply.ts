@@ -7,12 +7,14 @@
  * 就跑 `dp plan` 或 `dp apply --dry-run`，那两个都保证零副作用。
  */
 import { makePlan } from '@dp/core'
-import { createLocalRunner, listSourceEntries, normalizeSourceSpec } from '@dp/local'
+import { createLocalRunner, listSourceEntries, normalizeSourceSpec, type SourceSpec } from '@dp/local'
 import { deploy, rollback, type StaticTargetConfig } from '@dp/target-static'
-import { DpError, type Runner, type SourceEntry, type TargetContext } from '@dp/ports'
+import { chooseTransport, type TransferRequest, type TransportKind, type TransportPreference } from '@dp/transport'
+import { DpError, type BecomeConfig, type Runner, type SourceEntry, type TargetContext } from '@dp/ports'
 import type { HostConfig, ProjectConfig } from '@dp/schema'
 import type { LoadedConfig } from '../config-file.js'
-import { acquireFacts, readFactsFile } from '../facts-source.js'
+import { defaultApplyDeps, type ApplyDeps } from '../deps.js'
+import { acquireFacts as acquireFactsDefault, parseSshTarget, readFactsFile, resolveAuth } from '../facts-source.js'
 import { exitCodeFor, renderApplyJson, renderApplyPretty, type ApplyTargetResult } from '../output.js'
 import { releaseIdFor } from '../release-id.js'
 import { selectTargets } from '../targets.js'
@@ -60,6 +62,96 @@ function withParentDirs(entries: readonly SourceEntry[]): readonly SourceEntry[]
 function staticConfigFor(project: ProjectConfig): StaticTargetConfig {
   const fileExists = project.healthcheck?.fileExists
   return fileExists === undefined ? {} : { healthcheck: { fileExists } }
+}
+
+/**
+ * 配置里的 `transport.strategy` → 传输包的偏好链。
+ *
+ * 名字**对不上**是刻意的：配置面向用户写 `rsync` / `local`，传输包用
+ * `rsync-ssh` / `local-copy`（后者强调「拷贝」而非「本地」）。所以这层映射
+ * 必须显式写出来 —— 直接 `as` 断言等于把「用户写了 local 却静默走远端传输」
+ * 这种错配置也一并放过去。
+ *
+ * `local-copy` 从链上剔掉：远端部署里它永远不成立，留着只会让协商在链尾
+ * 报一个用户看不懂的失败。
+ */
+const KIND_ALIASES: Readonly<Record<string, TransportKind>> = {
+  rsync: 'rsync-ssh',
+  'tar-ssh': 'tar-ssh',
+  sftp: 'sftp',
+  scp: 'scp',
+  local: 'local-copy',
+}
+
+function transportPreference(hostConfig: HostConfig, path: string): TransportPreference | undefined {
+  const strategy = hostConfig.transport?.strategy
+  if (strategy === undefined) return undefined
+  const mapped: TransportKind[] = []
+  for (const raw of strategy) {
+    const kind = KIND_ALIASES[raw]
+    if (kind === undefined) {
+      throw new DpError('DP.CONFIG.INVALID', `未知的传输方式：${raw}`, {
+        path,
+        hint: `合法值：${Object.keys(KIND_ALIASES).join(' | ')}`,
+      })
+    }
+    if (kind !== 'local-copy') mapped.push(kind)
+  }
+  // 全是 local-copy 等价于「没写偏好」——给协商一条空链它会退回默认链，
+  // 而用户明写的东西被悄悄丢掉是最难发现的一类行为
+  return mapped.length === 0 ? undefined : mapped
+}
+
+/**
+ * schema 的 become（配置形态）→ ports 的 become（运行形态）。
+ *
+ * 两个形状不一样是刻意的：配置形态带 method / passwordRef（凭据解析是
+ * schema 的职责），运行形态只描述「怎么提权」。
+ *
+ * 有两类配置**明确拒绝**而不是凑一个值出来 —— 歧义靠拒绝，不靠默认值：
+ *  - `custom`：schema 里没有承载命令模板的字段，凑一个就是凭空发明行为；
+ *  - `method: stdin | pty`：要密码的提权，而运行形态没有密码通道。
+ */
+function becomeFor(hostConfig: HostConfig, path: string): BecomeConfig | undefined {
+  const b = hostConfig.become
+  if (b === undefined) return undefined
+  switch (b.type) {
+    case 'none':
+      return { type: 'none' }
+    case 'sudo': {
+      // stdin / pty 意味着「sudo 要问密码」。传输层没有密码通道（passwordRef 是
+      // schema 的事，BecomeConfig 里根本没有承载它的字段），而 @dp/ssh 对
+      // nonInteractive=false 的处理是**直接拒绝**（become.ts：铁律 0 不许等 stdin）。
+      // 与其让它在深处抛一句看不懂的 refusal，不如在这里说清「没接」。
+      if (b.method === 'stdin' || b.method === 'pty') {
+        throw new DpError('DP.CONFIG.INVALID', `become.method=${b.method} 尚未接入传输层`, {
+          path: `${path}.become.method`,
+          hint: '传输层没有密码通道，带密码的 sudo 会撞铁律 0。请配免密 sudo（nopasswd）或改用 su',
+        })
+      }
+      return {
+        type: 'sudo',
+        ...(b.user !== undefined ? { user: b.user } : {}),
+        nonInteractive: true,
+      }
+    }
+    case 'doas':
+      return { type: 'doas', ...(b.user !== undefined ? { user: b.user } : {}) }
+    case 'su': {
+      if (b.user === undefined || b.user === '') {
+        throw new DpError('DP.CONFIG.INVALID', 'become.type=su 必须写 become.user', {
+          path: `${path}.become.user`,
+          hint: "su 不给用户名就没有目标身份，写成 { \"type\": \"su\", \"user\": \"www-data\" }",
+        })
+      }
+      return { type: 'su', user: b.user }
+    }
+    case 'custom':
+      throw new DpError('DP.CONFIG.INVALID', 'become.type=custom 尚未接入传输层', {
+        path: `${path}.become.type`,
+        hint: 'custom 需要一条命令模板，而 schema 没有承载它的字段；请改用 sudo / su / doas',
+      })
+  }
 }
 
 function errorFields(err: unknown): { code: string; message: string; path?: string; hint?: string } {
@@ -133,12 +225,125 @@ interface ApplyTargetInput {
   readonly now: Date
 }
 
+/**
+ * 远端部署的传输钩子 —— 一次协商，之后每次 deploy 调它就传一次。
+ *
+ * **为什么是「钩子」而不是把 apply 拆成「先 transfer 再 deploy」两步**：
+ * deploy() 拥有 staging → rename → 换 current → verify → prune 这条链的全部补偿
+ * 语义，其中「空版本拒绝」和「verify 不过就换回上一版」是**线上不出事**的两道闸。
+ * 拆成两步意味着 CLI 要自己保证「传完再调 deploy」之间 staging 的归属，而一旦
+ * 传输失败，CLI 就得自己补一套「删干净 staging」的逻辑 —— 那是第二份补偿实现，
+ * 两份迟早不一致。所以这里只交出「把源搬进这个目录」这一个动作，其余全留给 deploy。
+ *
+ * 顺带得到一个免费的好处：`stagingDir` 由 deploy 传进来，而不是 CLI 算好了传进去 ——
+ * 于是「传输写到哪里」与「deploy 认为的 staging 在哪里」在类型上就不可能分叉。
+ */
+interface TransferHookInput {
+  readonly context: RunContext
+  readonly deps: ApplyDeps
+  readonly logger: ReturnType<RunContext['logger']['child']>
+  readonly hostConfig: HostConfig
+  readonly host: string
+  readonly spec: SourceSpec
+  readonly entries: readonly SourceEntry[]
+  readonly releaseRoot: string
+  readonly releaseId: string
+  readonly remoteFacts: Awaited<ReturnType<typeof acquireFactsDefault>>['facts']
+}
+
+async function makeTransferHook(
+  input: TransferHookInput,
+): Promise<(stagingDir: string) => Promise<{ readonly filesWritten: number; readonly warnings: readonly string[] }>> {
+  const { context, deps, logger, hostConfig, host, spec, entries, releaseRoot, releaseId, remoteFacts } = input
+  const hostPath = `hosts.${host}`
+
+  if (hostConfig.ssh === undefined) {
+    throw new DpError('DP.CONFIG.INVALID', `主机 ${host} 既没有 local: true 也没有 ssh`, {
+      path: hostPath,
+      hint: '远端部署需要 ssh 目标；本机目标请写 { "local": true }（它走逐条 writeFile，不经过传输层）',
+    })
+  }
+
+  const target = parseSshTarget(hostConfig.ssh, `${hostPath}.ssh`)
+  const auth = resolveAuth(context.env, `${hostPath}.ssh`)
+  const preferred = transportPreference(hostConfig, `${hostPath}.transport.strategy`)
+
+  // 只传**文件**条目：rsync / tar 都会自己建父目录，而目录条目传进去只是
+  // 多余的 argv，还会让 tar 的「传输了几个条目」这个计数偏大
+  const fileEntries = entries.filter((e) => e.kind === 'file').map((e) => e.relativePath)
+
+  const localFacts = await deps.probeLocalFacts()
+  const choice = chooseTransport({
+    local: localFacts,
+    remote: remoteFacts,
+    kind: 'remote',
+    ...(preferred !== undefined ? { preferred } : {}),
+  })
+
+  // 协商结论必须显式可见（transport.md §7）：用户有权知道「为什么这次没走 rsync」
+  logger.info('apply.transport', {
+    kind: choice.kind,
+    remoteRoot: `${releaseRoot}/releases/${releaseId}.incoming`,
+    entries: fileEntries.length,
+    rejected: choice.rejected.length,
+    reasons: choice.reasons,
+    ...(choice.rejected.length > 0
+      ? { rejectedItems: choice.rejected.map((r) => `${r.kind}: ${r.reason}`) }
+      : {}),
+  })
+
+  // 多跳还没进 schema（AGENTS.md：多跳尚未实现）。不加 `hops` 字段是对的 ——
+  // 为一个还不存在的配置项写 `(hostConfig as { hops?: ... })` 只是换个写法骗过类型
+  // 检查，运行时永远是 undefined，还会让人以为多跳已经通了。
+  // 端口走 rsh 的 -p，不进 sshTarget：rsync 自己会在目标串后追加 host，
+  // 写成 user@host:2222 会被当成主机名的一部分
+  const sshTarget = target.user !== undefined ? `${target.user}@${target.host}` : target.host
+  const become = becomeFor(hostConfig, hostPath)
+
+  return async (stagingDir: string): Promise<{ readonly filesWritten: number; readonly warnings: readonly string[] }> => {
+    const expected = `${releaseRoot}/releases/${releaseId}.incoming`
+    if (stagingDir !== expected) {
+      // 传错目录 = 把文件写到正在服务的目录或版本目录里，两种都是事故。
+      // 所以这里拒绝，而不是「用 CLI 自己算的那个」。
+      throw new DpError('DP.CONFIG.INVALID', `传输目标与 deploy 的 staging 不一致：${stagingDir}`, {
+        path: hostPath,
+        hint: `期望 ${expected}`,
+      })
+    }
+
+    const request: TransferRequest = {
+      kind: 'remote',
+      localRoot: spec.root,
+      entries: fileEntries,
+      remoteRoot: stagingDir,
+      host,
+      sshTarget,
+      ...(auth.type === 'key' ? { identityFile: auth.identityFile } : {}),
+      ...(target.port !== undefined ? { port: target.port } : {}),
+      ...(become !== undefined ? { become } : {}),
+      deleteExtraneous: hostConfig.transport?.delete ?? false,
+    }
+
+    // preferred **必须**传下去。上面那次 chooseTransport 只是「提前校验 + 打日志」；
+    // transfer() 内部会再协商一次，而它只认 deps.preferred —— 不传就等于用户写的
+    // strategy 被丢掉、日志里的 kind 与实际执行的方式不一致（写 tar-ssh 却跑 rsync）。
+    const result = await deps.transfer(request, {
+      localFacts,
+      remoteFacts,
+      logger,
+      ...(preferred !== undefined ? { preferred } : {}),
+    })
+    return { filesWritten: result.filesTransferred, warnings: result.warnings }
+  }
+}
+
 async function applyOne(
   context: RunContext,
   flags: ResolvedFlags,
   target: ApplyTargetInput,
 ): Promise<{ readonly result: ApplyTargetResult; readonly exitCode: number }> {
   const { host, logger, project } = target
+  const deps: ApplyDeps = context.deps ?? defaultApplyDeps()
   const releaseId = releaseIdFor(project, target.now)
 
   /** 部署前先把「将要发生什么」摆出来：人肉看日志和 CI 抓日志靠它对账 */
@@ -154,7 +359,7 @@ async function applyOne(
   // 也必须是 ApplyTargetResult 里的一个 error，而不是抛到 main 的通用错误处理。
   // 否则 `--json` 失败时 stdout 会是空的 —— CI 里 `dp apply --json > r.json`
   // 拿到一个空文件，等于机器可读模式在最需要它的那一刻失效。
-  let facts: Awaited<ReturnType<typeof acquireFacts>> | undefined
+  let facts: Awaited<ReturnType<typeof acquireFactsDefault>> | undefined
   let exitCode = 0
   let result: ApplyTargetResult
 
@@ -175,7 +380,7 @@ async function applyOne(
     facts =
       flags.factsFile !== undefined
         ? { facts: await readFactsFile(flags.factsFile), probeNotes: [] as readonly string[], close: undefined }
-        : await acquireFacts({
+        : await deps.acquireFacts({
             hostId: host,
             host: target.hostConfig,
             projectName: project,
@@ -243,6 +448,23 @@ async function applyOne(
       keep: target.projectConfig.release?.keep ?? DEFAULT_KEEP,
     }
 
+    // 远端改走传输层，本机保持逐条 writeFile —— 见 makeTransferHook 的说明
+    const transferHook =
+      target.hostConfig.local === true
+        ? undefined
+        : await makeTransferHook({
+            context,
+            deps,
+            logger,
+            hostConfig: target.hostConfig,
+            host,
+            spec,
+            entries,
+            releaseRoot: plan.releaseRoot,
+            releaseId,
+            remoteFacts: facts.facts,
+          })
+
     let deployed: Awaited<ReturnType<typeof deploy>>
     try {
       deployed = await deploy({
@@ -250,6 +472,7 @@ async function applyOne(
         ctx,
         entries,
         config: staticConfigFor(target.projectConfig),
+        ...(transferHook !== undefined ? { transfer: transferHook } : {}),
         onStep: (step) => {
           logger.info('apply.step', { step: step.id, kind: step.kind, title: step.title })
         },

@@ -154,6 +154,15 @@ export interface DeployInput {
   readonly config?: StaticTargetConfig
   /** 逐步回调，供 CLI 打实时日志 */
   readonly onStep?: (step: Step) => void
+  /**
+   * 由调用方提供的「把源搬到 staging 目录」的实现。
+   * 不提供时走现在的逐条 writeFile（本机、小目录都够用）。
+   * 返回值里的 filesWritten 同样要过「空版本拒绝」—— 传输出了 0 个文件
+   * 与 source 为空是同一类事故（current 指向空目录 = 线上 404）。
+   */
+  readonly transfer?: (
+    stagingDir: string,
+  ) => Promise<{ readonly filesWritten: number; readonly warnings?: readonly string[] }>
 }
 
 /** 真实执行：stage → commit → activate → verify → prune */
@@ -179,13 +188,28 @@ export async function deploy(input: DeployInput): Promise<DeployResult> {
   tracer.push({ id: steps[1]!.id, kind: 'install', ok: true })
 
   let filesWritten = 0
-  for (const entry of input.entries) {
-    const target = joinPath(staging, entry.relativePath)
-    if (entry.kind === 'dir') {
-      await runner.mkdir(target, { recursive: true, mode: entry.mode ?? DIR_MODE })
-    } else {
-      await runner.writeFile(target, await entry.read(), { mode: entry.mode ?? FILE_MODE })
-      filesWritten += 1
+  if (input.transfer !== undefined) {
+    // 钩子拿到的是**一个已存在的目录**。不先建好就指望 rsync / tar 自己造目录，
+    // 等于把「目标目录在不在」这个前提藏进各传输工具的实现细节里：rsync 造得了
+    // 最后一层、tar 的远端解包未必造得了，于是「同样的 deploy 换个传输方式就失败」。
+    // 前提在调用方显式建立，传输工具只管往里放文件。
+    await runner.mkdir(staging, { recursive: true, mode: DIR_MODE })
+
+    // 传输钩子只负责把源搬进 staging；commit/切 current/verify/prune 一律仍由
+    // 本函数做 —— 否则「换向」与「搬文件」会各自带一套补偿逻辑，
+    // 中途失败时就没人说得清环境到底处在哪个状态。
+    const moved = await input.transfer(staging)
+    filesWritten = moved.filesWritten
+    if (moved.warnings !== undefined) warnings.push(...moved.warnings)
+  } else {
+    for (const entry of input.entries) {
+      const target = joinPath(staging, entry.relativePath)
+      if (entry.kind === 'dir') {
+        await runner.mkdir(target, { recursive: true, mode: entry.mode ?? DIR_MODE })
+      } else {
+        await runner.writeFile(target, await entry.read(), { mode: entry.mode ?? FILE_MODE })
+        filesWritten += 1
+      }
     }
   }
 

@@ -13,6 +13,7 @@
     { "path": "../log" },
     { "path": "../schema" },
     { "path": "../ssh" },
-    { "path": "../target-static" }
+    { "path": "../target-static" },
+    { "path": "../transport" }
   ]
 }

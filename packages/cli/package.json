@@ -23,7 +23,8 @@
     "@dp/log": "workspace:*",
     "@dp/schema": "workspace:*",
     "@dp/ssh": "workspace:*",
-    "@dp/target-static": "workspace:*"
+    "@dp/target-static": "workspace:*",
+    "@dp/transport": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.9.0"

@@ -9,6 +9,7 @@ import { appendFileSync } from 'node:fs'
 import { createLogger, type LogFormat, type LogLevel } from '@dp/log'
 import type { DpError } from '@dp/ports'
 import { loadConfig, type LoadedConfig } from './config-file.js'
+import type { ApplyDeps } from './deps.js'
 
 export interface ResolvedFlags {
   readonly config?: string
@@ -46,6 +47,11 @@ export interface RunContext {
   readonly error: (message: string, hint?: string) => void
   readonly loadConfig: (flags: ResolvedFlags) => Promise<LoadedConfig>
   readonly flags: ResolvedFlags
+  /**
+   * apply 的可注入依赖。生产路径不传（命令内部回落到 defaultApplyDeps）；
+   * 测试传假的 acquireFacts / transfer，于是远端部署的测试**完全不碰网络**。
+   */
+  readonly deps?: ApplyDeps
 }
 
 const LOG_FORMATS: readonly LogFormat[] = ['json', 'pretty', 'logfmt']
@@ -73,6 +79,7 @@ export interface CreateContextOptions {
   readonly write?: (text: string) => void
   readonly writeErr?: (text: string) => void
   readonly isTTY?: boolean
+  readonly deps?: ApplyDeps
 }
 
 export function createContext(flags: ResolvedFlags, options: CreateContextOptions = {}): RunContext {
@@ -126,6 +133,7 @@ export function createContext(flags: ResolvedFlags, options: CreateContextOption
         env,
         ...(f.config !== undefined ? { explicit: f.config } : {}),
       }),
+    ...(options.deps !== undefined ? { deps: options.deps } : {}),
     flags,
   }
 }

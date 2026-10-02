@@ -75,7 +75,9 @@ build/          覆盖率产物所在根目录（已 gitignore）
 - **抗量子**：ssh2 **不支持**，只能靠 `native-ssh` 驱动；密码登录用 `SSH_ASKPASS`（不需要 sshpass）
 - **日志**：一律走 `@dp/log`，脱敏在 sink 出口统一做，禁止单点 `console.log`；日志抛错绝不上抛
 - **远端**：`@dp/ssh` 驱动偏好链 `native-ssh` → `ssh2`（ssh2 运行时可选加载，本机没装即表现为不可用）；
-  **多跳尚未实现**，`hops` 非空会显式报 `DP.CONFIG.INVALID`，当前用 `native-ssh` + `ProxyJump` 顶
+  **多跳对用户未开放**：`@dp/ssh` 的 `connect()` 对非空 `hops` 显式抛 `DP.CONFIG.INVALID`；
+  `@dp/transport` 的 rsh 能构造 `-J a,b` 与 `ProxyCommand` 两种 argv，但配置里没有 `hops` 字段。
+  开放要同时动 schema 与 ssh 驱动，别在 apply 里 cast 一个不存在的字段假装接上了
 
 ## 提交
 
