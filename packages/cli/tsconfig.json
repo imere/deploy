@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "build"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/config-load.ts", "src/context.ts"],
+  "references": [
+    { "path": "../ports" },
+    { "path": "../core" },
+    { "path": "../local" },
+    { "path": "../log" },
+    { "path": "../schema" },
+    { "path": "../ssh" }
+  ]
+}

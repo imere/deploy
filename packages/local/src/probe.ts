@@ -210,15 +210,13 @@ export async function probeLocalFacts(options: ProbeOptions = {}): Promise<Facts
   const dataHome = env.XDG_DATA_HOME ?? join(home, '.local', 'share')
   const localAppData = env.LOCALAPPDATA ?? join(home, 'AppData', 'Local')
 
+  // 候选按平台分流：/srv、/opt 这类 POSIX 目录在 Windows 上会被解析成 C:\srv 之类
+  // 根本不存在的位置，探它们既没意义又拖慢启动（每次探测都是一次真实建文件+删除）。
+  const posixDirs = ['/srv', '/opt', '/usr/local', '/var/lib', '/var/www', '/etc/systemd/system']
   const candidates =
     options.writeProbePaths ??
     [
-      '/srv',
-      '/opt',
-      '/usr/local',
-      '/var/lib',
-      '/var/www',
-      '/etc/systemd/system',
+      ...(platform === 'win32' ? [] : posixDirs),
       join(home, 'apps'),
       dataHome,
       env.ProgramData ?? 'C:/ProgramData',

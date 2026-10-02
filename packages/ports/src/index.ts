@@ -84,6 +84,13 @@ export type DpErrorCode =
   | 'DP.SSH.DRIVER_UNAVAILABLE'
   | 'DP.SSH.TUNNEL_FAILED'
   | 'DP.ELEVATE.FAILED'
+  // ↓ CLI（@dp/cli）追加。CLI 是唯一知道「具体实现存在」的层，所以它的错误码
+  // 单列一组：这里出现 DP.CLI.* 意味着**装配/调用方式**错了，不是部署本身失败。
+  | 'DP.CLI.USAGE'
+  | 'DP.CLI.UNKNOWN_COMMAND'
+  | 'DP.CLI.CONFIG_NOT_FOUND'
+  | 'DP.CLI.CONFIG_CONFLICT'
+  | 'DP.CLI.CONFIG_INVALID'
 
 export interface DpErrorOptions {
   /** 出错的配置路径，如 `projects.web.source` */

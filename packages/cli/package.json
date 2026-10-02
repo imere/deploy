@@ -1,0 +1,30 @@
+{
+  "name": "@dp/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "命令行入口：唯一允许组装具体实现的地方（docs/DESIGN.md §12 第 4 条）",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": { ".": { "types": "./build/index.d.ts", "default": "./build/index.js" } },
+  "bin": { "dp": "./build/bin.js" },
+  "files": ["build"],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@dp/ports": "workspace:*",
+    "@dp/core": "workspace:*",
+    "@dp/local": "workspace:*",
+    "@dp/log": "workspace:*",
+    "@dp/schema": "workspace:*",
+    "@dp/ssh": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}
