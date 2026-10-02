@@ -108,6 +108,15 @@ importers:
         specifier: ^5.9.0
         version: 5.9.3
 
+  packages/template:
+    dependencies:
+      '@dp/core':
+        specifier: workspace:*
+        version: link:../core
+      '@dp/ports':
+        specifier: workspace:*
+        version: link:../ports
+
   packages/transport:
     dependencies:
       '@dp/core':

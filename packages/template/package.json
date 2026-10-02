@@ -1,0 +1,13 @@
+{
+  "name": "@dp/template",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "纯模板渲染：${...} 变量展开 + 危险字符校验。零 IO，环境与 git 状态由调用方注入。",
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": { ".": { "types": "./build/index.d.ts", "default": "./build/index.js" } },
+  "files": ["build"],
+  "scripts": { "build": "tsc -b" },
+  "dependencies": { "@dp/ports": "workspace:*", "@dp/core": "workspace:*" }
+}

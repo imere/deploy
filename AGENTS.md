@@ -40,7 +40,7 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：esbuild 的平台二进制�
 ## 目录
 
 ```
-packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / cli 已实现）
+packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / cli 已实现）
 docs/           设计文档（★ 优先读：spikes.md failures.md decisions.md privilege.md）
 .agents/skills/ 可复用的操作流程（dp-spike-env / dp-subagent-dispatch）
 .tmp/           临时物（已 gitignore）
@@ -78,6 +78,10 @@ build/          覆盖率产物所在根目录（已 gitignore）
   **多跳对用户未开放**：`@dp/ssh` 的 `connect()` 对非空 `hops` 显式抛 `DP.CONFIG.INVALID`；
   `@dp/transport` 的 rsh 能构造 `-J a,b` 与 `ProxyCommand` 两种 argv，但配置里没有 `hops` 字段。
   开放要同时动 schema 与 ssh 驱动，别在 apply 里 cast 一个不存在的字段假装接上了
+- **模板**：渲染一律走 `@dp/template`，变量表以 `docs/config.md` §3.3 为准（不发明变量名）；
+  `$host` / `$request_uri` / `$1` 之类**必须原样保留**（吃掉它们产出的 nginx conf 直接废掉），
+  要字面量 `${x}` 写 `$${x}`。包本身零 IO：环境变量、git 状态、时钟都由调用方注入，
+  否则 `makePlan()` 就不再是纯函数。缺值与空值一律报 `DP.TPL.*`，**绝不留下 `${x}` 原文**
 
 ## 提交
 

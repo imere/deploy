@@ -128,6 +128,11 @@ service: defineService({
 | `DP.FILE.LOCKED` | 传输/激活 | ⚠️ | 见 §5 | `@dp/target-*` |
 | `DP.LOCK.HELD` | 并发 | ✅ | abort + 打印持锁者 | `@dp/core` |
 | `DP.STATE.INCONSISTENT` | 运行期 | ✅ | abort + 打印索引现状（**不**静默改动 current） | `@dp/cli`（`dp rollback`） |
+| `DP.TPL.UNKNOWN_VAR` | 配置渲染 | ✅ | abort（**绝不留下 `${x}` 原文**） | `@dp/template` |
+| `DP.TPL.MISSING_ENV` | 配置渲染 | ✅ | abort（空值同缺值处理） | `@dp/template` |
+| `DP.TPL.MISSING_VALUE` | 配置渲染 | ✅ | abort（同上：路径塌成 `/srv//` 要到中途才暴露） | `@dp/template` |
+| `DP.TPL.SYNTAX` | 配置渲染 | ✅ | abort（未闭合 / 嵌套） | `@dp/template` |
+| `DP.TPL.UNSAFE_VALUE` | 配置渲染 | ✅ | abort（按落点 text/path/shell/conf 分档） | `@dp/template` |
 | `DP.TRANSFER.INTERRUPTED` | 传输 | ❌ | 幂等重试 → abort | `@dp/transfer` |
 | `DP.TRANSFER.CHECKSUM_MISMATCH` | 传输 | ❌ | abort（staging 作废） | `@dp/transfer` |
 | `DP.ACTIVATE.START_FAILED` | 激活 | ❌ | 回滚到上一版 | `@dp/target-service` |

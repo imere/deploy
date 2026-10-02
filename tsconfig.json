@@ -9,6 +9,7 @@
     { "path": "./packages/log" },
     { "path": "./packages/ssh" },
     { "path": "./packages/transport" },
-    { "path": "./packages/cli" }
+    { "path": "./packages/cli" },
+    { "path": "./packages/template" }
   ]
 }

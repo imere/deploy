@@ -91,6 +91,14 @@ export type DpErrorCode =
   | 'DP.CLI.CONFIG_NOT_FOUND'
   | 'DP.CLI.CONFIG_CONFLICT'
   | 'DP.CLI.CONFIG_INVALID'
+  // ↓ 模板层（@dp/template）追加。渲染期的问题一律用 DP.TPL.*：
+  // 出现它们说明「配置里写了不能成立的变量」或「渲染出的值不该进那个位置」，
+  // 而不是部署执行失败 —— 两者的处置方式完全不同（改配置 vs 停下来）。
+  | 'DP.TPL.UNKNOWN_VAR'
+  | 'DP.TPL.MISSING_ENV'
+  | 'DP.TPL.MISSING_VALUE'
+  | 'DP.TPL.SYNTAX'
+  | 'DP.TPL.UNSAFE_VALUE'
 
 export interface DpErrorOptions {
   /** 出错的配置路径，如 `projects.web.source` */
