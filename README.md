@@ -28,7 +28,8 @@ dp rollback        # 回到上一个版本
 | `@dp/target-static` | ✅ | 静态投放：releases/\<id\> + current 原子切换 + keep N + 自动回退与 rollback |
 | `@dp/log` | ✅ | 结构化日志：JSONL 输出、出口统一脱敏（词段匹配 key + 值模式）、字段对齐 OTel、零运行时依赖 |
 | `@dp/ssh` | ✅ | 远端 Runner：驱动偏好链 `native-ssh` → `ssh2`、主机密钥四态、SSH_ASKPASS 免 sshpass、能力实证探测 |
-| `@dp/cli` | ✅ | 命令行：`plan` / `facts` / `schema`（只读）+ 配置发现与冲突检测 + 退出码契约 |
+| `@dp/cli` | ✅ | 命令行：`plan` / `facts` / `schema` / `apply`，配置发现与冲突检测、退出码契约 |
+| `@dp/transport` | ✅ | 传输协商与执行：`rsync-ssh` / `tar-ssh` / `sftp` / `scp` / `local-copy`，全部 argv-only |
 
 命令行：
 
@@ -45,7 +46,7 @@ dp apply --json         # 真部署：写 releases/<id> → 原子切 current �
 
 纵向链路已接通：**配置 → `makePlan()` → 本机真实部署 → 版本号切换 → 回滚**（`packages/core/src/slice.test.ts`）。
 
-尚未实现：`dp rollback` / `verify` / `status` 命令（底层 `@dp/target-static` 已具备，只差 CLI 接线）、`@dp/transport`（rsync / tar-ssh / sftp / scp 协商与**多跳**）、`@dp/template`、`@dp/target-nginx`、`@dp/target-docker`。
+尚未实现：`dp rollback` / `verify` / `status` 命令（底层 `@dp/target-static` 已具备，只差 CLI 接线）、把 `@dp/transport` 接进 `@dp/cli` 的 `apply`（远端走 rsync/tar 而不是逐条 writeFile）、`@dp/template`、`@dp/target-nginx`、`@dp/target-docker`。`@dp/ssh` 仍是**单跳**（`hops` 非空会显式报错）。
 `@dp/ssh` 当前是**单跳**（`hops` 非空会显式报错），多跳降级链 `direct-tcpip → nc → ssh-relay` 随 `@dp/transport` 一起做。
 
 ```bash
