@@ -140,7 +140,7 @@ node --test --test-reporter=lcov --test-reporter-destination=build/coverage/lcov
 **挂到容器里，用 Linux 命名空间删** —— 那里 `NUL` 只是普通文件名：
 
 ```bash
-podman run --rm -v "<仓库路径>:/mnt/dp:rw" alpine:latest sh -c 'rm -rf /mnt/dp/node_modules'
+podman run --rm -v "<仓库的绝对路径>:/mnt/dp:rw" alpine:latest sh -c 'rm -rf /mnt/dp/node_modules'
 ```
 
 这条同时是清理 `node_modules` 的可靠办法（`rm -rf` 在本机同样会被拦）。
@@ -165,7 +165,7 @@ podman run --rm -v "<仓库路径>:/mnt/dp:rw" alpine:latest sh -c 'rm -rf /mnt/
 
 ### 根因
 
-podman machine 的 `/etc/environment` 里配了 `<代理端口>`（本机实际可用的是 `<代理端口>`），且会被继承到容器环境。
+podman machine 的 `/etc/environment` 里配了一个**只在宿主机可达的代理端口**（容器网络里连不上），而这个环境会被继承进容器。
 
 ### 绕法
 

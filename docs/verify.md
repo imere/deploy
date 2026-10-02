@@ -33,7 +33,7 @@ flowchart LR
     class RIGHT good
 ```
 
-**HTTP/TCP 探针一律通过 `Runner` 在目标主机上执行**，探针地址里写 `127.0.0.1` 指的就是目标主机的回环。这是把「健康检查」做成 plan 里的一步而不是本机hablar?— 因为 plan 天然带着 `where: local | remote`。
+**HTTP/TCP 探针一律通过 `Runner` 在目标主机上执行**，探针地址里写 `127.0.0.1` 指的就是目标主机的回环。这是把「健康检查」做成 plan 里的一步、而不是在本机上直接探测 —— 因为 plan 天然带着 `where: local | remote`。
 
 两个例外要说清楚：
 

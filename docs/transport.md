@@ -97,7 +97,7 @@ for i in hops:
     if (i < last) sock_{i+1} = await forwardOut(client[i], hops[i+1].host, hops[i+1].port)
 ```
 
-必须由ointsolved 的六个细节：
+必须解决的六个细节：
 
 1. **每跳独立的主机密钥校验**。第 2 跳不能继承第 1 跳的信任；失败时要报 `hopIndex` + 期望指纹 + 实际指纹。
 2. **每跳独立的 crypto 协商**。这是最容易被忽略的一条：**连接只在两跳之间协商，整条链的强度等于最弱的一段**。中间跳板如果是老 SSH，即使两端都支持 ML-KEM，链上仍有非抗量子的段 —— 所以抗量子策略要**逐跳上报**，见 security.md。

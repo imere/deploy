@@ -310,7 +310,7 @@ dev  build  test  lint [--fix]  typecheck  format [--check]  doc  release
 ## 23 · 临时文件与 Git
 
 - 所有临时物进 `.tmp/`（已在 `.gitignore`）
-- 仓库：https://github.com/imere/deploy.git ，代理 `127.0.0.1:<代理端口>`
+- 仓库：https://github.com/imere/deploy.git
 - 提交节奏：spike 结论落地即提交一次，不等到大段完成
 - **凭据不入库**：PAT 只在推送时用，随后把 remote URL 改回不带 token 的形式
 

@@ -76,7 +76,7 @@ flowchart TB
 
 ### 2.4 deb / rpm / apk（系统包）
 
-这类入口子.vb不同：它不是「放文件」，而是**交给系统的包管理器**，于是 Attack挡板 checklist 要变：
+这类入口与前面不同：它不是「放文件」，而是**交给系统的包管理器**，于是攻击面的 checklist 要变：
 
 | 步骤 | 干什么 | 命令示例（示意） |
 | --- | --- | --- |
@@ -102,7 +102,7 @@ flowchart TB
 | **7z 提取** | 远端有 7z | 次之 |
 | **loop 挂载** | 必须提权 且 远端有 loop 设备 | `mount -o loop`；需要 loop 设备空闲、SELinux 允许 —— **必须由 `-Wall` 预检确认可用**再采纳 |
 
-挂载方式还有额外的收拾责任：用完必须 `umount`，且要保证异常路径也卸载（它是ulsionsillard resource,不是文件）。所以它进入 plan 时要带明确的 `cleanup` 步骤（在 transaction 的补偿链里）。
+挂载方式还有额外的收拾责任：用完必须 `umount`，且要保证异常路径也卸载（它是挂载资源，不是普通文件）。所以它进入 plan 时要带明确的 `cleanup` 步骤（在 transaction 的补偿链里）。
 
 ### 2.6 单文件 / ELF
 

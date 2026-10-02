@@ -344,7 +344,7 @@ type Target = {
 | `local-build-remote-load` | 本机 `docker build` → `docker save` 流出 → 走我们 exec 的 stdin → 远端 `docker load` | 远端不能编译（小机器 / 无 buildkit） |
 | `registry` | 本机 build+push，远端 pull+up | 有镜像仓库、要留版本化的制品 |
 
-**默认 `remote-cli` 是深思熟虑的**：它复用了已经解决的多跳与提权，不需要在本机和远端之间转发 docker socket（`DOCKER_HOST=ssh://` 反而会把我们拖回依赖系统 ssh 的老路）。健康Sche用 `docker compose ps --format json` 而不是 `docker ps` —— 前者能给出 compose 级别的期望状态。
+**默认 `remote-cli` 是深思熟虑的**：它复用了已经解决的多跳与提权，不需要在本机和远端之间转发 docker socket（`DOCKER_HOST=ssh://` 反而会把我们拖回依赖系统 ssh 的老路）。健康检查用 `docker compose ps --format json` 而不是 `docker ps` —— 前者能给出 compose 级别的期望状态。
 
 ---
 
@@ -485,7 +485,7 @@ flowchart TB
 3. **回滚前必须校验目标版本**：用 release 里的 `.dp/checksums.txt` 验证完整性。**校验不过就拒绝回滚并报错**，绝不「尽力而为」地切到一个坏版本上 —— 那时你会得到一个既不新也不旧的烂状态。
 4. **不允许回滚的回滚**：记录 pinned 版本；回滚失败时保持现状 + 明确告警 + 写出 trace，防止在两次失败之间无限来回。每次尝试（成功或失败）都要留 trace 并写明失败原因，`dp releases` 能看到「最后一次失败」。
 
-还有一条跨上面的规则：**数据库迁移不跟随回滚**。`hooks.migrate` 单独归类，默认策略是 `onRollback: none` —— 迁移是单向的艺术cements，工具不能假装它能撤销。这一条必须显式告诉用户，而不是悄悄跳过。
+还有一条跨上面的规则：**数据库迁移不跟随回滚**。`hooks.migrate` 单独归类，默认策略是 `onRollback: none` —— 迁移是单向的：工具不能假装它能撤销。这一条必须显式告诉用户，而不是悄悄跳过。
 
 ---
 

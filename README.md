@@ -26,10 +26,13 @@ dp rollback        # 回到上一个版本
 | `@dp/core` | ✅ | `makePlan()` 纯函数：跨平台路径校验、布局推导、release root 候选推导、step 生成 |
 | `@dp/local` | ✅ | 本机 Runner：能力**实证**、命令执行包装（不经 shell / 不交互 / 不无限等待）、源枚举 |
 | `@dp/target-static` | ✅ | 静态投放：releases/\<id\> + current 原子切换 + keep N + 自动回退与 rollback |
+| `@dp/log` | ✅ | 结构化日志：JSONL 输出、出口统一脱敏（词段匹配 key + 值模式）、字段对齐 OTel、零运行时依赖 |
+| `@dp/ssh` | ✅ | 远端 Runner：驱动偏好链 `native-ssh` → `ssh2`、主机密钥四态、SSH_ASKPASS 免 sshpass、能力实证探测 |
 
 纵向链路已接通：**配置 → `makePlan()` → 本机真实部署 → 版本号切换 → 回滚**（`packages/core/src/slice.test.ts`）。
 
-尚未实现：`@dp/transport`（rsync / tar-ssh / sftp / scp 与多跳 SSH）、`@dp/cli`、`@dp/target-nginx`、`@dp/target-docker`。
+尚未实现：`@dp/transport`（rsync / tar-ssh / sftp / scp 协商与**多跳**）、`@dp/cli`、`@dp/template`、`@dp/target-nginx`、`@dp/target-docker`。
+`@dp/ssh` 当前是**单跳**（`hops` 非空会显式报错），多跳降级链 `direct-tcpip → nc → ssh-relay` 随 `@dp/transport` 一起做。
 
 ```bash
 pnpm verify      # build + test + 覆盖率（产物落在 build/，lcov 在 build/coverage/）
@@ -46,6 +49,8 @@ packages/
   core/         plan 纯函数（布局推导、路径校验、step 生成）
   local/        本机 Runner（能力实证、命令执行、源枚举）
   target-static/静态投放目标
+  log/          结构化日志（JSONL + 出口脱敏）
+  ssh/          远端 Runner（驱动偏好链 · 主机密钥 · 能力实证）
 docs/
   diagrams.md    ★ 图集：全景 / 分层 / 数据流 / 状态机 / 各决策链（结构与流程以这里为准）
   DESIGN.md     总体设计：分层、管线、release 布局、并发隔离、扩展点、安全、里程碑
@@ -160,7 +165,7 @@ exit code 约定：成功 `0` / 部署失败 `1` / **验证失败且已回滚 `2
 
 ### 需要动手就先查清的两件事
 
-1. **Node 版本与抗量子的关系**：ML-KEM 混合密钥协商依赖 Node ≥ 24.7 的底层支持，本机是 **22.22.2**。这决定了默认能不能走抗量子，建议 `.nvmrc` 提到 24 —— 先用最小脚本连本机 OpenSSH 10.3 实测 `ssh2` 能协商出什么再定论。
+1. **抗量子只能走 `native-ssh` 驱动**：spike 实测 `ssh2` 不支持任何 PQC KEX（`mlkem768x25519-sha256` / `sntrup761` 都没有），而本机 OpenSSH 默认就协商 `mlkem768x25519-sha256`。所以驱动偏好链是 `native-ssh` → `ssh2`，且**退化到 ssh2 时必须明示"这条连接不抗量子"**。结论见 `docs/spikes.md`。
 2. **`ssh2` 的可选依赖会触发原生编译**：`cpu-features` / `nan` 需要本地编译且被 pnpm 的构建脚本白名单拦着。**建议跳过可选依赖**（只影响默认 cipher 择优，而我们本来就会显式指定 cipher 列表）。
 
 ---

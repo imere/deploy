@@ -40,12 +40,32 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：esbuild 的平台二进制�
 ## 目录
 
 ```
-packages/       @dp/* 各包（ports / schema / core / local / target-static 已实现）
+packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static 已实现）
 docs/           设计文档（★ 优先读：spikes.md failures.md decisions.md privilege.md）
-.agents/skills/ 可复用的操作流程
+.agents/skills/ 可复用的操作流程（dp-spike-env / dp-subagent-dispatch）
 .tmp/           临时物（已 gitignore）
 build/          覆盖率产物所在根目录（已 gitignore）
 ```
+
+## 派发子代理（mcode）
+
+大块实现交给子代理，但**派发与验收都在这里**，见 `.agents/skills/dp-subagent-dispatch/SKILL.md`。三条不能省：
+
+1. **必读清单写进 prompt 第一节**，并强制先读：`AGENTS.md` + `packages/ports/src/index.ts`（Runner 只有 `exec(argv[])`）
+   + 同层参照实现（写 ssh 就看 `local/src/{exec,probe,runner}.ts`）+ 对应设计文档（`spikes.md` 是**实测硬约束**）。
+   不给清单 → 它瞎猜，还会把读过的东西复述一遍烧你的 token。
+2. **边界写死**：不许跑 git、不许改 `docs/`、不许加依赖；改 `ports/src/index.ts` 只能末尾追加。
+   源码只许修**被测试暴露的真 bug**，且不许为过测而放宽断言。
+3. **验收自己来做**：`tsc -b` + 全量 `node --test` + 一份独立验收脚本断言行为（不采信它的测试）
+   + grep 禁项（`console.log` / `execShell` / 纯包里的 `node:fs`）+ grep 私有环境。
+
+## 写作纪律（文档与注释）
+
+- **注释只解释「为什么这么定 / 不这么定会怎样」**，不复述代码在做什么。复述型注释是噪声，见到就删。
+- **不写私有环境**：本机绝对路径、代理端口、token、用户名一律不进文档与注释，用占位符或参数化写法。
+  （容器靶机地址 `127.0.0.1:2222` / `dpuser` 是可复现的实验环境，不算。）
+- **不注水**：文档按"改代码顺手改对应文档"维护，不新增说明性 markdown；套话式的"总结"不写。
+- 子代理产出物尤其要过这两条 —— 它天生爱写复述型注释，也会把本机环境写进去。
 
 ## 架构要点（改动前先读）
 
@@ -53,6 +73,9 @@ build/          覆盖率产物所在根目录（已 gitignore）
 - **偏好链**：transport / jump / transfer / supervisor 都是候选链，全失败时输出结构化错误（每项原因 + 建议）
 - **护栏层**：目标机状态日志 + 带租约的部署锁 + 两阶段激活 `trial→promote`；unit 必须注入 `MemoryMax`/`StartLimitBurst`/`Restart=on-failure`
 - **抗量子**：ssh2 **不支持**，只能靠 `native-ssh` 驱动；密码登录用 `SSH_ASKPASS`（不需要 sshpass）
+- **日志**：一律走 `@dp/log`，脱敏在 sink 出口统一做，禁止单点 `console.log`；日志抛错绝不上抛
+- **远端**：`@dp/ssh` 驱动偏好链 `native-ssh` → `ssh2`（ssh2 运行时可选加载，本机没装即表现为不可用）；
+  **多跳尚未实现**，`hops` 非空会显式报 `DP.CONFIG.INVALID`，当前用 `native-ssh` + `ProxyJump` 顶
 
 ## 提交
 
