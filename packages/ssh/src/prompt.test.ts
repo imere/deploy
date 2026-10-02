@@ -131,3 +131,24 @@ describe('模式表与提示的性质', () => {
     assert.match(promptHint('su-password'), /tty/)
   })
 })
+
+describe('detectPrompt —— PIN 提示（硬件密钥 / 智能卡）', () => {
+  // 只认裸 `PIN:` 会漏掉带对象的写法，漏判的后果是挂在那里等人类输入（铁律 0）
+  it('Enter PIN for <对象>: 必须命中', () => {
+    for (const line of [
+      "Enter PIN for 'My Token': ",
+      "Enter PIN for 'PIV Card':",
+      'Enter PIN for key:',
+    ]) {
+      assert.equal(detectPrompt(line)?.kind, 'pin', `${line} 应命中 pin`)
+    }
+  })
+
+  it('裸 PIN: 仍然命中', () => {
+    assert.equal(detectPrompt('PIN:')?.kind, 'pin')
+  })
+
+  it('不误伤含 PIN 的普通输出', () => {
+    assert.equal(detectPrompt('pinned host key SHA256:abc'), undefined)
+  })
+})

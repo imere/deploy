@@ -56,6 +56,9 @@ export const PROMPT_PATTERNS: readonly PromptPattern[] = [
   { kind: 'doas-password', re: /^[ \t]*doas[ \t]*\(?.*\)?[ \t]*:[ \t]*$/ },
   // 双重认证 / 硬件密钥
   { kind: 'pin', re: /^[ \t]*(?:Enter[ \t]+)?PIN[ \t]*:[ \t]*$/ },
+  // `Enter PIN for 'My Token':` / `Enter PIN for 'PIV Card':` —— 只认裸 `PIN:` 会漏掉
+  // 这种带对象的写法，漏判的后果是挂在那里等人类输入（铁律 0）
+  { kind: 'pin', re: /^[ \t]*Enter[ \t]+PIN[ \t]+for[^\n]*:[ \t]*$/i },
   { kind: 'pin', re: /^[ \t]*Verification[ \t]+code:[ \t]*$/i },
   { kind: 'otp', re: /^[ \t]*(?:One-time|OTP)[ \t]*code[^\n]*:[ \t]*$/i },
 ]
