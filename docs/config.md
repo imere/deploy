@@ -323,6 +323,45 @@ flowchart TB
 - **1 命中** → 用它，日志打印：`检测到 docker-compose.yml → target.type=docker（可用 target.type 覆盖）`
 - **多命中** → 默认**报错**（不猜），除非配 `target.pick: highest | first`；报错信息里列出所有候选与排除办法
 
+### nginx：`target.nginx`
+
+conf **不手写**，由 `@dp/target-nginx` 从结构化配置生成。`confd` 不在这里 —— 它是
+`target.confd`，由实测可写性推导（见 §4：目标机上的路径不是配置项）。
+
+```yaml
+projects:
+  web:
+    source: { root: './dist' }
+    release: { root: '/srv/web' }
+    target:
+      type: [static, nginx]        # 先按静态投放，再换 conf
+      # confd: '/etc/nginx/conf.d' # 推导不出来时才显式写（注意写的是主配置 include 的那个目录）
+      nginx:
+        filename: '${project}.conf'   # 可选，默认 <项目名>.conf。不含目录
+        force: false                  # 覆盖未带 `# managed by dp` 的同名文件（仍先备份）
+        reload: [systemctl, reload, nginx]   # argv[]；false = 由外部机制重载
+        server:                       # 单个块，或块数组
+          serverName: ['www.example.com']
+          listen: [80, '443 ssl']
+          root: '${release.current}'  # 软链，不是具体版本目录
+          index: ['index.html']
+          locations:
+            - path: '/'
+              tryFiles: '$uri $uri/ /index.html'
+            - path: '/api/'
+              proxy:
+                upstream: 'http://127.0.0.1:8080'   # 末尾斜杠的两种语义不同，它报错而不替你选
+                websocket: true
+                timeouts: { connect: 5, send: 30, read: 30 }
+          extra: ['add_header X-Deployed-By dp always;']   # 原样输出，连 `;` 都不补 —— 分号自己写
+```
+
+生效顺序固定：**渲染到影子目录 → `nginx -t` 影子校验 → 备份 → 原子 rename → 整棵树 `-t`
+复验 → reload**。`$host` / `$request_uri` 这类 nginx 变量**原样保留**（要字面量 `${x}` 写
+`$${x}`）。只覆盖带 `# managed by dp` 的文件；遇同名未标记文件报 `DP.NGX.NOT_MANAGED`，
+需要 `force` 才继续。`dp apply` 里的位置是 install → deploy → activate，activate 失败
+**不回滚发布**（版本是好的，旧 conf 指向 `current` 软链所以服务没断）。
+
 ### delegate：项目自带部署方式
 
 很多项目已经有自己的部署脚本/compose/Makefile，我们不该抢活。此时本项目的角色变成：**在一旁提供版本布局、锁、日志、回滚与验证**。
@@ -381,7 +420,8 @@ transport.strategy = auto ← defaults（本次协商结果：tar-ssh）
 | `projects.*.release` | `root`、`keep`、`shared[]`、`owner`、`dirMode`、`fileMode`、`switchStrategy` |
 | `projects.*.transfer` | `strategy`、`delete`、`compress`、`checksum`、`bandwidthLimit` |
 | `projects.*.rollout` | `strategy`、`batch`、`pauseMs`、`failPolicy`、`healthWaitMs` |
-| `projects.*.target` | `type`、`pick` + 各 target 自有字段（`nginx.confd` / `docker.image` / ...） |
+| `projects.*.target` | `type`、`pick`、`confd`、`service` + 各 target 自有段（`target.nginx.*` / `docker.image` / ...） |
+| `projects.*.target.nginx` | `server`（块或块数组）、`filename`、`force`、`reload`（argv[] 或 `false`）。见 §8 |
 | `projects.*.healthcheck` | `command` / `http` / `tcp` / `fileExists` |
 | `projects.*.hooks` | `before|after × prepare|transfer|install|activate|verify`，每条带 `where: local|remote` |
 | `projects.*.rollback` | `enabled`、`onFailure: auto|ask|never` |
