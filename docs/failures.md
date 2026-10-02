@@ -138,6 +138,8 @@ service: defineService({
 | `DP.NGX.UNSAFE_VALUE` | conf 渲染 | ✅ | abort（值带 conf 边界字符 = 注入指令） | `@dp/target-nginx` |
 | `DP.NGX.RELOAD_CMD_INVALID` | conf 生效 | ✅ | abort（命令不是 argv[]，照传会静默改变语义） | `@dp/target-nginx` |
 | `DP.NGX.NO_PREVIOUS` | 回滚 | ✅ | abort（首次部署无上一版可还原，不报假成功） | `@dp/target-nginx` |
+| `DP.NGX.TEST_FAILED` | conf 生效 | ✅ | 还原备份并**再验一次**；原话进 stderr（处置：按它改配置重来） | `@dp/target-nginx` |
+| `DP.NGX.RELOAD_FAILED` | reload | ❌ | **不回滚**：盘上 conf 已过 `-t`，重跑 reload 即收敛（与上一行处置相反，故单列） | `@dp/target-nginx` |
 | `DP.TRANSFER.INTERRUPTED` | 传输 | ❌ | 幂等重试 → abort | `@dp/transfer` |
 | `DP.TRANSFER.CHECKSUM_MISMATCH` | 传输 | ❌ | abort（staging 作废） | `@dp/transfer` |
 | `DP.ACTIVATE.START_FAILED` | 激活 | ❌ | 回滚到上一版 | `@dp/target-service` |

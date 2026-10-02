@@ -16,34 +16,44 @@ import type { NginxTargetConfig } from './types.js'
 
 const DEFAULT_RELOAD: readonly string[] = ['nginx', '-s', 'reload']
 const BACKUP_SUFFIX = '.dp-backup'
+const NEW_SUFFIX = '.dp-new'
 
 /** 统一用 `/`：这些路径会被写进远端的 conf 与命令行，反斜杠在 Linux 上是转义而不是分隔符 */
 function joinPath(...parts: readonly string[]): string {
   return parts.filter((p) => p !== '').join('/')
 }
 
-interface Layout {
+/** 导出给执行器：路径表必须**只有一份**。计划里印的路径与真正写文件的路径一旦分叉，
+ * 用户看到的是「计划说备份了 A，实际覆盖了 B」 */
+export interface Layout {
   /** confd 里的目标文件名 */
   readonly file: string
+  /** 影子目录的根（不含 releaseId）。列 confd 时要整个排除掉它 */
+  readonly shadowRoot: string
   /** 影子校验工作目录（每次部署一个子目录，避免并发部署互相覆盖） */
   readonly shadowDir: string
   readonly candidate: string
   /** 影子主配置：include 真实 confd 树 + 候选文件 */
   readonly mainConfig: string
   readonly backup: string
+  /** 替换用的中间文件。必须落在 confd 内，见 planActivate 的 replace 步骤 */
+  readonly newFile: string
   readonly reload: readonly string[] | false
 }
 
-function layout(ctx: TargetContext, config: NginxTargetConfig): Layout {
+export function layout(ctx: TargetContext, config: NginxTargetConfig): Layout {
   const name = resolveFilename(ctx, config)
   const confd = config.confd.replace(/\/+$/, '')
-  const shadowDir = joinPath((config.shadowDir ?? joinPath(confd, '.dp-shadow')).replace(/\/+$/, ''), ctx.releaseId)
+  const shadowRoot = (config.shadowDir ?? joinPath(confd, '.dp-shadow')).replace(/\/+$/, '')
+  const file = joinPath(confd, name)
   return {
-    file: joinPath(confd, name),
-    shadowDir,
-    candidate: joinPath(shadowDir, name),
-    mainConfig: joinPath(shadowDir, 'nginx.shadow.conf'),
-    backup: `${joinPath(confd, name)}${BACKUP_SUFFIX}`,
+    file,
+    shadowRoot,
+    shadowDir: joinPath(shadowRoot, ctx.releaseId),
+    candidate: joinPath(shadowRoot, ctx.releaseId, name),
+    mainConfig: joinPath(shadowRoot, ctx.releaseId, 'nginx.shadow.conf'),
+    backup: `${file}${BACKUP_SUFFIX}`,
+    newFile: `${file}${NEW_SUFFIX}`,
     reload: config.reload === undefined ? DEFAULT_RELOAD : config.reload,
   }
 }
@@ -123,7 +133,9 @@ function assertReloadArgv(argv: readonly string[]): readonly string[] {
 const NGINX_T = 'nginx'
 const NGINX_TEST: readonly string[] = [NGINX_T, '-t']
 
-function renderFor(config: NginxTargetConfig): string {
+/** 导出给执行器：候选内容与计划标题里的行数必须出自同一次渲染，
+ * 否则「计划说 12 行、实际写下去 13 行」这类不一致会一直留在纸面上 */
+export function renderFor(config: NginxTargetConfig): string {
   const project = config.render.project
   return renderConf(config.server, config.render, {
     path: `projects.${project === '' ? '*' : project}.target.nginx.server`,
@@ -188,13 +200,17 @@ export const nginxTarget: Target<NginxTargetConfig> = {
       {
         id: 'nginx.replace',
         kind: 'activate',
-        title: `rename ${L.candidate} → ${L.file}（同文件系统内的原子替换）`,
+        title: `在 confd 内写 ${L.newFile}，再 rename → ${L.file}（同文件系统内的原子替换）`,
         host: ctx.host,
         undo:
           ctx.previousReleaseId === undefined
             ? `删除 ${L.file}（首次部署，无备份可还原）`
             : `把 ${L.backup} rename 回 ${L.file}，然后按 nginx.reload-conf 重新 reload`,
-        detail: { from: L.candidate, to: L.file, backup: L.backup },
+        // 不写「把候选 rename 过去」：shadowDir 允许配到 confd 之外，
+        // 那时跨文件系统的 rename 直接 EXDEV，原子替换变成部署失败。
+        // 候选留在影子目录里（已被影子校验证明能解析），往 confd 里写一份再 rename，
+        // 原子性只依赖 confd 自己那一个文件系统。
+        detail: { via: L.newFile, to: L.file, backup: L.backup },
       },
       {
         id: 'nginx.validate-live',

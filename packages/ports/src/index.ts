@@ -107,6 +107,15 @@ export type DpErrorCode =
   | 'DP.NGX.UNSAFE_VALUE'
   | 'DP.NGX.RELOAD_CMD_INVALID'
   | 'DP.NGX.NO_PREVIOUS'
+  // ↓ nginx 执行器（@dp/target-nginx）追加。这两个单列的理由是**处置方式相反**：
+  // 上面的 DP.NGX.* 都能在动手之前判定，处置是「改配置然后重来」；
+  // 而这两个是「配置通过了本包能做的全部校验、nginx 仍然不接受」：
+  // TEST_FAILED 的原话在 stderr 里，多半是同一棵树上的别的文件或环境问题；
+  // RELOAD_FAILED 时盘上的 conf 已经被 `-t` 接受，nginx 只是没收到信号，
+  // 重跑一次 reload 就收敛 —— 此时回滚反而制造第二次不一致。合成一个码，
+  // 调用方就只能对两种相反的处置一律回滚。
+  | 'DP.NGX.TEST_FAILED'
+  | 'DP.NGX.RELOAD_FAILED'
 
 export interface DpErrorOptions {
   /** 出错的配置路径，如 `projects.web.source` */
