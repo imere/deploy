@@ -30,17 +30,22 @@ dp rollback        # 回到上一个版本
 | `@dp/ssh` | ✅ | 远端 Runner：驱动偏好链 `native-ssh` → `ssh2`、主机密钥四态、SSH_ASKPASS 免 sshpass、能力实证探测 |
 | `@dp/cli` | ✅ | 命令行：`plan` / `facts` / `schema`（只读）+ 配置发现与冲突检测 + 退出码契约 |
 
-命令行（只读三件套已可用）：
+命令行：
 
 ```bash
 dp plan --json          # 干跑：布局 / 发布根候选（含实证可写性）/ 每一步与它的撤销项
 dp facts --json         # 目标机事实与能力（全部实测，不靠 uid 推断）
 dp schema               # 导出 JSON Schema，写进编辑器就有补全与校验
+dp apply --dry-run      # 只算不写；去掉 --dry-run 就是真部署
+dp apply --json         # 真部署：写 releases/<id> → 原子切 current → 健康检查 → 保留 N 版
 ```
+
+`apply` 失败时会自动回滚：健康检查不过退 **2**（已回滚），装配期错误退 **3**，环境缺依赖退 **4**，
+其他失败退 **1**。回滚本身失败时不假装成功，会明确报告 `needsHealing` 并给出人工下一步命令。
 
 纵向链路已接通：**配置 → `makePlan()` → 本机真实部署 → 版本号切换 → 回滚**（`packages/core/src/slice.test.ts`）。
 
-尚未实现：`dp apply` / `dp rollback` 命令（底层 `@dp/target-static` 已具备，只差 CLI 接线）、`@dp/transport`（rsync / tar-ssh / sftp / scp 协商与**多跳**）、`@dp/template`、`@dp/target-nginx`、`@dp/target-docker`。
+尚未实现：`dp rollback` / `verify` / `status` 命令（底层 `@dp/target-static` 已具备，只差 CLI 接线）、`@dp/transport`（rsync / tar-ssh / sftp / scp 协商与**多跳**）、`@dp/template`、`@dp/target-nginx`、`@dp/target-docker`。
 `@dp/ssh` 当前是**单跳**（`hops` 非空会显式报错），多跳降级链 `direct-tcpip → nc → ssh-relay` 随 `@dp/transport` 一起做。
 
 ```bash
