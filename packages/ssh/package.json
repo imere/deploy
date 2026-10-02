@@ -1,0 +1,33 @@
+{
+  "name": "@dp/ssh",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "远端 Runner：SSH 连接（native-ssh / ssh2 偏好链）· 命令执行 · 远端文件系统 · 能力实证 · 提权包装",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "default": "./build/index.js"
+    }
+  },
+  "files": [
+    "build"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@dp/ports": "workspace:*",
+    "@dp/log": "workspace:*",
+    "@dp/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

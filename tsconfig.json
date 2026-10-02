@@ -6,6 +6,7 @@
     { "path": "./packages/core" },
     { "path": "./packages/local" },
     { "path": "./packages/target-static" },
-    { "path": "./packages/log" }
+    { "path": "./packages/log" },
+    { "path": "./packages/ssh" }
   ]
 }

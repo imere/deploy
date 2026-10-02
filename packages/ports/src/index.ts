@@ -73,6 +73,17 @@ export type DpErrorCode =
   | 'DP.SOURCE.EMPTY'
   | 'DP.INTERACTIVE_PROMPT_DETECTED'
   | 'DP.TIMEOUT.EXEC'
+  // ↓ SSH 远端 Runner（@dp/ssh）追加。注意 `CONFIG_INVALID` 是命名空间化之前
+  // 留下的历史名，它没有点分前缀；新代码一律用 `DP.CONFIG.INVALID`。
+  | 'DP.CONFIG.INVALID'
+  | 'DP.SSH.CONNECT_FAILED'
+  | 'DP.SSH.AUTH_FAILED'
+  | 'DP.SSH.HOST_KEY_UNKNOWN'
+  | 'DP.SSH.HOST_KEY_MISMATCH'
+  | 'DP.SSH.TOOL_MISSING'
+  | 'DP.SSH.DRIVER_UNAVAILABLE'
+  | 'DP.SSH.TUNNEL_FAILED'
+  | 'DP.ELEVATE.FAILED'
 
 export interface DpErrorOptions {
   /** 出错的配置路径，如 `projects.web.source` */
@@ -281,4 +292,43 @@ export interface Logger {
   /** 开始计时，返回的 end() 会自动写 durationMs */
   begin(msg: string, fields?: Readonly<Record<string, unknown>>): () => void
   flush(): Promise<void>
+}
+
+// ============================================================
+// 提权 —— 由 @dp/ssh 的 become.ts 落地包装
+// ============================================================
+
+/**
+ * 提权方式的**运行期**形状。
+ *
+ * 这是 config.md §4 里 `hosts.*.become` 经 schema 层归一化之后的产物：
+ * `method: auto|nopasswd|stdin|pty` 与 `passwordRef` 属于配置与凭据解析层，
+ * 不该混进这条运行时契约（解析 ref 是 schema 的职责，见 security.md §3）。
+ *
+ * 硬约束：任何一种取值都**不允许产生会等待 stdin 的命令**（铁律 0）。
+ * `nonInteractive: false` 只是"不要 `-n`"，密码通道必须由调用方显式提供。
+ */
+export type BecomeConfig =
+  | { readonly type: 'none' }
+  /** `nonInteractive` 默认 true，即 `sudo -n`（完全免密） */
+  | { readonly type: 'sudo'; readonly user?: string; readonly group?: string; readonly nonInteractive?: boolean }
+  | { readonly type: 'doas'; readonly user?: string }
+  /** 已知 busybox su 可能缺 suid 位（spikes.md S7 实测失败），所以只做包装不保证可用 */
+  | { readonly type: 'su'; readonly user: string; readonly shell?: string }
+  | { readonly type: 'custom'; readonly template: string }
+
+/**
+ * 提权的**实证结论**，不是配置声明。
+ *
+ * 存在它是因为 privilege.md §1 的铁律：能力一律实证。配置里写了
+ * `become: { type: 'sudo' }` 不代表这台机器上 `sudo -n` 真能成
+ * —— 所以每次部署都要用 `canElevate()` 跑一次并把结论记在这里。
+ */
+export interface Elevation {
+  readonly become: BecomeConfig
+  /** 目标身份。不由 uid 推断，由 `sudo -n id -un` 的真实输出得到 */
+  readonly targetUser?: string
+  readonly available: boolean
+  /** 不可用时的原因（远端原话脱敏后），或可用的实测依据 */
+  readonly reason?: string
 }
