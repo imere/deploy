@@ -238,3 +238,47 @@ export interface Runner {
   /** 真实路径解析；预检路径逃逸校验依赖它 */
   realpath(path: string): Promise<string>
 }
+
+// ============================================================
+// Logger —— 结构化日志（实现见 @dp/log）
+// ============================================================
+
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error'
+
+/** 一条日志。固定字段对齐 OTel 语义约定，其余字段自由扩展。 */
+export interface LogRecord {
+  /** ISO 8601，由注入的 clock 产出，保证测试可确定 */
+  readonly ts: string
+  readonly level: LogLevel
+  /** 事件名，点分小写，如 `transfer.begin` */
+  readonly msg: string
+  readonly deployId?: string
+  readonly host?: string
+  readonly phase?: string
+  readonly span?: string
+  readonly attempt?: number
+  readonly [key: string]: unknown
+}
+
+/** 出口。实现必须在这里做脱敏，调用方不许自己 scrub。 */
+export interface LogSink {
+  /** line 是格式化后的单行文本（不含换行符） */
+  write(line: string, record: LogRecord): void
+  /** 可选：异步刷盘。`flush()` 会等它 */
+  flush?(): Promise<void>
+}
+
+export interface Logger {
+  /** 派生一个绑定了固定字段的子 logger；子字段覆盖父字段，只影响自己 */
+  child(bind: Readonly<Record<string, unknown>>): Logger
+  /** 绑定 span 字段的快捷方式 */
+  span(spanId: string): Logger
+  trace(msg: string, fields?: Readonly<Record<string, unknown>>): void
+  debug(msg: string, fields?: Readonly<Record<string, unknown>>): void
+  info(msg: string, fields?: Readonly<Record<string, unknown>>): void
+  warn(msg: string, fields?: Readonly<Record<string, unknown>>): void
+  error(msg: string, fields?: Readonly<Record<string, unknown>>): void
+  /** 开始计时，返回的 end() 会自动写 durationMs */
+  begin(msg: string, fields?: Readonly<Record<string, unknown>>): () => void
+  flush(): Promise<void>
+}

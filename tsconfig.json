@@ -5,6 +5,7 @@
     { "path": "./packages/schema" },
     { "path": "./packages/core" },
     { "path": "./packages/local" },
-    { "path": "./packages/target-static" }
+    { "path": "./packages/target-static" },
+    { "path": "./packages/log" }
   ]
 }

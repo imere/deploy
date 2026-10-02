@@ -1,0 +1,13 @@
+{
+  "name": "@dp/log",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "结构化日志：JSONL 输出 · 内置脱敏 · 字段对齐 OpenTelemetry 语义约定",
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": { ".": { "types": "./build/index.d.ts", "default": "./build/index.js" } },
+  "files": ["build"],
+  "scripts": { "build": "tsc -b" },
+  "dependencies": { "@dp/ports": "workspace:*" }
+}

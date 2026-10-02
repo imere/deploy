@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "outDir": "build", "rootDir": "src" },
+  "include": ["src/**/*.ts"],
+  "references": [{ "path": "../ports" }]
+}
