@@ -86,7 +86,16 @@ build/          覆盖率产物所在根目录（已 gitignore）
   「记得才写」。值里的 `;` `{` `}` 一律拒（一个分号就多出一条指令）；`proxy_pass` 末尾斜杠的
   两种语义不同，**报错而不替用户选**；只覆盖带 `# managed by dp` 的文件，遇同名未标记文件报错。
   生效顺序固定：写候选 → 影子校验 → 原子替换 → `nginx -t` 复验 → reload（两步 `-t` 是刻意的）。
-  目标机路径（`confd`）**不是配置项**，由实测 layout 推导后注入
+  目标机路径（`confd`）**不是配置项**，由实测能力推导后注入：显式 `target.confd` > 按 platform
+  取候选里第一个 `canWrite === true` 的 > 都没有报 `DP.PERM.CONFD_NOT_WRITABLE`。
+  `canWrite` 里没有那个键就是不可写 —— 当成「可能可写」去猜是这类 bug 的标准形状。
+  两份 facts 来源（`@dp/ssh` 与 `@dp/local`）的探测候选**必须一致**，否则同一份配置会
+  在远端推得出来、本机推不出来
+- **`dp apply` 的三段顺序是 install → deploy → activate**，不是随手排的：install 碰的是影子
+  目录，能在动任何生产路径之前挡掉坏 conf；conf 的 `root` 用 `${release.current}` **软链**
+  所以先切版本再换 conf 安全（反过来会留下指向未就绪目录的 conf）。activate 失败
+  **不回滚 release**：版本本身是好的（健康检查过了），退掉它只会把「一个 conf 问题」
+  变成「一次服务中断」；但必须说清状态、退出码非 0
 - **nginx 执行器的三条不变量**：① 不重排步骤 —— 每条 argv 都从计划的 `detail.argv` 取，
   执行器里不另写一份（两份 argv 各改各的 = 计划与真跑悄悄分叉）；② 判定先于副作用 ——
   所有权判定排在任何 mkdir/writeFile 之前；③ 失败必须留痕 —— 补偿失败不许吞掉原错误。

@@ -8,6 +8,7 @@
  */
 import { makePlan } from '@dp/core'
 import { listSourceEntries, normalizeSourceSpec, type SourceSpec } from '@dp/local'
+import { activateNginx, installNginx, type NginxExecResult, type NginxTargetConfig } from '@dp/target-nginx'
 import { deploy, rollback } from '@dp/target-static'
 import { chooseTransport, type TransferRequest, type TransportKind, type TransportPreference } from '@dp/transport'
 import { DpError, type BecomeConfig, type SourceEntry, type TargetContext } from '@dp/ports'
@@ -15,7 +16,8 @@ import type { HostConfig, ProjectConfig } from '@dp/schema'
 import type { LoadedConfig } from '../config-file.js'
 import { defaultApplyDeps, type ApplyDeps } from '../deps.js'
 import { acquireFacts as acquireFactsDefault, parseSshTarget, readFactsFile, resolveAuth } from '../facts-source.js'
-import { exitCodeFor, renderApplyJson, renderApplyPretty, type ApplyTargetResult } from '../output.js'
+import { nginxConfigFor, releaseCurrentPath, resolveConfd } from '../nginx-config.js'
+import { exitCodeFor, renderApplyJson, renderApplyPretty, type ApplyTargetResult, type NginxTargetResult } from '../output.js'
 import { releaseIdFor } from '../release-id.js'
 import { selectTargets } from '../targets.js'
 import { staticConfigFor } from '../target-config.js'
@@ -326,6 +328,98 @@ async function makeTransferHook(
   }
 }
 
+/**
+ * nginx 的「两个阶段」在本仓是什么关系。
+ *
+ * 顺序是 ① installNginx → ② deploy → ③ activateNginx，不是随手排的：
+ *  - install 放最前，因为它能在**碰任何生产目录之前**把坏 conf 挡掉（渲染 + 影子校验）；
+ *  - conf 里的 root 用 `${release.current}` **软链**而不是具体版本目录，所以先切版本
+ *    再换 conf 是安全的。反过来（先换 conf 再切版本）会在发布失败时留下一份指向
+ *    还没就绪目录的 conf —— 而那种状态要等到下一次部署或下一次重启才暴露；
+ *  - install 与 activate 分开，是因为 activate 要备份、原子替换、复验、reload，
+ *    每一步都碰生产 confd；而 install 写的是影子目录。
+ */
+interface NginxRun {
+  readonly config: NginxTargetConfig
+  readonly confd: string
+  /** `${release.current}` 展开后的软链路径，失败说明要用它 —— 见 releaseCurrentPath */
+  readonly current: string
+}
+
+function nginxRunFor(
+  target: ApplyTargetInput,
+  ctx: TargetContext,
+  env: string,
+  envVars: Readonly<Record<string, string | undefined>>,
+  now: Date,
+  facts: Awaited<ReturnType<typeof acquireFactsDefault>>['facts'],
+): NginxRun | undefined {
+  const spec = target.projectConfig.target?.nginx
+  if (spec === undefined) return undefined
+  const confd = resolveConfd({ facts, ...(target.projectConfig.target !== undefined ? { target: target.projectConfig.target } : {}) })
+  return {
+    confd,
+    current: releaseCurrentPath(ctx),
+    config: nginxConfigFor({
+      project: target.project,
+      env,
+      envVars,
+      targetCtx: ctx,
+      now,
+      nginx: spec,
+      confd,
+    }),
+  }
+}
+
+/**
+ * 两个阶段的结论并成一段。`ownership` 取 install 的判定 —— activate 判的是同一份
+ * 文件，重复报一次只会让人以为发生过两次判定。
+ */
+function nginxReport(
+  confd: string,
+  results: readonly NginxExecResult[],
+): NginxTargetResult {
+  const steps = results.flatMap((r) => r.steps.map((s) => ({ id: s.id, kind: s.kind, ok: s.ok, skipped: s.skipped })))
+  const first = results[0]
+  const last = results[results.length - 1]
+  if (first === undefined || last === undefined) {
+    // 调用点保证至少一个阶段（配了 nginx 就一定有 install），所以这是代码错误而非部署失败
+    throw new Error('nginxReport 收到了空的结果列表')
+  }
+  return {
+    confd,
+    file: last.file,
+    ...(first.ownership !== undefined ? { ownership: first.ownership } : {}),
+    dryRun: last.dryRun,
+    reloaded: results.some((r) => r.reloaded),
+    skipped: steps.filter((s) => s.skipped).map((s) => s.id),
+    steps,
+    warnings: results.flatMap((r) => r.warnings),
+  }
+}
+
+/**
+ * activate 失败时机器处在什么状态。**不写「已回滚」**是刻意的：
+ * conf 失败而版本本身是好的（deploy 的健康检查过了），为一个 conf 问题把一次
+ * 成功的发布退掉，是把两件独立的事绑成一次失败。旧 conf 指向的是 `release.current`
+ * 软链，所以线上仍然在服务，不是悬空。
+ */
+function activateFailedWarning(
+  releaseId: string,
+  /** `${release.current}` 展开后的真实软链位置。confd 里没有 current 这种东西，
+   *  把 confd 拼上去会指向一个根本不存在的路径 */
+  currentPath: string,
+  f: { readonly code: string; readonly message: string },
+): string {
+  return [
+    `版本已切到 ${releaseId}，conf 未更新，nginx 仍在用旧的 conf（它的 root 指向 ${currentPath} 软链，所以服务没有中断）。`,
+    `失败原因 [${f.code}]：${f.message}`,
+    '下一步：按 nginx 的原话修好 target.nginx 的配置后重跑 dp apply。',
+    '**不要回滚这次发布** —— 版本本身是好的，退掉它只会把「一个 conf 问题」变成「一次服务中断」。',
+  ].join('\n')
+}
+
 async function applyOne(
   context: RunContext,
   flags: ResolvedFlags,
@@ -386,9 +480,47 @@ async function applyOne(
       ...(target.hostConfig.layout !== undefined ? { layout: target.hostConfig.layout } : {}),
     })
 
+    // ctx 提前到这里：nginx 的 install 阶段要它（渲染上下文里的 release.current 来自它），
+    // 而 install 必须在 deploy **之前**跑。放在原处会让 nginx 阶段拿到未定义的值
+    const ctx: TargetContext = {
+      host,
+      root: plan.releaseRoot,
+      releaseId,
+      keep: resolved.keep,
+    }
+
+    // nginx 装配。confd 推导不出会在这里抛（DP.PERM.CONFD_NOT_WRITABLE），
+    // 发生时机是「一个字节都还没写」，所以它属于装配期失败而不是部署失败
+    const nginx = nginxRunFor(target, ctx, flags.env ?? '', context.env, target.now, resolved.facts)
+
     // ④ --dry-run：算完就停，一个字节都不写
     if (flags.dryRun) {
       announce(plan.releaseRoot, fileCount)
+      // nginx 走**真**执行器的 dryRun：影子校验需要盘上的文件才能跑，跑完再撤掉。
+      // 跳掉它报个成功，等于把「这份 conf 到底能不能过 -t」这件事藏起来
+      const dryRuns: NginxExecResult[] = []
+      if (nginx !== undefined) {
+        dryRuns.push(
+          await installNginx({
+            runner: resolved.runner,
+            ctx,
+            config: nginx.config,
+            dryRun: true,
+            onStep: (step) => logger.info('apply.nginx.install', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+        // activate 也走一遍：它只读现有 conf 做所有权判定，不写盘。
+        // 跳过它就报成功，等于把「这份文件现在能不能被替换」藏起来了
+        dryRuns.push(
+          await activateNginx({
+            runner: resolved.runner,
+            ctx,
+            config: nginx.config,
+            dryRun: true,
+            onStep: (step) => logger.info('apply.nginx.activate', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+      }
       // --json 时 stdout 只能有那一个 JSON 文档，正文走日志
       if (flags.json) {
         logger.info('apply.dry_run', { releaseId, steps: plan.steps.length, wrote: false })
@@ -405,6 +537,7 @@ async function applyOne(
         steps: plan.steps.map((s) => ({ id: s.id, kind: s.kind, ok: true })),
         probeNotes: resolved.probeNotes,
         dryRun: true,
+        ...(nginx !== undefined ? { nginx: nginxReport(nginx.confd, dryRuns) } : {}),
       }
       return { result, exitCode: 0 }
     }
@@ -413,12 +546,6 @@ async function applyOne(
 
     // ⑤ 真执行。previousReleaseId **不填** —— deploy() 自己从索引里读，
     //    重复造一遍只会制造两个可能不一致的来源。
-    const ctx: TargetContext = {
-      host,
-      root: plan.releaseRoot,
-      releaseId,
-      keep: resolved.keep,
-    }
 
     // 远端改走传输层，本机保持逐条 writeFile —— 见 makeTransferHook 的说明
     const transferHook =
@@ -436,6 +563,21 @@ async function applyOne(
             releaseId,
             remoteFacts: resolved.facts,
           })
+
+    // ⑥ nginx install：**先于 deploy**。
+    // 失败时一个字节都还没写进 confd、更没碰发布根，所以直接按该错误码退，
+    // 不跑 deploy、也不回滚（没有东西可回滚）
+    const nginxResults: NginxExecResult[] = []
+    if (nginx !== undefined) {
+      nginxResults.push(
+        await installNginx({
+          runner: resolved.runner,
+          ctx,
+          config: nginx.config,
+          onStep: (step) => logger.info('apply.nginx.install', { step: step.id, kind: step.kind, title: step.title }),
+        }),
+      )
+    }
 
     let deployed: Awaited<ReturnType<typeof deploy>>
     try {
@@ -495,6 +637,41 @@ async function applyOne(
 
     for (const w of deployed.warnings) logger.warn('apply.warning', { warning: w })
 
+    // ⑦ nginx activate：**后于 deploy**。此时 current 已指向新版本，conf 里的
+    // ${release.current} 软链正好服务新内容
+    let nginxError: { code: string; message: string; path?: string; hint?: string } | undefined
+    /** 保留原对象：退出码由 exitCodeFor 按错误码映射，只留结构化副本就映射不了 */
+    let nginxCause: unknown
+    if (nginx !== undefined) {
+      try {
+        nginxResults.push(
+          await activateNginx({
+            runner: resolved.runner,
+            ctx,
+            config: nginx.config,
+            onStep: (step) => logger.info('apply.nginx.activate', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+      } catch (err) {
+        // 执行器**已经**把 conf 还原并重新 -t 过了，所以这里不回滚 release。
+        // 退出码取这个错误的映射：发布了但 conf 没换，不能报成功
+        nginxError = errorFields(err)
+        nginxCause = err
+        logger.error('apply.nginx.failed', { code: nginxError.code })
+      }
+    }
+
+    const nginxSection = nginx === undefined ? undefined : nginxReport(nginx.confd, nginxResults)
+    // activate 的告警排在发布告警**之后**：它描述的是「版本已切、conf 没换」，
+    // 排在前面会让人以为发布本身也出了问题
+    const warnings = [
+      ...deployed.warnings,
+      ...(nginxSection?.warnings ?? []),
+      ...(nginx !== undefined && nginxError !== undefined
+        ? [activateFailedWarning(deployed.releaseId, nginx.current, nginxError)]
+        : []),
+    ]
+
     result = {
       project,
       host,
@@ -502,13 +679,20 @@ async function applyOne(
       ...(deployed.previousReleaseId !== undefined ? { previousReleaseId: deployed.previousReleaseId } : {}),
       filesWritten: deployed.filesWritten,
       rolledBack: false,
-      warnings: deployed.warnings,
+      warnings,
       steps: deployed.steps.map((s) => ({ id: s.id, kind: s.kind, ok: s.ok })),
       probeNotes: resolved.probeNotes,
       dryRun: false,
+      ...(nginxSection !== undefined ? { nginx: nginxSection } : {}),
+      ...(nginxError !== undefined ? { error: nginxError } : {}),
+    }
+    // 退出码不能因为「发布了但 conf 没换」就报成功：nginx 跑的还是旧 conf，
+    // CI 需要据此通知。取 activate 那个错误的映射
+    if (nginxCause !== undefined) {
+      exitCode = exitCodeFor(nginxCause)
     }
     logger.info('apply.done', { releaseId: deployed.releaseId, filesWritten: deployed.filesWritten })
-    return { result, exitCode: 0 }
+    return { result, exitCode }
   } catch (err) {
     // 走到这里的是装配期失败（计划/路径/权限等）：没有产生副作用，也没什么可回滚的
     logger.error('apply.aborted', { code: errorFields(err).code })

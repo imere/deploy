@@ -9,6 +9,7 @@ import {
   arr,
   bool,
   constrained,
+  literal,
   num,
   obj,
   oneOf,
@@ -19,7 +20,56 @@ import {
   withDefault,
   type Infer,
   type InputOf,
+  type JsonSchemaNode,
+  type Schema,
 } from './dsl.js'
+
+// ============================================================
+// 联合
+// ============================================================
+
+/**
+ * 对象 / 数组这类联合。
+ *
+ * 为什么不用 `oneOf`：它只认字符串枚举，对象联合无处可挂（枚举里放不进"对象或对象数组"）。
+ * 为什么不让它「逐个试、谁先过算谁的」：试错式分派要靠**异常**探测，
+ * 而两个分支都失败时报哪个错，取决于抛出顺序 —— 用户看到的是随机的措辞，
+ * 下次换个写法又变一句话。这里要求每个分支自带一个**形状判据**，判据不匹配就直接说清
+ * 期望的两种形态，错误消息与输入无关。
+ *
+ * 这是本文件内部用的最小实现，不进 dsl：它是「两个已有 schema 的组合」，
+ * 而不是第四种类型。真的需要第四种时再往上提。
+ */
+function unionOf<AOut, AIn, BOut, BIn>(
+  a: { readonly schema: Schema<AOut, AIn, false>; readonly matches: (input: unknown) => boolean; readonly shape: string },
+  b: { readonly schema: Schema<BOut, BIn, false>; readonly matches: (input: unknown) => boolean; readonly shape: string },
+): Schema<AOut | BOut, AIn | BIn, false> {
+  return {
+    kind: 'union',
+    isOptional: false,
+    acceptsUndefined: false,
+    parse(input, path) {
+      if (a.matches(input)) return a.schema.parse(input, path)
+      if (b.matches(input)) return b.schema.parse(input, path)
+      throw new DpError('CONFIG_INVALID', `期望 ${a.shape} 或 ${b.shape}，实际是 ${describe(input)}`, {
+        path,
+        hint: `两种写法都可以：${a.shape}；${b.shape}`,
+      })
+    },
+    toJsonSchema: () => ({ anyOf: [a.schema.toJsonSchema(), b.schema.toJsonSchema()] } as JsonSchemaNode),
+  }
+}
+
+function describe(input: unknown): string {
+  if (input === null) return 'null'
+  if (Array.isArray(input)) return 'array'
+  return typeof input
+}
+
+const isArray = (input: unknown): boolean => Array.isArray(input)
+const isPlainObject = (input: unknown): boolean => typeof input === 'object' && input !== null && !Array.isArray(input)
+const isFalse = (input: unknown): boolean => input === false
+
 
 // ============================================================
 // 源
@@ -104,12 +154,100 @@ export const hostSchema = obj(
 
 export const TARGET_KINDS = ['static', 'nginx', 'docker', 'systemd', 'process'] as const
 
+/**
+ * nginx 段。**只管形状与类型**，语义判定全部留给 @dp/target-nginx。
+ *
+ * `proxy.upstream` 的末尾斜杠、`locations: []`、`listen` 的修饰符这些判定在渲染层
+ * 都已经有了，还带 hint。在这里再写一遍就是两套规则各自演化，症状是「CLI 说合法、
+ * 渲染时报错」或反过来 —— 所以本段刻意不知道它们。
+ *
+ * 唯一的例外是 reload 里的**空串**：那是纯类型层看不出来的（`['']` 类型上完全合法），
+ * 而空参数会让目标机的 execve 直接失败，报错还与真正的问题无关。渲染层也会拒它，
+ * 但那要等到真部署时；配置加载就拒掉是更便宜的一处。
+ */
+const proxyTimeoutsSchema = obj(
+  {
+    connect: opt(num('connect 超时，秒')),
+    send: opt(num('send 超时，秒')),
+    read: opt(num('read 超时，秒')),
+  },
+  '反代超时，单位秒',
+)
+
+const reverseProxySchema = obj(
+  {
+    upstream: str('后端地址，如 http://127.0.0.1:8080'),
+    websocket: opt(bool('走 Upgrade/Connection 头。需要主配置里有 map $http_upgrade $connection_upgrade')),
+    timeouts: opt(proxyTimeoutsSchema),
+  },
+  '反代',
+)
+
+const locationSchema = obj(
+  {
+    path: str('location 匹配串，如 /、/api/、= /healthz、~ \\.php$'),
+    root: opt(str('相对 server 的 root 覆盖')),
+    tryFiles: opt(str('try_files 参数，如 $uri $uri/ /index.html')),
+    proxy: opt(reverseProxySchema),
+    extra: opt(arr(str('原样输出的附加指令'))),
+  },
+  '一个 location',
+)
+
+const serverBlockSchema = obj(
+  {
+    serverName: opt(arr(str('server_name。省略 = 不按域名分流，渲染成 server_name _'))),
+    listen: opt(arr(unionOf<number, number, string, string>(
+      { schema: num('端口'), matches: (v) => typeof v === 'number', shape: '数字端口' },
+      { schema: str('带修饰符的监听地址，如 "443 ssl"'), matches: (v) => typeof v === 'string', shape: '带修饰符的字符串' },
+    ))),
+    root: opt(str('静态根，通常是 ${release.current}（软链）而不是具体版本目录')),
+    index: opt(arr(str('index 指令'))),
+    locations: opt(arr(locationSchema)),
+    reverseProxy: opt(reverseProxySchema),
+    extra: opt(arr(str('原样输出的附加指令'))),
+  },
+  '一个 server 块',
+)
+
+const reloadSchema = unionOf<readonly string[], readonly string[], false, false>(
+  {
+    schema: constrained(arr(str('reload 命令的 argv')), (value, path) => {
+      for (let i = 0; i < value.length; i += 1) {
+        if (value[i] === '') {
+          throw new DpError('CONFIG_INVALID', 'reload 的参数里有空串', {
+            path: `${path}[${i}]`,
+            hint: '删掉空串。空参数会让目标机的 execve 直接失败，报错还与真正的问题无关',
+          })
+        }
+      }
+    }),
+    matches: isArray,
+    shape: 'argv 数组',
+  },
+  { schema: literal(false), matches: isFalse, shape: 'false（由外部机制重载）' },
+)
+
+export const nginxSchema = obj(
+  {
+    server: unionOf(
+      { schema: serverBlockSchema, matches: isPlainObject, shape: '单个 server 块对象' },
+      { schema: arr(serverBlockSchema), matches: isArray, shape: 'server 块数组' },
+    ),
+    filename: opt(str('confd 里的文件名，不含目录。默认 <项目名>.conf')),
+    force: opt(bool('覆盖未带 `# managed by dp` 的同名文件（仍先备份）')),
+    reload: opt(reloadSchema),
+  },
+  'nginx 目标。confd 不是这里的字段 —— 它在 target.confd，默认由实测能力推导',
+)
+
 export const targetSchema = obj(
   {
     type: prefChain(TARGET_KINDS, ['static'] as const, '目标类型，也可以是偏好链'),
     pick: withDefault(oneOf(['auto', 'fail'] as const), 'auto'),
-    confd: opt(str('conf.d 目录（nginx 目标）')),
+    confd: opt(str('conf.d 目录（nginx 目标）。不写则由实测能力推导')),
     service: opt(str('服务名（systemd / process 目标）')),
+    nginx: opt(nginxSchema),
   },
   '部署目标',
 )
@@ -234,6 +372,8 @@ export type ProjectInput = InputOf<typeof projectSchema>
 export type SourceConfig = Infer<typeof sourceSchema>
 export type ReleaseConfig = Infer<typeof releaseSchema>
 export type TargetConfig = Infer<typeof targetSchema>
+export type NginxConfig = Infer<typeof nginxSchema>
+export type NginxInput = InputOf<typeof nginxSchema>
 export type TransportConfig = Infer<typeof transportSchema>
 export type ActivationConfig = Infer<typeof activationSchema>
 export type HealthcheckConfig = Infer<typeof healthcheckSchema>
@@ -248,6 +388,7 @@ export const defineRelease = (c: InputOf<typeof releaseSchema>): ReleaseConfig =
   releaseSchema.parse(c, 'release')
 export const defineTarget = (c: InputOf<typeof targetSchema>): TargetConfig =>
   targetSchema.parse(c, 'target')
+export const defineNginx = (c: NginxInput): NginxConfig => nginxSchema.parse(c, 'nginx')
 export const defineTransport = (c: InputOf<typeof transportSchema>): TransportConfig =>
   transportSchema.parse(c, 'transport')
 export const defineActivation = (c: InputOf<typeof activationSchema>): ActivationConfig =>

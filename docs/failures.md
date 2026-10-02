@@ -124,6 +124,7 @@ service: defineService({
 | `DP.DISK.INODE_EXHAUSTED` | 预检 | ✅ | abort | `@dp/preflight` |
 | `DP.DISK.NOT_WRITABLE` | 预检 | ✅ | abort | `@dp/preflight`（**实证写入**） |
 | `DP.PERM.*` / `DP.LSM.SELINUX_*` | 预检 | ✅ | abort 或 auto-remedy | `@dp/preflight` + `@dp/lsm` |
+| `DP.PERM.CONFD_NOT_WRITABLE` | 装配 | ✅ | abort（**一个字节都没写就退**，不猜路径） | `@dp/cli`（`dp apply`，nginx 目标的 confd 推导） |
 | `DP.PORT.OCCUPIED` | 预检 | ✅ | abort（或 `portPolicy`） | `@dp/preflight` |
 | `DP.FILE.LOCKED` | 传输/激活 | ⚠️ | 见 §5 | `@dp/target-*` |
 | `DP.LOCK.HELD` | 并发 | ✅ | abort + 打印持锁者 | `@dp/core` |

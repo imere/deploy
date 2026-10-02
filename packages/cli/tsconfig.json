@@ -14,6 +14,8 @@
     { "path": "../schema" },
     { "path": "../ssh" },
     { "path": "../target-static" },
+    { "path": "../target-nginx" },
+    { "path": "../template" },
     { "path": "../transport" }
   ]
 }

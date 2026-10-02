@@ -261,6 +261,20 @@ export function renderFactsJson(facts: Facts, probeNotes: readonly string[] = []
 // Apply 渲染
 // ============================================================
 
+/** nginx 阶段的结论。字段全部来自 NginxExecResult，不另造一套** */
+export interface NginxTargetResult {
+  readonly confd: string
+  /** confd 里的目标文件（含目录） */
+  readonly file: string
+  readonly ownership?: { readonly action: string; readonly reason: string; readonly backup: boolean }
+  readonly dryRun: boolean
+  readonly reloaded: boolean
+  /** 本次在机器上没留下作用的步骤 id */
+  readonly skipped: readonly string[]
+  readonly steps: ReadonlyArray<{ id: string; kind: string; ok: boolean; skipped: boolean }>
+  readonly warnings: readonly string[]
+}
+
 /** 一个目标机的执行结果。刻意**不含** ok / command —— 那两个是信封级字段 */
 export interface ApplyTargetResult {
   readonly project: string
@@ -277,6 +291,8 @@ export interface ApplyTargetResult {
   readonly error?: { code: string; message: string; path?: string; hint?: string }
   /** 回滚本身也失败 = needsHealing 环境真的需要人工介入 */
   readonly needsHealing?: boolean
+  /** 配了 target.nginx 才有。conf 这一半的结论与 release 那一半分开记 */
+  readonly nginx?: NginxTargetResult
 }
 
 /**
@@ -311,6 +327,23 @@ export function renderApplyPretty(result: ApplyTargetResult): string {
     lines.push(`  ${step.ok ? '✓' : '✗'} [${step.kind}] ${step.id}`)
   }
   if (result.rolledBack) lines.push('  已回滚到上一版')
+  if (result.nginx !== undefined) {
+    const n = result.nginx
+    lines.push('', `nginx · ${n.file}`)
+    lines.push(`  confd:   ${n.confd}`)
+    if (n.ownership !== undefined) lines.push(`  所有权:   ${n.ownership.action} —— ${n.ownership.reason}`)
+    lines.push(`  reload:  ${n.dryRun ? '未发（--dry-run）' : n.reloaded ? '已发出' : '未发'}`)
+    for (const step of n.steps) {
+      // skipped 单独标出来：它判据是「机器上有没有留下作用」，不是「跑没跑」。
+      // 渲染成同一个 ✓ 会让 dry-run 的报告看起来像是真备份过
+      const mark = step.skipped ? '-' : step.ok ? '✓' : '✗'
+      const note = step.skipped ? '（未在机器上留下作用）' : ''
+      lines.push(`  ${mark} [${step.kind}] ${step.id}${note}`)
+    }
+    if (n.warnings.length > 0) {
+      lines.push('', 'nginx 告警', ...n.warnings.map((w) => `  ! ${w}`))
+    }
+  }
   if (result.warnings.length > 0) {
     lines.push('', '告警', ...result.warnings.map((w) => `  ! ${w}`))
   }

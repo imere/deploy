@@ -35,9 +35,15 @@ importers:
       '@dp/ssh':
         specifier: workspace:*
         version: link:../ssh
+      '@dp/target-nginx':
+        specifier: workspace:*
+        version: link:../target-nginx
       '@dp/target-static':
         specifier: workspace:*
         version: link:../target-static
+      '@dp/template':
+        specifier: workspace:*
+        version: link:../template
       '@dp/transport':
         specifier: workspace:*
         version: link:../transport

@@ -24,6 +24,8 @@
     "@dp/schema": "workspace:*",
     "@dp/ssh": "workspace:*",
     "@dp/target-static": "workspace:*",
+    "@dp/target-nginx": "workspace:*",
+    "@dp/template": "workspace:*",
     "@dp/transport": "workspace:*"
   },
   "devDependencies": {

@@ -212,7 +212,18 @@ export async function probeLocalFacts(options: ProbeOptions = {}): Promise<Facts
 
   // 候选按平台分流：/srv、/opt 这类 POSIX 目录在 Windows 上会被解析成 C:\srv 之类
   // 根本不存在的位置，探它们既没意义又拖慢启动（每次探测都是一次真实建文件+删除）。
-  const posixDirs = ['/srv', '/opt', '/usr/local', '/var/lib', '/var/www', '/etc/systemd/system']
+  // `/etc/nginx/conf.d` 在表里的理由：@dp/ssh 的 DEFAULT_WRITE_PATHS 有它，nginx 目标
+  // 的 confd 推导只读 `canWrite` —— 两份 facts 来源的候选不一致，会让同一份配置在
+  // 远端能推出来、在本机推不出来（表现为「ssh 目标成功、local 目标报权限错」）。
+  const posixDirs = [
+    '/srv',
+    '/opt',
+    '/usr/local',
+    '/var/lib',
+    '/var/www',
+    '/etc/systemd/system',
+    '/etc/nginx/conf.d',
+  ]
   const candidates =
     options.writeProbePaths ??
     [

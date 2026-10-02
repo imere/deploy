@@ -25,6 +25,8 @@ export interface JsonSchemaNode {
   default?: unknown
   description?: string
   additionalProperties?: boolean | JsonSchemaNode
+  /** 联合：任一分支成立即可 */
+  anyOf?: readonly JsonSchemaNode[]
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- DSL 必须擦除具体类型才能做形状推导 */
