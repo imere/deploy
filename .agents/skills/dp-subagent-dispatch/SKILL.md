@@ -87,6 +87,8 @@ node --test "packages/*/build/**/*.test.js"   # fail 必须为 0
 |---|---|
 | `The run failed: terminated. Retry after the connection recovers.` | 运行时掉线，非代码问题。盘点残留产物 → `--continue` 续跑 |
 | `mcode exec cancelled` + `safe-delete ... ETIMEDOUT` | 同上；清理临时目录时卡住拖垮了进程 |
+| `Runtime shutdown did not complete cleanly` + 沙箱拒写 `C:\Users\<用户名>\.minimax\**` | 它在写自己的会话/日志目录被拦。**先 `git status` 盘点**：它很可能已经把源码写完在盘上了（实测一次：汇报文件没落盘，但 `executor.ts` 与测试都在）。盘点完再决定是否 `--continue`，别看到 failed 就重派（会撞车）。派发时加 `dangerouslyDisableSandbox: true` 可避开 |
+| 全量 `pnpm test` 突然冒出一批跨包失败（`@dp/local` 的 exec、`@dp/ssh` driver、用到 `F:\Temp` 的用例） | **先看是不是沙箱**：它会拦临时目录写入与 build 产物读取，还会让真起子进程的用例单个跑 80~130 秒。实测 21 个失败全是环境造成，关掉沙箱复跑即 0 fail。**不要去改代码** |
 | 单次跑 15 分钟以上 | **拆小**：先源码、再测试、再收口。每轮目标 ≤ 10 分钟 |
 | 一次派两个子代理 | **绝对不要**。会同时改 `ports/src/index.ts`、并发 `tsc -b` 打架 |
 | 同一个包先后派两个（前一个还没停） | 更糟：产出**两套设计叠加的半成品**（两份 config 加载模块、孤儿文件、编译错）。**派发前先确认没有在跑的同包任务**；发现撞车就先停掉后发的那个，再派一个"收敛"轮：指定保留哪套、删掉孤儿模块对 |
