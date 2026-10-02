@@ -208,10 +208,19 @@ export function obj<S extends Shape>(
   }
 }
 
-export function record<T>(
-  value: Schema<T>,
+/**
+ * 泛型必须把三个参数都写出来。
+ *
+ * 写成 `record<T>(value: Schema<T>)` 时，`Schema<T>` 等价于 `Schema<T, T, false>`，
+ * 于是 T 同时对应到 TOut 与 TIn 两个位置。传入 `obj({...})` 这种 TOut ≠ TIn 的
+ * schema 时 TS 会挑其中一个 —— 实测挑了 **TIn（输入形状）**，于是
+ * `Config.projects.web.release.keep` 明明有默认值却被推导成可能 undefined，
+ * 下游只得写一堆 `?? 默认值` 来绕。TOut / TIn 分开声明才能把归一化后的形状传出去。
+ */
+export function record<TOut, TIn, IsOptional extends boolean>(
+  value: Schema<TOut, TIn, IsOptional>,
   description?: string,
-): Schema<Readonly<Record<string, T>>> {
+): Schema<Readonly<Record<string, TOut>>, Readonly<Record<string, TIn>>> {
   return {
     kind: 'record',
     isOptional: false,
@@ -221,7 +230,7 @@ export function record<T>(
       if (input === null || typeof input !== 'object' || Array.isArray(input)) {
         fail(path, `期望对象，实际是 ${typeName(input)}`)
       }
-      const out: Record<string, T> = {}
+      const out: Record<string, TOut> = {}
       for (const [key, rawValue] of Object.entries(input as Record<string, unknown>)) {
         out[key] = value.parse(rawValue, `${path}.${key}`)
       }

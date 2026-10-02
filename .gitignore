@@ -38,3 +38,6 @@ id_ed25519.pub
 # Git Bash 下 ssh UserKnownHostsFile=/dev/null 产生的副作用文件
 NUL
 nul
+
+# 写权限实证探测的临时文件（正常会被自己删掉；删除被拦截时别让它进版本库）
+.dp-w-*

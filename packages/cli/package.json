@@ -22,7 +22,8 @@
     "@dp/local": "workspace:*",
     "@dp/log": "workspace:*",
     "@dp/schema": "workspace:*",
-    "@dp/ssh": "workspace:*"
+    "@dp/ssh": "workspace:*",
+    "@dp/target-static": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.9.0"

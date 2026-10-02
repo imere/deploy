@@ -171,6 +171,42 @@ describe('config-file · 校验', () => {
   })
 })
 
+describe('config-file · release.root 归一化', () => {
+  it('相对路径按 cwd 解析成绝对路径（探测的 key 与查询的 key 必须一致）', async () => {
+    await withTempDir(async (dir) => {
+      const cfg = {
+        hosts: { local: { local: true } },
+        projects: { web: { source: { root: './dist' }, release: { root: './srv' } } },
+      }
+      await fs.writeFile(join(dir, 'deploy.config.json'), JSON.stringify(cfg), 'utf8')
+      const loaded = await loadConfig({ cwd: dir, env: {} })
+      const root = loaded.config.projects['web']?.release?.root
+      assert.equal(root, join(dir, 'srv'), '相对 release.root 必须是绝对路径')
+    })
+  })
+
+  it('绝对路径原样保留', async () => {
+    await withTempDir(async (dir) => {
+      const abs = join(dir, 'abs-srv')
+      const cfg = {
+        hosts: { local: { local: true } },
+        projects: { web: { source: { root: './dist' }, release: { root: abs } } },
+      }
+      await fs.writeFile(join(dir, 'deploy.config.json'), JSON.stringify(cfg), 'utf8')
+      const loaded = await loadConfig({ cwd: dir, env: {} })
+      assert.equal(loaded.config.projects['web']?.release?.root, abs)
+    })
+  })
+
+  it('没写 release.root 时不凭空造一个', async () => {
+    await withTempDir(async (dir) => {
+      await fs.writeFile(join(dir, 'deploy.config.json'), JSON.stringify(VALID), 'utf8')
+      const loaded = await loadConfig({ cwd: dir, env: {} })
+      assert.equal(loaded.config.projects['web']?.release?.root, undefined)
+    })
+  })
+})
+
 describe('config-file · 端到端发现（真实 IO）', () => {
   it('自动发现 + 校验成功', async () => {
     await withTempDir(async (dir) => {

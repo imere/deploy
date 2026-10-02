@@ -178,11 +178,19 @@ describe('cli · 退出码与错误输出（走 main()，不起子进程）', ()
     assert.match(err.join(''), /nope\.json/)
   })
 
-  it('未实现的命令明确拒绝，不静默成功', async () => {
-    const lines: string[] = []
-    const code = await main(['apply'], { write: (t) => lines.push(t) })
-    assert.notEqual(code, EXIT_OK)
-    assert.match(lines.join(''), /第二回合/)
+  it('apply --dry-run 真的能跑通：子进程退出 0 且不落盘', async () => {
+    await withWorkspace(async (dir) => {
+      const r = await runBin(['apply', '--dry-run', '--json'], dir)
+      assert.equal(r.code, EXIT_OK, `stderr: ${r.stderr}`)
+      const parsed = JSON.parse(r.stdout) as { ok: boolean; command: string; dryRun: boolean; filesWritten: number }
+      assert.equal(parsed.ok, true)
+      assert.equal(parsed.command, 'apply')
+      assert.equal(parsed.dryRun, true)
+      assert.equal(parsed.filesWritten, 0)
+      // 干跑必须是零副作用：源目录与工作区都不能多出任何东西
+      assert.deepEqual((await fs.readdir(join(dir, 'dist'))).sort(), ['assets', 'index.html'])
+      assert.deepEqual((await fs.readdir(dir)).sort(), ['deploy.config.json', 'dist'])
+    })
   })
 
   it('没有任何子命令时打印根帮助并成功退出', async () => {

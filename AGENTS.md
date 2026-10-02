@@ -40,7 +40,7 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：esbuild 的平台二进制�
 ## 目录
 
 ```
-packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static 已实现）
+packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / cli 已实现）
 docs/           设计文档（★ 优先读：spikes.md failures.md decisions.md privilege.md）
 .agents/skills/ 可复用的操作流程（dp-spike-env / dp-subagent-dispatch）
 .tmp/           临时物（已 gitignore）

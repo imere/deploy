@@ -12,6 +12,7 @@
     { "path": "../local" },
     { "path": "../log" },
     { "path": "../schema" },
-    { "path": "../ssh" }
+    { "path": "../ssh" },
+    { "path": "../target-static" }
   ]
 }

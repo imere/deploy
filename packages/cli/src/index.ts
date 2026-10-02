@@ -29,6 +29,7 @@ import {
 } from './output.js'
 import { createContext, parseLogFormat, parseLogLevel, type ResolvedFlags, type RunContext } from './run.js'
 import { runPlan } from './commands/plan.js'
+import { runApply } from './commands/apply.js'
 import { runFacts } from './commands/facts.js'
 import { runSchema } from './commands/schema.js'
 
@@ -82,6 +83,13 @@ export function resolveFlags(parsed: ParsedArgs): ResolvedFlags {
 }
 
 const PLAN_FLAGS = ['config', 'env', 'host', 'project', 'all', 'facts', 'json', 'dry-run', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
+/**
+ * apply 的开关集合与 plan 一致 —— **刻意不给 `yes`**。
+ * 铁律 0 不许交互，也就意味着没有「人看过提示再敲 y」这个环节；
+ * 加一个确认开关只会让人误以为「有确认=更安全」，实际上它只是多一次能忘记的输入。
+ * 想要不落盘的预览，`--dry-run` 已经足够。
+ */
+const APPLY_FLAGS = ['config', 'env', 'host', 'project', 'all', 'facts', 'json', 'dry-run', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
 const FACTS_FLAGS = ['config', 'env', 'host', 'project', 'all', 'json', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
 const SCHEMA_FLAGS = ['out', 'json', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
 
@@ -93,6 +101,8 @@ function allowedFor(command: string): readonly string[] {
   switch (command) {
     case 'plan':
       return PLAN_FLAGS
+    case 'apply':
+      return APPLY_FLAGS
     case 'facts':
       return FACTS_FLAGS
     case 'schema':
@@ -174,6 +184,8 @@ export async function main(argv: readonly string[], options: MainOptions = {}): 
     switch (effective) {
       case 'plan':
         return await runPlan(context, flags)
+      case 'apply':
+        return await runApply(context, flags)
       case 'facts':
         return await runFacts(context, flags)
       case 'schema':

@@ -20,21 +20,28 @@ import { isUsageError } from './args.js'
  * 退出码以 docs/transaction.md §"exit code 要区分" 为准：
  * `0` 成功 / `1` 部署失败但已完整回滚 / `2` 验证失败且已回滚 / `3` 配置错 / `4` 环境缺依赖。
  *
- * 本包只做**只读**命令，所以 tx 的 1 与 2（部署/验收类）本回合不会由我们产生。
+ * 本包最早的三个命令都是只读的，所以 tx 的 1 与 2（部署/验收类）一度用不上。
  * 剩下没被文档覆盖的部分按任务约定补：用法错 = 2，与 tx 的 2 同码
  * （对 CI 而言都是「你给的东西不对，重跑前先改输入」），配置错 = 3，缺依赖 = 4。
  * 未知错误 = 1：不编造新码。
+ *
+ * 注意 2 号码承载了两种语义（用法错 / 验证失败）。这是刻意的：CI 要能对
+ * 「验证失败且已回滚」单独发通知，而**区分它们的信号是 JSON 里的
+ * `error.code`（DP.VERIFY.FAILED），不是退出码** —— 所以 `--json` 下必须
+ * 看 code，别只看 exit code。
  */
 export const EXIT_OK = 0
 export const EXIT_FAILURE = 1
 export const EXIT_USAGE = 2
+/** 验证失败且已回滚。与 EXIT_USAGE 同码，见上方说明 */
+export const EXIT_VERIFY_FAILED = 2
 export const EXIT_CONFIG = 3
 export const EXIT_MISSING_DEPENDENCY = 4
 
 export const EXIT_CODE_ROWS: readonly (readonly [number, string])[] = [
   [EXIT_OK, '成功'],
   [EXIT_FAILURE, '失败（未知错误，或需要 --verbose 看细节）'],
-  [EXIT_USAGE, '用法/参数错：未知选项、未知命令、目标有多个却没指定'],
+  [EXIT_USAGE, '用法/参数错，或验证失败且已回滚（用 --json 看 error.code 区分）'],
   [EXIT_CONFIG, '配置错：找不到 / 有冲突 / 校验不过 / source 写法有歧义'],
   [EXIT_MISSING_DEPENDENCY, '环境缺依赖：ssh 驱动不可用、工具缺失、传输链全失败'],
 ]
@@ -66,6 +73,10 @@ export function exitCodeFor(err: unknown): number {
       case 'DP.PREF.UNSUPPORTED':
       case 'DP.LINK.UNAVAILABLE':
         return EXIT_MISSING_DEPENDENCY
+      // 验证失败**且已回滚**：CI 靠这个码单独发通知，所以它不能和「部署失败
+      // 但已完整回滚」的 1 混在一起
+      case 'DP.VERIFY.FAILED':
+        return EXIT_VERIFY_FAILED
       default:
         return EXIT_FAILURE
     }
@@ -244,4 +255,71 @@ export function renderFactsPretty(facts: Facts, probeNotes: readonly string[] = 
 
 export function renderFactsJson(facts: Facts, probeNotes: readonly string[] = []): string {
   return JSON.stringify({ ok: true, command: 'facts', facts, probeNotes }, null, 2)
+}
+
+// ============================================================
+// Apply 渲染
+// ============================================================
+
+/** 一个目标机的执行结果。刻意**不含** ok / command —— 那两个是信封级字段 */
+export interface ApplyTargetResult {
+  readonly project: string
+  readonly host: string
+  readonly releaseId: string
+  readonly previousReleaseId?: string
+  readonly filesWritten: number
+  readonly rolledBack: boolean
+  readonly warnings: readonly string[]
+  readonly steps: ReadonlyArray<{ id: string; kind: string; ok: boolean }>
+  readonly probeNotes: readonly string[]
+  readonly dryRun: boolean
+  /** 失败时非空。JSON 输出里必须带它，否则 CI 拿不到失败原因 */
+  readonly error?: { code: string; message: string; path?: string; hint?: string }
+  /** 回滚本身也失败 = needsHealing 环境真的需要人工介入 */
+  readonly needsHealing?: boolean
+}
+
+/**
+ * apply 的 JSON 结果。**永远是恰好一个 JSON 文档**（铁律：stdout 只有 JSON）。
+ *
+ * 单目标时把字段平铺到顶层：最常见的形状，也省掉 agent 侧的一层解包；
+ * 多目标时平铺不了，就统一读 `results`。规则是确定的、只看数组长度，
+ * 调用方不需要猜。
+ */
+export function renderApplyJson(results: readonly ApplyTargetResult[]): string {
+  const single = results.length === 1 ? results[0] : undefined
+  return JSON.stringify(
+    {
+      ok: results.every((r) => r.error === undefined),
+      command: 'apply',
+      ...(single !== undefined ? single : {}),
+      results,
+    },
+    null,
+    2,
+  )
+}
+
+export function renderApplyPretty(result: ApplyTargetResult): string {
+  const head = result.dryRun
+    ? `apply --dry-run · ${result.project} → ${result.host}（未写入任何文件）`
+    : `apply · ${result.project} → ${result.host}`
+  const lines = [head, `  releaseId: ${result.releaseId}`]
+  if (result.previousReleaseId !== undefined) lines.push(`  上一版:     ${result.previousReleaseId}`)
+  if (!result.dryRun) lines.push(`  写入文件:   ${result.filesWritten}`)
+  for (const step of result.steps) {
+    lines.push(`  ${step.ok ? '✓' : '✗'} [${step.kind}] ${step.id}`)
+  }
+  if (result.rolledBack) lines.push('  已回滚到上一版')
+  if (result.warnings.length > 0) {
+    lines.push('', '告警', ...result.warnings.map((w) => `  ! ${w}`))
+  }
+  if (result.probeNotes.length > 0) {
+    lines.push('', '探测说明', ...result.probeNotes.map((n) => `  - ${n}`))
+  }
+  if (result.error !== undefined) {
+    lines.push('', `错误 [${result.error.code}]：${result.error.message}`)
+    if (result.error.hint !== undefined) lines.push(`  下一步：${result.error.hint}`)
+  }
+  return lines.join('\n')
 }

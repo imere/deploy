@@ -11,7 +11,7 @@
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { existsSync, promises as fs } from 'node:fs'
-import { DpError, type Facts, type Platform } from '@dp/ports'
+import { DpError, type Facts, type Platform, type Runner } from '@dp/ports'
 import type { HostConfig } from '@dp/schema'
 import type { Logger } from '@dp/log'
 import { probeLocalFacts, probeWritable } from '@dp/local'
@@ -65,6 +65,18 @@ export interface FactsResult {
   readonly probeNotes: readonly string[]
   /** 有连接需要关时非空；调用方必须在 finally 里调它 */
   readonly close: (() => Promise<void>) | undefined
+  /**
+   * 已连上的那台机器的 Runner —— **只有 ssh 路径有**。
+   *
+   * 为什么单独交出来而不是让 apply 自己再连一次：探测要跑十几条命令，
+   * 重复连接既慢又可能因为主机密钥/瞬时抖动而第二次失败。复用同一条连接
+   * 也保证了「探测看到的机器」与「写入的机器」物理上就是同一台。
+   *
+   * 刻意保持可选且可缺省：local 路径**不**填（Runner 由调用方按需用
+   * createLocalRunner(facts) 现造，不需要 IO），plan/facts 两条只读命令也
+   * 完全不读这个字段 —— 所以既有调用方一行都不用改。
+   */
+  readonly runner?: Runner
 }
 
 /** `user@host[:port]` —— 纯解析，不猜端口（SSH 的默认端口由驱动自己决定） */
@@ -207,6 +219,8 @@ export async function acquireFacts(request: FactsRequest): Promise<FactsResult> 
     facts: { ...connected.facts, host: request.hostId },
     probeNotes: connected.probeNotes,
     close: () => connected.close(),
+    // 同一条连接上的 Runner 交给调用方复用，别让人为了写文件再连一次
+    runner: connected.runner,
   }
 }
 

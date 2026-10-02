@@ -53,7 +53,7 @@ describe('help · 每个命令都够用（decisions.md §18）', () => {
   it('未实现的命令也给出可执行的下一步，而不是空帮助', () => {
     for (const doc of COMMANDS.filter((c) => !c.implemented)) {
       const text = notImplementedMessage(doc)
-      assert.match(text, /第二回合/, doc.name)
+      assert.match(text, /后续回合/, doc.name)
       assert.match(text, /dp plan/, `${doc.name} 应指向 plan`)
     }
   })

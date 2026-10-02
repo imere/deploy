@@ -11,17 +11,9 @@ import { listSourceEntries, normalizeSourceSpec } from '@dp/local'
 import type { LoadedConfig } from '../config-file.js'
 import { acquireFacts, readFactsFile } from '../facts-source.js'
 import { renderPlanJson, renderPlanPretty } from '../output.js'
+import { previewReleaseId } from '../release-id.js'
 import { selectTargets } from '../targets.js'
 import type { PlanOptions, ResolvedFlags, RunContext } from '../run.js'
-
-/**
- * releaseId 预览。**只读命令不许真的去目标机上建 release 目录**，
- * 所以这里只算一个「如果真部署会是哪个 id」的预览值，并明确标注是 preview。
- */
-function previewReleaseId(name: string, now: Date): string {
-  const stamp = now.toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-')
-  return `preview-${name}-${stamp}`
-}
 
 export async function runPlan(context: RunContext, flags: ResolvedFlags): Promise<number> {
   const started = new Date()

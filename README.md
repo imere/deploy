@@ -28,10 +28,19 @@ dp rollback        # 回到上一个版本
 | `@dp/target-static` | ✅ | 静态投放：releases/\<id\> + current 原子切换 + keep N + 自动回退与 rollback |
 | `@dp/log` | ✅ | 结构化日志：JSONL 输出、出口统一脱敏（词段匹配 key + 值模式）、字段对齐 OTel、零运行时依赖 |
 | `@dp/ssh` | ✅ | 远端 Runner：驱动偏好链 `native-ssh` → `ssh2`、主机密钥四态、SSH_ASKPASS 免 sshpass、能力实证探测 |
+| `@dp/cli` | ✅ | 命令行：`plan` / `facts` / `schema`（只读）+ 配置发现与冲突检测 + 退出码契约 |
+
+命令行（只读三件套已可用）：
+
+```bash
+dp plan --json          # 干跑：布局 / 发布根候选（含实证可写性）/ 每一步与它的撤销项
+dp facts --json         # 目标机事实与能力（全部实测，不靠 uid 推断）
+dp schema               # 导出 JSON Schema，写进编辑器就有补全与校验
+```
 
 纵向链路已接通：**配置 → `makePlan()` → 本机真实部署 → 版本号切换 → 回滚**（`packages/core/src/slice.test.ts`）。
 
-尚未实现：`@dp/transport`（rsync / tar-ssh / sftp / scp 协商与**多跳**）、`@dp/cli`、`@dp/template`、`@dp/target-nginx`、`@dp/target-docker`。
+尚未实现：`dp apply` / `dp rollback` 命令（底层 `@dp/target-static` 已具备，只差 CLI 接线）、`@dp/transport`（rsync / tar-ssh / sftp / scp 协商与**多跳**）、`@dp/template`、`@dp/target-nginx`、`@dp/target-docker`。
 `@dp/ssh` 当前是**单跳**（`hops` 非空会显式报错），多跳降级链 `direct-tcpip → nc → ssh-relay` 随 `@dp/transport` 一起做。
 
 ```bash
@@ -51,6 +60,7 @@ packages/
   target-static/静态投放目标
   log/          结构化日志（JSONL + 出口脱敏）
   ssh/          远端 Runner（驱动偏好链 · 主机密钥 · 能力实证）
+  cli/          命令行：配置发现 · plan / facts / schema · 退出码
 docs/
   diagrams.md    ★ 图集：全景 / 分层 / 数据流 / 状态机 / 各决策链（结构与流程以这里为准）
   DESIGN.md     总体设计：分层、管线、release 布局、并发隔离、扩展点、安全、里程碑

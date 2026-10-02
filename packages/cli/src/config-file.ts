@@ -12,7 +12,7 @@ import { existsSync, promises as fs } from 'node:fs'
 import { dirname, isAbsolute, join, parse as parsePath, resolve as resolvePath } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { DpError } from '@dp/ports'
-import { configSchema, type Config } from '@dp/schema'
+import { configSchema, type Config, type ProjectConfig } from '@dp/schema'
 import { CliUsageError } from './args.js'
 
 /** 自动发现的文件名，顺序即优先级（ts > js > json：前者能写逻辑，后者最通用） */
@@ -271,7 +271,39 @@ export async function loadConfig(options: LoadConfigOptions): Promise<LoadedConf
   if (!existsSync(location.path)) throw notFoundError(options.cwd)
 
   const raw = await loadConfigFile(location.path)
-  return { config: validateConfig(raw, location.path), path: location.path, source: location.source }
+  return {
+    config: withAbsoluteReleaseRoots(validateConfig(raw, location.path), options.cwd),
+    path: location.path,
+    source: location.source,
+  }
+}
+
+/**
+ * 把 `release.root` 归一化成绝对路径。
+ *
+ * 两条理由，都是踩出来的：
+ * ① **探测的 key 必须与查询的 key 是同一个字符串**。能力探测往
+ *    `canWrite[<root>]` 里写结论，`pickReleaseRoot` 又按 `project.release.root`
+ *    去查它。一个写相对、一个查绝对（或反过来）就会得出「不可写」这种
+ *    莫名其妙的结论 —— 而实际上目录好得很。
+ * ② **打印出来的发布根必须是能直接 cd 进去的**。`./srv` 出现在日志和 JSON 里，
+ *    读者没法知道它相对的是哪儿。
+ *
+ * 只动 release.root：`source.root` 的相对语义由 `@dp/local` 的
+ * normalizeSourceSpec 按 cwd 解析（构建产物本来就该相对你跑命令的地方）。
+ */
+function withAbsoluteReleaseRoots(config: Config, cwd: string): Config {
+  const projects: Record<string, ProjectConfig> = {}
+  for (const [name, project] of Object.entries(config.projects)) {
+    // 用局部变量承接：直接写 `project.release?.root === undefined` 时 TS 不会把
+    // project.release 收窄成非 undefined，展开出来的 keep / switchStrategy 就都变成可选
+    const release = project.release
+    projects[name] =
+      release?.root === undefined
+        ? project
+        : { ...project, release: { ...release, root: absolutize(release.root, cwd) } }
+  }
+  return { ...config, projects }
 }
 
 /** `--config` 的相对路径解析：只在 index.ts 用，避免各处各写一遍 isAbsolute 判断 */

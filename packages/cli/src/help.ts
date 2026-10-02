@@ -21,7 +21,7 @@ export interface CommandDoc {
   readonly related: readonly string[]
   /** 这个命令最可能撞到的错误 → 怎么修 */
   readonly commonErrors: readonly (readonly [string, string])[]
-  /** 第二回合才实现 */
+  /** 后续回合才实现 */
   readonly implemented: boolean
 }
 
@@ -106,17 +106,31 @@ export const COMMANDS: readonly CommandDoc[] = [
   },
   {
     name: 'apply',
-    summary: '真实部署（第二回合实现）',
-    usage: 'dp apply [--config <path>] [--host <id>]',
-    flags: [],
-    examples: ['dp apply --project web --host local'],
-    related: ['plan', 'rollback'],
-    commonErrors: [['', '先跑 `dp plan --project web --host local` 看清将要发生什么']],
-    implemented: false,
+    summary: '真实部署：写入 releases/<id> 并原子切换 current。默认真执行',
+    usage: 'dp apply [--config <path>] [--env <name>] [--project <name>] [--host <id>] [--all] [--facts <file>] [--dry-run] [--json]',
+    flags: [
+      ['--dry-run', '只算不写：打印将要执行的步骤，一个字节都不落盘，退出 0'],
+      ['--project <name>', '只部署这一个项目'],
+      ['--host <id>', '只部署这一台主机'],
+      ['--all', '所有项目都部署（不能与 --host 同用）'],
+      ['--facts <file>', '复用存下来的 Facts，跳过真实探测（**仅限 local 主机**：远端写入必须有真连接）'],
+    ],
+    examples: [
+      'dp apply --project web --host local',
+      'dp apply --project web --host local --dry-run',
+      'dp apply --config ./deploy/prod.json --env prod --host web-01 --json',
+    ],
+    related: ['plan', 'facts', 'rollback'],
+    commonErrors: [
+      ['DP.SOURCE.EMPTY', 'source 枚举结果为空；先构建。注意 "./dist" 与 "./dist/**" 的区别'],
+      ['DP.PATH.NOT_WRITABLE', '发布根建不出来；用 release.root 显式指定一个可写目录'],
+      ['DP.VERIFY.FAILED', '健康检查未通过，**已自动回退**到上一版；坏版本留在 releases/<id> 待查。退出码 2'],
+    ],
+    implemented: true,
   },
   {
     name: 'rollback',
-    summary: '回滚到上一个 release（第二回合实现）',
+    summary: '回滚到上一个 release（后续回合实现）',
     usage: 'dp rollback [--config <path>] [--host <id>]',
     flags: [],
     examples: ['dp rollback --host local'],
@@ -126,7 +140,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   },
   {
     name: 'verify',
-    summary: '只跑健康检查（第二回合实现）',
+    summary: '只跑健康检查（后续回合实现）',
     usage: 'dp verify [--config <path>] [--host <id>]',
     flags: [],
     examples: ['dp verify --host local'],
@@ -136,7 +150,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   },
   {
     name: 'status',
-    summary: '查看目标机当前 release 状态（第二回合实现）',
+    summary: '查看目标机当前 release 状态（后续回合实现）',
     usage: 'dp status [--config <path>] [--host <id>]',
     flags: [],
     examples: ['dp status --host local'],
@@ -208,7 +222,7 @@ export function rootHelp(version: string): string {
     '命令（已实现）',
     ...renderTable(done.map((c) => [c.name, c.summary] as const)),
     '',
-    '命令（第二回合接入，现在会明确拒绝而不是静默什么都不做）',
+    '命令（后续回合接入，现在会明确拒绝而不是静默什么都不做）',
     ...renderTable(todo.map((c) => [c.name, c.summary] as const)),
     '',
     '全局开关',
@@ -269,7 +283,7 @@ export function unknownCommandMessage(name: string): string {
 
 export function notImplementedMessage(doc: CommandDoc): string {
   return [
-    `dp ${doc.name} 还没接入（第二回合实现）。`,
+    `dp ${doc.name} 还没接入（后续回合实现）。`,
     '本回合这条命令会打印这句并以退出码 1 结束 —— 不会静默什么都不做，',
     '因为「静默成功」是自动化里最难查的一类故障。',
     '现在能做的：dp plan --host <id> —— 先看清将要执行哪些步骤。',
