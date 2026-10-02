@@ -32,6 +32,9 @@ import type { ApplyDeps } from './deps.js'
 import { runPlan } from './commands/plan.js'
 import { runApply } from './commands/apply.js'
 import { runFacts } from './commands/facts.js'
+import { runStatus } from './commands/status.js'
+import { runVerify } from './commands/verify.js'
+import { runRollback } from './commands/rollback.js'
 import { runSchema } from './commands/schema.js'
 
 export const VERSION: string = readVersion()
@@ -95,6 +98,18 @@ const FACTS_FLAGS = ['config', 'env', 'host', 'project', 'all', 'json', 'log-for
 const SCHEMA_FLAGS = ['out', 'json', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
 
 /**
+ * status / verify 的开关集合。**不给 `facts`**：它们需要一个 Runner 才能读索引，
+ * 而 --facts 只对 local 主机成立（远端写入必须有真连接）。给了它只会让人
+ * 以为「离线查状态」是支持的。
+ */
+const READONLY_FLAGS = ['config', 'env', 'host', 'project', 'all', 'json', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
+/**
+ * rollback 同样不给 `facts`；也不给 `dry-run` —— 回滚要么做要么不做，
+ * 没有「演练回滚」这种半状态。
+ */
+const ROLLBACK_FLAGS = ['config', 'env', 'host', 'project', 'all', 'json', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
+
+/**
  * `help` 的位置参数有两种可能：`dp help plan`（第 0 个位置参数是命令名）与
  * `dp plan --help`（无）。所以 help 的参数校验要放到解析之后单独做。
  */
@@ -106,6 +121,12 @@ function allowedFor(command: string): readonly string[] {
       return APPLY_FLAGS
     case 'facts':
       return FACTS_FLAGS
+    case 'status':
+      return READONLY_FLAGS
+    case 'verify':
+      return READONLY_FLAGS
+    case 'rollback':
+      return ROLLBACK_FLAGS
     case 'schema':
       return SCHEMA_FLAGS
     case 'help':
@@ -192,6 +213,12 @@ export async function main(argv: readonly string[], options: MainOptions = {}): 
         return await runApply(context, flags)
       case 'facts':
         return await runFacts(context, flags)
+      case 'status':
+        return await runStatus(context, flags)
+      case 'verify':
+        return await runVerify(context, flags)
+      case 'rollback':
+        return await runRollback(context, flags)
       case 'schema':
         return await runSchema(context, flags)
       default:

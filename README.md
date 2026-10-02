@@ -43,6 +43,9 @@ dp facts --json         # 目标机事实与能力（全部实测，不靠 uid �
 dp schema               # 导出 JSON Schema，写进编辑器就有补全与校验
 dp apply --dry-run      # 只算不写；去掉 --dry-run 就是真部署
 dp apply --json         # 真部署：写 releases/<id> → 原子切 current → 健康检查 → 保留 N 版
+dp status --json        # 当前版本 / 上一版 / 健康与否（只读）
+dp verify --json        # 只跑健康检查，不通过退 2（CI 用）
+dp rollback --json      # 切回上一版并复查；只切换，不删任何版本
 ```
 
 `apply` 失败时会自动回滚：健康检查不过退 **2**（已回滚），装配期错误退 **3**，环境缺依赖退 **4**，
@@ -50,7 +53,19 @@ dp apply --json         # 真部署：写 releases/<id> → 原子切 current �
 
 纵向链路已接通：**配置 → `makePlan()` → 本机真实部署 → 版本号切换 → 回滚**（`packages/core/src/slice.test.ts`）。
 
-尚未实现：`dp rollback` / `verify` / `status` 命令（底层 `@dp/target-static` 已具备，只差 CLI 接线）、`@dp/template`、`@dp/target-nginx`、`@dp/target-docker`。
+尚未实现：`@dp/template`、`@dp/target-nginx`、`@dp/target-docker`（以及 `dp deploy` 这个「什么都不写也能用」的一键入口）。
+
+三条运维命令已接线，语义刻意分开：
+
+```bash
+dp status  --json   # 报告事实：当前版本 / 上一版 / 共几版 / 健康与否。查到坏消息也退出 0（零副作用）
+dp verify  --json   # CI 的闸：只验当前 current，不通过退 2
+dp rollback --json  # 切回上一版，然后**再验一次**；新版本不健康就 needsHealing + 退 2，不假装成功
+```
+
+`rollback` 只切换、不清理（删版本是 `apply` 里 prune 的事：上一版是被保护的版本，
+把清理混进回滚，一次失败的回滚就可能顺手毁掉唯一的退路）。它也**不接受 `--dry-run`** ——
+回滚要么做要么不做，「演练回滚」本身就是切一次。
 
 多跳：**argv 层已具备，配置层未开放**。`@dp/transport` 的 rsh 能构造 `-J a,b`（多跳）与
 `ProxyCommand` 两种形态，但配置里没有 `hops` 字段、`@dp/ssh` 的 `connect()` 对非空 `hops`

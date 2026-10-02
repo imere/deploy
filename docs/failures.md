@@ -127,6 +127,7 @@ service: defineService({
 | `DP.PORT.OCCUPIED` | 预检 | ✅ | abort（或 `portPolicy`） | `@dp/preflight` |
 | `DP.FILE.LOCKED` | 传输/激活 | ⚠️ | 见 §5 | `@dp/target-*` |
 | `DP.LOCK.HELD` | 并发 | ✅ | abort + 打印持锁者 | `@dp/core` |
+| `DP.STATE.INCONSISTENT` | 运行期 | ✅ | abort + 打印索引现状（**不**静默改动 current） | `@dp/cli`（`dp rollback`） |
 | `DP.TRANSFER.INTERRUPTED` | 传输 | ❌ | 幂等重试 → abort | `@dp/transfer` |
 | `DP.TRANSFER.CHECKSUM_MISMATCH` | 传输 | ❌ | abort（staging 作废） | `@dp/transfer` |
 | `DP.ACTIVATE.START_FAILED` | 激活 | ❌ | 回滚到上一版 | `@dp/target-service` |

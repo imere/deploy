@@ -402,3 +402,42 @@ export const staticTarget: Target<StaticTargetConfig> = {
     ]
   },
 }
+
+// ------------------------------------------------------------
+// 只读观测 —— status / verify 的数据来源
+// ------------------------------------------------------------
+
+export interface ReleaseState {
+  /** 索引里的当前版本；没部署过为 undefined */
+  readonly current?: string
+  /** current 在 releases 里的前一个；没有为 undefined */
+  readonly previous?: string
+  /** 索引里的版本列表（老的在前） */
+  readonly releases: readonly string[]
+  /** 切换历史，每项是 [新版本, 旧版本] */
+  readonly history: readonly (readonly string[])[]
+}
+
+/**
+ * 读发布状态。**只读**：不建目录、不写索引、不切 current。
+ *
+ * 索引不存在 / 损坏时返回空状态而不是抛错 —— 「还没部署过」是正常的初始状态，
+ * 不是错误。抛错会让 `dp status` 在全新机器上直接失败，而它恰恰应该报告
+ * 「尚未部署过」然后退出 0。
+ *
+ * `previous` 取的是 **current 在 releases 数组里的前一个位置**，不是倒数第二个：
+ * releases 是被 prune 裁剪过的历史，不保证以 current 结尾（裁剪规则只保护
+ * current 与上一版，更早的版本随时可能排在 current 前面以外的任何位置）。
+ * 按位置取才不会在 current 后面还排着新版本时，回退到一个从没生效过的东西。
+ */
+export async function readReleaseState(runner: Runner, root: string): Promise<ReleaseState> {
+  const index = await readJson(runner, layout(root).indexFile)
+  const at = index.current === undefined ? -1 : index.releases.indexOf(index.current)
+  const previous = at > 0 ? index.releases[at - 1] : undefined
+  return {
+    ...(index.current !== undefined ? { current: index.current } : {}),
+    ...(previous !== undefined ? { previous } : {}),
+    releases: [...index.releases],
+    history: index.history.map((h) => [...h]),
+  }
+}
