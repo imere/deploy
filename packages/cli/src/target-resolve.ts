@@ -13,14 +13,11 @@
 import { deriveLayout, pickReleaseRoot } from '@dp/core'
 import { createLocalRunner } from '@dp/local'
 import { DpError, type Facts, type Runner } from '@dp/ports'
-import type { HostConfig, ProjectConfig } from '@dp/schema'
+import { DEFAULT_KEEP, type HostConfig, type ProjectConfig } from '@dp/schema'
 import type { ApplyDeps } from './deps.js'
 import type { Logger } from '@dp/log'
 import type { FactsResult } from './facts-source.js'
 import type { RunContext } from './run.js'
-
-/** 与 configSchema 里 release.keep 的默认值一致；config 没写 release 段时用它 */
-export const DEFAULT_KEEP = 5
 
 export interface ResolvedTarget {
   readonly hostId: string

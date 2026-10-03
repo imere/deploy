@@ -9,7 +9,7 @@ import { homedir as osHomedir, tmpdir as osTmpdir, platform as osPlatform, arch 
 import { promises as fs } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
-import type { Arch, Capabilities, Facts, InitSystem, Platform } from '@dp/ports'
+import { POSIX_WRITE_CANDIDATES, type Arch, type Capabilities, type Facts, type InitSystem, type Platform } from '@dp/ports'
 import { resolveTool, run } from './exec.js'
 
 function mapPlatform(p: NodeJS.Platform): Platform {
@@ -211,22 +211,12 @@ export async function probeLocalFacts(options: ProbeOptions = {}): Promise<Facts
 
   // 候选按平台分流：/srv、/opt 这类 POSIX 目录在 Windows 上会被解析成 C:\srv 之类
   // 根本不存在的位置，探它们既没意义又拖慢启动（每次探测都是一次真实建文件+删除）。
-  // `/etc/nginx/conf.d` 在表里的理由：@dp/ssh 的 DEFAULT_WRITE_PATHS 有它，nginx 目标
-  // 的 confd 推导只读 `canWrite` —— 两份 facts 来源的候选不一致，会让同一份配置在
-  // 远端能推出来、在本机推不出来（表现为「ssh 目标成功、local 目标报权限错」）。
-  const posixDirs = [
-    '/srv',
-    '/opt',
-    '/usr/local',
-    '/var/lib',
-    '/var/www',
-    '/etc/systemd/system',
-    '/etc/nginx/conf.d',
-  ]
+  // 表本身取自 @dp/ports —— 与 @dp/ssh 那份同源。两份 facts 的候选不一致会让同一份
+  // 配置在远端能推出 confd、在本机推不出来（表现为「ssh 目标成功、local 目标报权限错」）。
   const candidates =
     options.writeProbePaths ??
     [
-      ...(platform === 'win32' ? [] : posixDirs),
+      ...(platform === 'win32' ? [] : POSIX_WRITE_CANDIDATES),
       join(home, 'apps'),
       dataHome,
       env.ProgramData ?? 'C:/ProgramData',

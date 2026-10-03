@@ -10,7 +10,7 @@
  *    projectName 有字符集、每个路径走 @dp/template 的 shell 档。漏掉一个，
  *    代价是 compose 在远端报一句与配置毫无关系的话。
  */
-import { DpError, type TargetContext } from '@dp/ports'
+import { DpError, RELEASES_DIR_NAME, type TargetContext } from '@dp/ports'
 import { renderString } from '@dp/template'
 import type { DockerCompose, DockerMode, DockerTargetConfig } from './types.js'
 
@@ -19,9 +19,9 @@ function joinPath(...parts: readonly string[]): string {
   return parts.filter((p) => p !== '').join('/')
 }
 
-/** release 目录。与 @dp/target-static 的 `<root>/releases/<id>` 布局一致 */
+/** release 目录。与 @dp/target-static 的 `<root>/releases/<id>` 布局**同源**（都取 ports 那份名字） */
 export function releaseDir(ctx: TargetContext, releaseId: string): string {
-  return joinPath(ctx.root.replace(/\/+$/, ''), 'releases', releaseId)
+  return joinPath(ctx.root.replace(/\/+$/, ''), RELEASES_DIR_NAME, releaseId)
 }
 
 /**

@@ -4,8 +4,8 @@
  * 铁律：`plan(config + facts) → steps` 是**纯函数**，没有任何 IO。
  * 这是整套设计可测试性的来源：不需要机器就能断言"将会执行什么"。
  */
-import type { Facts, Layout, Step } from '@dp/ports'
-import type { ProjectConfig } from '@dp/schema'
+import { INCOMING_SUFFIX, RELEASES_DIR_NAME, type Facts, type Layout, type Step } from '@dp/ports'
+import { DEFAULT_KEEP, type ProjectConfig } from '@dp/schema'
 import {
   checkSourcePaths,
   deriveLayout,
@@ -63,16 +63,17 @@ export function makePlan(input: PlanInput): Plan {
   }
 
   const root = choice.root
-  const keep = project.release?.keep ?? 5
+  const keep = project.release?.keep ?? DEFAULT_KEEP
+  const incoming = `${root}/${RELEASES_DIR_NAME}/${releaseId}${INCOMING_SUFFIX}`
   const steps: Step[] = [
     { id: 'prepare', kind: 'prepare', title: '预检：连接 · 权限实证 · 磁盘 · 端口', host: facts.host },
     { id: 'stage', kind: 'stage', title: `计算 releaseId ${releaseId}`, host: facts.host },
     {
       id: 'transfer',
       kind: 'transfer',
-      title: `传输到 ${root}/releases/${releaseId}.incoming`,
+      title: `传输到 ${incoming}`,
       host: facts.host,
-      undo: `删除 ${root}/releases/${releaseId}.incoming`,
+      undo: `删除 ${incoming}`,
     },
     { id: 'install', kind: 'install', title: '安装：shared 链接 · 权限 · 渲染 conf', host: facts.host },
     {

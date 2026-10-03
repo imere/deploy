@@ -152,6 +152,24 @@ service: defineService({
 | `DP.DOCKER.FILE_MISSING` | 装配（install） | ❌ | abort（compose 文件/envFile 由 `stat` 实证不在 release 目录里，一次列全） | `@dp/target-docker` |
 | `DP.DOCKER.PULL_FAILED` | 激活 | ❌ | abort（**不回滚**：只动镜像缓存，跑着的仍是上一版） | `@dp/target-docker` |
 | `DP.DOCKER.PLAN_MISMATCH` | 任意 | — | 当作**代码错误**抛（plan 与执行器不同步）；不是部署失败，按失败去回滚只会回滚一个零副作用的部署 | `@dp/target-docker` |
+| `DP.PATH.CASE_COLLISION` | 源校验 | ✅ | abort（仅大小写不同的两条路径，在 Windows 上是同一个文件） | `@dp/core` |
+| `DP.PATH.RESERVED_NAME` | 源校验 | ✅ | abort（Windows 保留名，如 `NUL` / `CON`） | `@dp/core` |
+| `DP.PATH.TOO_LONG` | 源校验 | ✅ | abort（超出平台路径上限，传到一半才炸更贵） | `@dp/core` |
+| `DP.PATH.ILLEGAL_CHAR` | 源校验 | ✅ | abort（**零副作用**：此时还没传第一个字节） | `@dp/core` / `@dp/ssh` |
+| `DP.PATH.WSL_MOUNT` | 源校验 | ✅ | abort（WSL 挂载点上的文件行为不一致） | `@dp/core` |
+| `DP.PATH.NOT_WRITABLE` | 发布根 | ❌ | abort（**实证写入**得知，不靠 uid 推断）；列出全部候选让用户授权其一 | `@dp/core` |
+| `DP.LAYOUT.MISMATCH` | 布局推导 | ✅ | abort（显式指定的 layout 与实测能力不符） | `@dp/core` |
+| `DP.LAYOUT.UNSUPPORTED` | 布局推导 | ✅ | abort（该平台没有可用布局） | `@dp/core` |
+| `DP.PREF.UNSUPPORTED` | 传输协商 | ✅ | abort（**不静默降级**：偏好链里第一项不可用就直说，换一个不告之等于暗改行为） | `@dp/transport` |
+| `DP.LINK.UNAVAILABLE` | 激活 | ❌ | abort（软链不可用，原子切换无从谈起） | `@dp/core` |
+| `DP.SOURCE.EMPTY` | 源枚举 | ✅ | abort（**在连目标机之前**就知道，此时零代价） | `@dp/transport` / `@dp/cli` |
+| `DP.SSH.CONNECT_FAILED` | 连接 | ❌ | abort（零副作用） | `@dp/ssh` |
+| `DP.SSH.AUTH_FAILED` | 认证 | ❌ | abort（含 `SSH_ASKPASS` 取密码失败） | `@dp/ssh` |
+| `DP.SSH.HOST_KEY_UNKNOWN` | 主机密钥 | ❌ | abort（**绝不静默接受**未知主机密钥 —— 那是 MITM 的入口） | `@dp/ssh` |
+| `DP.SSH.HOST_KEY_MISMATCH` | 主机密钥 | ❌ | abort（密钥变了要么真换了机器，要么被劫持，两种都不能自动放过） | `@dp/ssh` |
+| `DP.SSH.TOOL_MISSING` | 能力探测 | ❌ | abort（远端缺 rsync / tar 等，靠实测而非版本号猜） | `@dp/ssh` |
+| `DP.SSH.DRIVER_UNAVAILABLE` | 驱动选择 | ❌ | abort（native-ssh 与 ssh2 都不可用；不退化成「假装连上」） | `@dp/ssh` |
+| `DP.SSH.TUNNEL_FAILED` | 多跳 | ❌ | abort（`ProxyJump` / `ProxyCommand` 都建不起来） | `@dp/ssh` |
 | `DP.TRANSFER.INTERRUPTED` | 传输 | ❌ | 幂等重试 → abort | `@dp/transfer` |
 | `DP.TRANSFER.CHECKSUM_MISMATCH` | 传输 | ❌ | abort（staging 作废） | `@dp/transfer` |
 | `DP.ACTIVATE.START_FAILED` | 激活 | ❌ | 回滚到上一版 | `@dp/target-service` |

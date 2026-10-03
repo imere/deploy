@@ -48,64 +48,86 @@ export interface Facts {
 export type Layout = 'system' | 'hybrid' | 'user'
 
 // ============================================================
+// 发布目录的命名
+// ============================================================
+
+/**
+ * 发布目录的三个名字。**全仓只有这一份**。
+ *
+ * 它们同时被四处使用：`@dp/core` 的步骤标题、`@dp/target-static` 的真实目录操作、
+ * `@dp/template` 的 `${release.current}`、以及 `@dp/target-docker` 算 compose 的 cwd。
+ * 这四处写的其实是同一套约定 —— 各写一份的结果是「改了目录名只改了三处」，
+ * 而漏掉的那处表现为**路径指到了一个真实存在但内容不对的目录**：不报错，只是部署了个寂寞。
+ */
+export const RELEASES_DIR_NAME = 'releases'
+export const CURRENT_LINK_NAME = 'current'
+/** 传输中的半成品后缀。正在服务的目录永远不直接被写 */
+export const INCOMING_SUFFIX = '.incoming'
+
+/**
+ * 实测可写性的 POSIX 候选目录。
+ *
+ * `@dp/local`（本机探测）与 `@dp/ssh`（远端探测）**必须用同一张表**：两份 facts
+ * 只是来源不同，语义必须可比。各写一份的后果是同一份配置在远端能推出 confd、
+ * 在本机推不出来（表现为「ssh 目标成功、local 目标报权限错」），而这种错指不回真正的原因。
+ */
+export const POSIX_WRITE_CANDIDATES: readonly string[] = [
+  '/srv',
+  '/opt',
+  '/usr/local',
+  '/var/lib',
+  '/var/www',
+  '/etc/systemd/system',
+  '/etc/nginx/conf.d',
+]
+
+// ============================================================
 // 错误
 // ============================================================
 
-export type DpErrorCode =
-  | 'CONFIG_INVALID'
-  | 'DP.PATH.CASE_COLLISION'
-  | 'DP.PATH.RESERVED_NAME'
-  | 'DP.PATH.TOO_LONG'
-  | 'DP.PATH.ILLEGAL_CHAR'
-  | 'DP.PATH.WSL_MOUNT'
-  | 'DP.PATH.NOT_WRITABLE'
-  | 'DP.LAYOUT.MISMATCH'
-  | 'DP.LAYOUT.UNSUPPORTED'
-  | 'DP.PERM.ELEVATION_REQUIRED'
-  | 'DP.PERM.CONFD_NOT_WRITABLE'
-  | 'DP.SYSTEMD.NO_LINGER'
-  | 'DP.SEC.RESCUE_UNSAFE_PATH'
-  | 'DP.PREF.UNSUPPORTED'
-  | 'DP.VERIFY.FAILED'
-  | 'DP.VERIFY.NO_HEALTHCHECK'
-  | 'DP.LINK.UNAVAILABLE'
-  | 'DP.SOURCE.EMPTY'
-  | 'DP.INTERACTIVE_PROMPT_DETECTED'
-  | 'DP.TIMEOUT.EXEC'
+export const DP_ERROR_CODES = [
+  'CONFIG_INVALID',
+  'DP.PATH.CASE_COLLISION',
+  'DP.PATH.RESERVED_NAME',
+  'DP.PATH.TOO_LONG',
+  'DP.PATH.ILLEGAL_CHAR',
+  'DP.PATH.WSL_MOUNT',
+  'DP.PATH.NOT_WRITABLE',
+  'DP.LAYOUT.MISMATCH',
+  'DP.LAYOUT.UNSUPPORTED',
+  'DP.PERM.CONFD_NOT_WRITABLE',
+  'DP.PREF.UNSUPPORTED',
+  'DP.VERIFY.FAILED',
+  'DP.LINK.UNAVAILABLE',
+  'DP.SOURCE.EMPTY',
+  'DP.INTERACTIVE_PROMPT_DETECTED',
+  'DP.TIMEOUT.EXEC',
   // ↓ SSH 远端 Runner（@dp/ssh）追加。注意 `CONFIG_INVALID` 是命名空间化之前
   // 留下的历史名，它没有点分前缀；新代码一律用 `DP.CONFIG.INVALID`。
-  | 'DP.CONFIG.INVALID'
-  | 'DP.SSH.CONNECT_FAILED'
-  | 'DP.SSH.AUTH_FAILED'
-  | 'DP.SSH.HOST_KEY_UNKNOWN'
-  | 'DP.SSH.HOST_KEY_MISMATCH'
-  | 'DP.SSH.TOOL_MISSING'
-  | 'DP.SSH.DRIVER_UNAVAILABLE'
-  | 'DP.SSH.TUNNEL_FAILED'
-  | 'DP.ELEVATE.FAILED'
-  // ↓ CLI（@dp/cli）追加。CLI 是唯一知道「具体实现存在」的层，所以它的错误码
-  // 单列一组：这里出现 DP.CLI.* 意味着**装配/调用方式**错了，不是部署本身失败。
-  | 'DP.CLI.USAGE'
-  | 'DP.CLI.UNKNOWN_COMMAND'
-  | 'DP.CLI.CONFIG_NOT_FOUND'
-  | 'DP.CLI.CONFIG_CONFLICT'
-  | 'DP.CLI.CONFIG_INVALID'
+  'DP.CONFIG.INVALID',
+  'DP.SSH.CONNECT_FAILED',
+  'DP.SSH.AUTH_FAILED',
+  'DP.SSH.HOST_KEY_UNKNOWN',
+  'DP.SSH.HOST_KEY_MISMATCH',
+  'DP.SSH.TOOL_MISSING',
+  'DP.SSH.DRIVER_UNAVAILABLE',
+  'DP.SSH.TUNNEL_FAILED',
   // ↓ 模板层（@dp/template）追加。渲染期的问题一律用 DP.TPL.*：
   // 出现它们说明「配置里写了不能成立的变量」或「渲染出的值不该进那个位置」，
   // 而不是部署执行失败 —— 两者的处置方式完全不同（改配置 vs 停下来）。
-  | 'DP.TPL.UNKNOWN_VAR'
-  | 'DP.TPL.MISSING_ENV'
-  | 'DP.TPL.MISSING_VALUE'
-  | 'DP.TPL.SYNTAX'
-  | 'DP.TPL.UNSAFE_VALUE'
+  'DP.TPL.UNKNOWN_VAR',
+  'DP.TPL.MISSING_ENV',
+  'DP.TPL.MISSING_VALUE',
+  'DP.TPL.SYNTAX',
+  'DP.TPL.UNSAFE_VALUE',
   // ↓ nginx 目标（@dp/target-nginx）追加。conf 相关的问题单列一组：它们全部
   // 可在 plan 期判定、且处置方式是「改配置」，与 DP.TPL.*（变量本身不成立）
   // 分开是为了让调用方能区分「变量错了」与「把变量放进这个位置是错的」。
-  | 'DP.NGX.CONF_INVALID'
-  | 'DP.NGX.NOT_MANAGED'
-  | 'DP.NGX.UNSAFE_VALUE'
-  | 'DP.NGX.RELOAD_CMD_INVALID'
-  | 'DP.NGX.NO_PREVIOUS'
+  'DP.NGX.CONF_INVALID',
+  'DP.NGX.NOT_MANAGED',
+  'DP.NGX.UNSAFE_VALUE',
+  'DP.NGX.RELOAD_CMD_INVALID',
+  'DP.NGX.NO_PREVIOUS',
   // ↓ nginx 执行器（@dp/target-nginx）追加。这两个单列的理由是**处置方式相反**：
   // 上面的 DP.NGX.* 都能在动手之前判定，处置是「改配置然后重来」；
   // 而这两个是「配置通过了本包能做的全部校验、nginx 仍然不接受」：
@@ -113,32 +135,36 @@ export type DpErrorCode =
   // RELOAD_FAILED 时盘上的 conf 已经被 `-t` 接受，nginx 只是没收到信号，
   // 重跑一次 reload 就收敛 —— 此时回滚反而制造第二次不一致。合成一个码，
   // 调用方就只能对两种相反的处置一律回滚。
-  | 'DP.NGX.TEST_FAILED'
-  | 'DP.NGX.RELOAD_FAILED'
+  'DP.NGX.TEST_FAILED',
+  'DP.NGX.RELOAD_FAILED',
   // ↓ docker 目标（@dp/target-docker）追加。全部是**配置期可判定**的问题：
   // 它们要么在拼 argv 之前就被顶回（项目名字符集、compose 文件路径、mode），
   // 要么是「命令跑了但输出读不出结论」（ps 解析）。后者单独一组的理由是
   // 处置方式相反：前者改配置重来，后者要先确认远端 compose 可用，重跑没用。
-  | 'DP.DOCKER.MODE_UNSUPPORTED'
-  | 'DP.DOCKER.PROJECT_NAME_INVALID'
-  | 'DP.DOCKER.COMPOSE_FILES_EMPTY'
-  | 'DP.DOCKER.COMPOSE_FILE_DUPLICATED'
-  | 'DP.DOCKER.COMPOSE_FILE_INVALID'
-  | 'DP.DOCKER.PS_PARSE_FAILED'
-  | 'DP.DOCKER.NO_PREVIOUS'
+  'DP.DOCKER.MODE_UNSUPPORTED',
+  'DP.DOCKER.PROJECT_NAME_INVALID',
+  'DP.DOCKER.COMPOSE_FILES_EMPTY',
+  'DP.DOCKER.COMPOSE_FILE_DUPLICATED',
+  'DP.DOCKER.COMPOSE_FILE_INVALID',
+  'DP.DOCKER.PS_PARSE_FAILED',
+  'DP.DOCKER.NO_PREVIOUS',
   // ↓ docker 执行器（@dp/target-docker）追加。这三个与上面那组**处置方式相反**：
   // 上面全部是配置期可判定的「改配置重来」，而这三个是「配置过了、命令真的跑了」。
   // FILE_MISSING 靠 stat 实证（compose 文件本该由传输层搬上来，缺了是上游漏了，
   // 不是配置写错）；PULL_FAILED 靠真跑一次 pull 才成立（改配置对它是无效动作）；
   // PLAN_MISMATCH 单列的理由是它根本不是部署失败 —— 计划与执行器不同步是代码错误，
   // 按部署失败去回滚只会回滚一个其实没有任何副作用的部署。
-  | 'DP.DOCKER.FILE_MISSING'
-  | 'DP.DOCKER.PULL_FAILED'
-  | 'DP.DOCKER.PLAN_MISMATCH'
+  'DP.DOCKER.FILE_MISSING',
+  'DP.DOCKER.PULL_FAILED',
+  'DP.DOCKER.PLAN_MISMATCH',
   // ↓ 激活失败（在册，但类型里一直缺这一条）。它单列而不是复用
   // DP.VERIFY.FAILED：处置方向相反 —— 验收没过是「已经起来了但状态不对」，
   // 激活失败是「根本没起来」，上层 `dp apply` 据此决定回滚与否。
-  | 'DP.ACTIVATE.START_FAILED'
+  'DP.ACTIVATE.START_FAILED',
+] as const
+
+/** 从数组派生：加码只改上面那一个地方，类型自动跟上 */
+export type DpErrorCode = (typeof DP_ERROR_CODES)[number]
 
 export interface DpErrorOptions {
   /** 出错的配置路径，如 `projects.web.source` */

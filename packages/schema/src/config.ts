@@ -318,10 +318,20 @@ export const targetSchema = obj(
 // 发布
 // ============================================================
 
+/**
+ * 保留几个历史版本。**全仓只有这一份**。
+ *
+ * 之前它有三处：这里的 `withDefault`、`@dp/core` 的 `?? 5`、`@dp/cli` 的 `DEFAULT_KEEP`。
+ * 三处同值是巧合而不是约束 —— 改一处漏两处的结果是「plan 说保留 10 个、
+ * 实际 prune 只留 5 个」，且两边都不报错。默认值属于归一化层（schema），
+ * 其余各处引用它。
+ */
+export const DEFAULT_KEEP = 5
+
 export const releaseSchema = obj(
   {
     root: opt(str('发布根目录。不写则由能力推导')),
-    keep: withDefault(num('保留的历史版本数'), 5),
+    keep: withDefault(num('保留的历史版本数'), DEFAULT_KEEP),
     shared: opt(arr(str('跨版本共享的相对路径，如 uploads'))),
     owner: opt(str('属主')),
     dirMode: opt(str('目录权限，如 0750')),

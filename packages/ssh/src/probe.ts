@@ -11,7 +11,7 @@
  * 并在 `probeNotes` 里说明「哪项没探到、为什么」。静默降级比报错更危险。
  */
 import type { Arch, Capabilities, Facts, InitSystem, Platform } from '@dp/ports'
-import { DpError } from '@dp/ports'
+import { DpError, POSIX_WRITE_CANDIDATES } from '@dp/ports'
 import type { SshDriver } from './driver.js'
 import { resolveTimeoutMs } from './driver.js'
 import {
@@ -47,16 +47,12 @@ const TOOLS_TO_PROBE = [
   'openssl',
 ] as const
 
-const DEFAULT_WRITE_PATHS = [
-  '/srv',
-  '/opt',
-  '/usr/local',
-  '/var/lib',
-  '/var/www',
-  '/etc/systemd/system',
-  '/etc/nginx/conf.d',
-  '/tmp',
-] as const
+/**
+ * 与 `@dp/local` 共用同一份候选（`@dp/ports` 的那张表），只多一个 `/tmp`：
+ * 本机探测有 `os.tmpdir()` 可用，远端没有，只能把它列进候选里实测。
+ * 这张表**不许**在这里另写一份 —— 两份 facts 的语义必须可比。
+ */
+const DEFAULT_WRITE_PATHS = [...POSIX_WRITE_CANDIDATES, '/tmp'] as const
 
 export interface ProbeOptions {
   readonly tools?: readonly string[]

@@ -10,7 +10,20 @@
  *  3. **每一步都能说清撤销动作是什么。** 每步自带 `undo`，plan 阶段就把回滚计划算出来，
  *     不是出事了才想办法。
  */
-import { DpError, type Runner, type SourceEntry, type Step, type Target, type TargetContext } from '@dp/ports'
+import {
+  CURRENT_LINK_NAME,
+  DpError,
+  INCOMING_SUFFIX,
+  RELEASES_DIR_NAME,
+  type Runner,
+  type SourceEntry,
+  type Step,
+  type Target,
+  type TargetContext,
+} from '@dp/ports'
+
+/** rename 之前的落点后缀。与 INCOMING_SUFFIX 的区别：它只在一次 rename 内存在 */
+const TMP_SUFFIX = '.dp-tmp'
 
 export interface StaticTargetConfig {
   /** 激活后必须存在的相对路径；缺省校验当前 release 非空 */
@@ -38,13 +51,14 @@ interface Layout {
 }
 
 function layout(root: string): Layout {
+  const releases = joinPath(root, RELEASES_DIR_NAME)
   return {
     root,
-    releasesDir: joinPath(root, 'releases'),
-    currentLink: joinPath(root, 'current'),
+    releasesDir: releases,
+    currentLink: joinPath(root, CURRENT_LINK_NAME),
     indexFile: joinPath(root, '.dp', 'index.json'),
-    releaseDir: (id) => joinPath(root, 'releases', id),
-    stagingDir: (id) => joinPath(root, 'releases', `${id}.incoming`),
+    releaseDir: (id) => joinPath(releases, id),
+    stagingDir: (id) => joinPath(releases, `${id}${INCOMING_SUFFIX}`),
   }
 }
 
@@ -316,7 +330,7 @@ export async function prune(
 ): Promise<readonly string[]> {
   const L = layout(root)
   const all = (await runner.listDir(L.releasesDir))
-    .filter((n) => !n.endsWith('.incoming') && !n.endsWith('.dp-tmp'))
+    .filter((n) => !n.endsWith(INCOMING_SUFFIX) && !n.endsWith(TMP_SUFFIX))
     .sort()
 
   const protectedIds = new Set([currentId, ...(previousId !== undefined ? [previousId] : [])])
@@ -342,9 +356,9 @@ export const staticTarget: Target<StaticTargetConfig> = {
       {
         id: 'install',
         kind: 'install',
-        title: `写入 ${ctx.root}/releases/${ctx.releaseId}.incoming`,
+        title: `写入 ${ctx.root}/${RELEASES_DIR_NAME}/${ctx.releaseId}${INCOMING_SUFFIX}`,
         host: ctx.host,
-        undo: `删除 releases/${ctx.releaseId}.incoming`,
+        undo: `删除 ${RELEASES_DIR_NAME}/${ctx.releaseId}${INCOMING_SUFFIX}`,
         ...(config.healthcheck?.fileExists !== undefined
           ? { detail: { requireFiles: config.healthcheck.fileExists } }
           : {}),
@@ -352,9 +366,9 @@ export const staticTarget: Target<StaticTargetConfig> = {
       {
         id: 'commit',
         kind: 'install',
-        title: `rename releases/${ctx.releaseId}.incoming → releases/${ctx.releaseId}`,
+        title: `rename ${RELEASES_DIR_NAME}/${ctx.releaseId}${INCOMING_SUFFIX} → ${RELEASES_DIR_NAME}/${ctx.releaseId}`,
         host: ctx.host,
-        undo: `删除 releases/${ctx.releaseId}`,
+        undo: `删除 ${RELEASES_DIR_NAME}/${ctx.releaseId}`,
       },
     ]
   },
@@ -364,12 +378,12 @@ export const staticTarget: Target<StaticTargetConfig> = {
       {
         id: 'activate',
         kind: 'activate',
-        title: `current → releases/${ctx.releaseId}（原子 rename）`,
+        title: `${CURRENT_LINK_NAME} → ${RELEASES_DIR_NAME}/${ctx.releaseId}（原子 rename）`,
         host: ctx.host,
         undo:
           ctx.previousReleaseId !== undefined
-            ? `current 指回 releases/${ctx.previousReleaseId}`
-            : '删除 current（首次部署，无上一版）',
+            ? `${CURRENT_LINK_NAME} 指回 ${RELEASES_DIR_NAME}/${ctx.previousReleaseId}`
+            : `删除 ${CURRENT_LINK_NAME}（首次部署，无上一版）`,
       },
     ]
   },
@@ -395,7 +409,7 @@ export const staticTarget: Target<StaticTargetConfig> = {
         kind: 'activate',
         title:
           ctx.previousReleaseId !== undefined
-            ? `current 指回 releases/${ctx.previousReleaseId}`
+            ? `${CURRENT_LINK_NAME} 指回 ${RELEASES_DIR_NAME}/${ctx.previousReleaseId}`
             : '无上一版，无法回退',
         host: ctx.host,
       },

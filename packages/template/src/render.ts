@@ -9,7 +9,7 @@
  *     渲染拿到上一次的结果（`${env.FOO}` 变成字面量）—— 这类 bug 只在
  *     「同一份配置部署两次」时出现，极难复现。
  */
-import { DpError, type TargetContext } from '@dp/ports'
+import { CURRENT_LINK_NAME, DpError, type TargetContext } from '@dp/ports'
 import { assertSafe } from './unsafe.js'
 import { resolveVar, scan } from './vars.js'
 import type { RenderContext, RenderOptions } from './context.js'
@@ -114,6 +114,6 @@ export function releaseVars(ctx: TargetContext): { 'release.id': string; 'releas
   const root = ctx.root.replace(/\/+$/, '')
   return {
     'release.id': ctx.releaseId,
-    'release.current': `${root}/current`,
+    'release.current': `${root}/${CURRENT_LINK_NAME}`,
   }
 }

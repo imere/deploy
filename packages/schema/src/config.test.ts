@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DpError } from '@dp/ports'
-import { defineDocker, defineNginx, defineTarget, dockerSchema, nginxSchema, type DockerInput, type NginxInput } from './config.js'
+import { DEFAULT_KEEP, defineDocker, defineNginx, defineTarget, dockerSchema, nginxSchema, releaseSchema, type DockerInput, type NginxInput } from './config.js'
 
 function codeOf(fn: () => unknown): { code: string; path?: string; hint?: string } {
   try {
@@ -276,5 +276,15 @@ describe('targetSchema 里的 docker', () => {
     const json = dockerSchema.toJsonSchema()
     assert.deepEqual(json.required, ['mode', 'compose'])
     assert.equal(json.properties?.['mode']?.default, 'remote-cli')
+  })
+})
+
+describe('DEFAULT_KEEP', () => {
+  it('钉住字面值 5 —— 改默认值必须是一次有意识的、会让这条变红的动作', () => {
+    assert.equal(DEFAULT_KEEP, 5)
+  })
+
+  it('release 段整个省略时，归一化结果就是它（其余各处从这里取，不再各写一份 5）', () => {
+    assert.equal(releaseSchema.parse({}, 'release').keep, DEFAULT_KEEP)
   })
 })
