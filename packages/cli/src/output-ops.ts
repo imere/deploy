@@ -30,6 +30,14 @@ export interface StatusResult {
   /** null = 没部署过无从判断；false = 验过了且不通过。两者不能混为一谈 */
   readonly healthy: boolean | null
   readonly reason?: string
+  /**
+   * `compose ps` 读到的服务状态。**只有真正读到才有**（哪怕读到的是空数组）——
+   * 「没配 docker」「ps 跑失败」「读到 0 个服务」是三件不同的事，混成同一个
+   * 空值就等于让读结果的人自己猜 compose 到底有没有被查过
+   */
+  readonly services?: ReadonlyArray<{ service: string; state: string; status: string; health: string }>
+  /** ps 确实读到了（哪怕是空的）。用来把「读到了 0 个服务」与「没读」区分开 */
+  readonly composeRead?: boolean
   readonly warnings: readonly string[]
   readonly error?: OpsError
 }
@@ -92,6 +100,14 @@ export function renderOpsPretty(command: OpsCommand, result: OpsResult): string 
     lines.push(
       `  健康:       ${s.healthy === null ? '—（没部署过，无从判断）' : s.healthy ? '✓ 通过' : `✗ ${s.reason ?? '未通过'}`}`,
     )
+    if (s.composeRead === true) {
+      // 明确写出「读到了」与「读到了几个」：否则空数组看不出是没读还是读了没服务
+      lines.push(`  compose:    ${s.services === undefined ? 0 : s.services.length} 个服务（ps 已读）`)
+      for (const svc of s.services ?? []) {
+        const health = svc.health === '' ? '（没配 healthcheck）' : svc.health
+        lines.push(`    ${svc.service}: state=${svc.state} health=${health} status=${svc.status}`)
+      }
+    }
   } else if (command === 'verify') {
     const v = result as VerifyResult
     lines.push(`  发布根:     ${v.releaseRoot}`)

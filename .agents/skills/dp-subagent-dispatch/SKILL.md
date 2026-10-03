@@ -88,6 +88,9 @@ node --test "packages/*/build/**/*.test.js"   # fail 必须为 0
 | `The run failed: terminated. Retry after the connection recovers.` | 运行时掉线，非代码问题。盘点残留产物 → `--continue` 续跑 |
 | `mcode exec cancelled` + `safe-delete ... ETIMEDOUT` | 同上；清理临时目录时卡住拖垮了进程 |
 | `Runtime shutdown did not complete cleanly` + 沙箱拒写 `C:\Users\<用户名>\.minimax\**` | 它在写自己的会话/日志目录被拦。**先 `git status` 盘点**：它很可能已经把源码写完在盘上了（实测一次：汇报文件没落盘，但 `executor.ts` 与测试都在）。盘点完再决定是否 `--continue`，别看到 failed 就重派（会撞车）。派发时加 `dangerouslyDisableSandbox: true` 可避开 |
+| `Sign in to MiniMax to use Agent features. Run \`mcode login\`` | **凭据被清空**（`~/.minimax/auth/prod/cn/mcode-public/auth.json` 的 `records` 变 `{}`、`auth-state.json` 的 `status` 变 `error`）。跑一次 `mcode login --no-browser --region cn`（**必须带 `--no-browser`**，默认会拉起浏览器窗口），多数情况是刷新成功并输出 `Already signed in with MiniMax.` |
+| `agent_name_conflict_migration_failed:lock` | 上一次被掐死的进程留下的 runtime 锁。**再跑一次就好**，不要去删 `~/.minimax` 下的 `.lock` 文件 |
+| `mcode exec` 报 failed 但 `git status` 干净 | 先探活再决定：`timeout 90 mcode exec --cwd … -o .tmp/out-ping.md "回复 PONG 两个字"`。排查顺序固定 **ping → `login --no-browser` → 再 ping → 才重派**。别因为 mcode 挂了就改派别的子代理（会撞车、且烧的是另一份配额） |
 | 全量 `pnpm test` 突然冒出一批跨包失败（`@dp/local` 的 exec、`@dp/ssh` driver、用到 `F:\Temp` 的用例） | **先看是不是沙箱**：它会拦临时目录写入与 build 产物读取，还会让真起子进程的用例单个跑 80~130 秒。实测 21 个失败全是环境造成，关掉沙箱复跑即 0 fail。**不要去改代码** |
 | 单次跑 15 分钟以上 | **拆小**：先源码、再测试、再收口。每轮目标 ≤ 10 分钟 |
 | 一次派两个子代理 | **绝对不要**。会同时改 `ports/src/index.ts`、并发 `tsc -b` 打架 |

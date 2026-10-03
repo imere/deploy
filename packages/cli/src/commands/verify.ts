@@ -6,9 +6,11 @@
  * 混成一条命令会让「想知道情况」和「要不要卡住流水线」被迫二选一。
  */
 import { readReleaseState, verifyRelease } from '@dp/target-static'
+import { verifyDocker } from '@dp/target-docker'
 import { DpError, type Runner, type TargetContext } from '@dp/ports'
 import type { HostConfig, ProjectConfig } from '@dp/schema'
 import { defaultApplyDeps } from '../deps.js'
+import { dockerConfigFor } from '../docker-config.js'
 import { exitCodeFor } from '../output.js'
 import { renderOpsJson, renderOpsPretty, type VerifyResult } from '../output-ops.js'
 import { selectTargets } from '../targets.js'
@@ -39,7 +41,7 @@ export async function runVerify(context: RunContext, flags: ResolvedFlags): Prom
       projectConfig: target.projectConfig,
       hostConfig: target.hostConfig,
       logger,
-    })
+    }, flags)
     results.push(result)
     worst = Math.max(worst, exitCode)
   }
@@ -64,6 +66,7 @@ async function verifyOne(
   context: RunContext,
   deps: ResolvedTargetInput['deps'],
   input: VerifyInput,
+  flags: ResolvedFlags,
 ): Promise<{ readonly result: VerifyResult; readonly exitCode: number }> {
   const { host, project, logger } = input
   const warnings: string[] = []
@@ -90,6 +93,26 @@ async function verifyOne(
       ...(state.previous !== undefined ? { previousReleaseId: state.previous } : {}),
     }
     const check = await verifyRelease(resolved.runner, ctx, staticConfigFor(input.projectConfig))
+
+    // docker 目标：compose 的 ps 是**唯一**能证明服务真起来的手段
+    // （static 的 fileExists 只看得到文件在不在，看不到容器状态）。
+    // 两个都过才算过 —— 少跑一个就是给了一盏少一半的绿灯
+    const dockerSpec = input.projectConfig.target?.docker
+    if (dockerSpec !== undefined) {
+      await verifyDocker({
+        runner: resolved.runner,
+        ctx,
+        config: dockerConfigFor({
+          project: input.project,
+          env: flags.env ?? '',
+          envVars: context.env,
+          targetCtx: ctx,
+          now: new Date(0),
+          docker: dockerSpec,
+        }),
+        onStep: (step) => logger.info('verify.docker', { step: step.id, kind: step.kind }),
+      })
+    }
 
     if (!check.ok) {
       // 失败也要给一条能直接敲的下一步（docs/verify.md §6 的 onFailure 思路）：

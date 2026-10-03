@@ -6,8 +6,10 @@
  * 排查问题时反而会引入新的变量。
  */
 import { readReleaseState, verifyRelease } from '@dp/target-static'
+import { verifyDocker, type ComposePsEntry } from '@dp/target-docker'
 import type { TargetContext } from '@dp/ports'
 import { defaultApplyDeps } from '../deps.js'
+import { dockerConfigFor } from '../docker-config.js'
 import { exitCodeFor } from '../output.js'
 import { renderOpsJson, renderOpsPretty, type StatusResult } from '../output-ops.js'
 import { selectTargets } from '../targets.js'
@@ -39,7 +41,7 @@ export async function runStatus(context: RunContext, flags: ResolvedFlags): Prom
       projectConfig: target.projectConfig,
       hostConfig: target.hostConfig,
       logger,
-    })
+    }, flags)
     results.push(result)
     worst = Math.max(worst, exitCode)
   }
@@ -64,9 +66,14 @@ async function statusOne(
   context: RunContext,
   deps: ResolvedTargetInput['deps'],
   input: StatusInput,
+  flags: ResolvedFlags,
 ): Promise<{ readonly result: StatusResult; readonly exitCode: number }> {
   const { host, project, logger } = input
   const warnings: string[] = []
+  /** compose 读到的服务状态。空 = 这次没读到（没配 docker，或读失败） */
+  const services: ComposePsEntry[] = []
+  /** ps 是否真的读到了。「读到且空」与「没读到」在结果里必须分得开 */
+  let sawCompose = false
   let resolved: Awaited<ReturnType<typeof resolveTarget>> | undefined
 
   try {
@@ -102,11 +109,48 @@ async function statusOne(
     const check = await verifyRelease(resolved.runner, ctx, staticConfigFor(input.projectConfig))
     if (!check.ok) warnings.push(`DP.VERIFY.FAILED: ${check.reason}`)
 
+    // docker：compose ps 是只读的，所以「读服务状态」不违反 status 的零副作用。
+    // 但**读不到不能当成不健康**：那会让一台没装 compose 的机器在 status 里永远红着，
+    // 而 status 的职责是报告事实。读不到就说读不到（warning），healthy 交给 static 那一半
+    const dockerSpec = input.projectConfig.target?.docker
+    if (dockerSpec !== undefined) {
+      try {
+        const docker = await verifyDocker({
+          runner: resolved.runner,
+          ctx,
+          config: dockerConfigFor({
+            project: input.project,
+            // 与 apply / verify 同源：projectName 与 compose 文件路径都过渲染，
+            // ${env} 在 status 里算成空串会让 ps 去查另一个项目名，然后报「读不到」
+            env: flags.env ?? '',
+            envVars: context.env,
+            targetCtx: ctx,
+            now: new Date(0),
+            docker: dockerSpec,
+          }),
+          onStep: (step) => logger.info('status.docker', { step: step.id, kind: step.kind }),
+        })
+        for (const s of docker.services ?? []) {
+          services.push(s)
+        }
+        if (docker.services !== undefined) sawCompose = true
+        // compose 过了但 static 没过（或反过来）都以 static 为准：
+        // 只有一个 healthy 字段，合并的口径写死在这里，别让两处各判一次
+        if (docker.services !== undefined && docker.services.length > 0 && !check.ok) {
+          warnings.push('compose 的服务状态是好的，但 static 健康检查没过 —— 以 static 的结论为准')
+        }
+      } catch (err) {
+        warnings.push(`读不到 compose 状态：${targetErrorFields(err).message}`)
+      }
+    }
+
     return {
       result: {
         ...base,
         healthy: check.ok,
         ...(check.ok ? {} : { reason: check.reason ?? '健康检查未通过' }),
+        ...(services.length > 0 ? { services } : {}),
+        ...(sawCompose ? { composeRead: true } : {}),
       },
       exitCode: 0,
     }

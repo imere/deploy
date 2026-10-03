@@ -241,6 +241,67 @@ export const nginxSchema = obj(
   'nginx 目标。confd 不是这里的字段 —— 它在 target.confd，默认由实测能力推导',
 )
 
+/**
+ * docker 段。**只管形状与类型**，语义判定全部留给 @dp/target-docker。
+ *
+ * 与 nginx 段同一条纪律，两套规则各自演化的症状是「CLI 说合法、执行时报错」或反过来：
+ *  - 绝对路径 / `..` / 反斜杠 / 重复文件 → `DP.DOCKER.COMPOSE_FILE_*`（compose.ts）
+ *  - projectName 的字符集 → `DP.DOCKER.PROJECT_NAME_INVALID`（compose.ts）
+ *  - `files: []` → `DP.DOCKER.COMPOSE_FILES_EMPTY`（compose.ts）
+ *  - 非 `remote-cli` 的 mode → `DP.DOCKER.MODE_UNSUPPORTED`（compose.ts）
+ *
+ * 唯一的例外是 `compose.files` 元素里的**空串**，理由与 reload 那条一致：
+ * 类型上 `['']` 完全合法，而空路径拼进 `-f` 后面在目标机上报的是一句与本次部署
+ * 毫无关系的话（`no such file or directory`，指向那个空路径）。配置加载就拒掉是
+ * 更便宜的一处。
+ */
+const composeFilesSchema = constrained(
+  arr(str('compose 文件路径，相对 release 目录，按给定顺序生效')),
+  (value, path) => {
+    for (let i = 0; i < value.length; i += 1) {
+      if (value[i] === '') {
+        throw new DpError('CONFIG_INVALID', 'compose.files 的元素里有空串', {
+          path: `${path}[${i}]`,
+          hint:
+            '删掉这个空串。空路径拼进 `-f` 后面，目标机报的是 `no such file or directory`，' +
+            '指向那个空路径而不是你真正想指的那一处',
+        })
+      }
+    }
+  },
+)
+
+const dockerComposeSchema = obj(
+  {
+    // 必填：空数组在 schema 层合法（用户可能用数组拼装），但它的后果是
+    // 「不带 -f 的 docker compose up 会去当前工作目录找文件」—— 那条错误信息
+    // 属于 compose.ts 的 DP.DOCKER.COMPOSE_FILES_EMPTY，hint 里带着这句解释
+    files: composeFilesSchema,
+    projectName: str('compose -p 的值：容器名与网络名的前缀'),
+    envFile: opt(str('env 文件路径，相对 release 目录。给了就变成 --env-file')),
+    pull: withDefault(bool('拉取镜像。浮动 tag 不 pull 等于部署上一轮的镜像'), true),
+    wait: withDefault(bool('up --wait 等到健康。关掉后 verify 是唯一一道关'), true),
+  },
+  'compose 配置。发布根目录不是这里的字段 —— 它由能力推导（docs/privilege.md §6）',
+)
+
+const dockerHealthcheckSchema = obj(
+  {
+    services: opt(arr(str('只检查这些服务。不写 = ps 输出里每个服务都要通过'))),
+    expectStates: opt(arr(str('期望状态。默认 running / healthy'))),
+  },
+  'docker 健康检查。它的有无决定哪些服务算数',
+)
+
+export const dockerSchema = obj(
+  {
+    mode: withDefault(oneOf(['remote-cli'] as const), 'remote-cli'),
+    compose: dockerComposeSchema,
+    healthcheck: opt(dockerHealthcheckSchema),
+  },
+  'docker 目标。本轮只实现 remote-cli：compose 文件随 release 上传后在目标机上跑',
+)
+
 export const targetSchema = obj(
   {
     type: prefChain(TARGET_KINDS, ['static'] as const, '目标类型，也可以是偏好链'),
@@ -248,6 +309,7 @@ export const targetSchema = obj(
     confd: opt(str('conf.d 目录（nginx 目标）。不写则由实测能力推导')),
     service: opt(str('服务名（systemd / process 目标）')),
     nginx: opt(nginxSchema),
+    docker: opt(dockerSchema),
   },
   '部署目标',
 )
@@ -374,6 +436,8 @@ export type ReleaseConfig = Infer<typeof releaseSchema>
 export type TargetConfig = Infer<typeof targetSchema>
 export type NginxConfig = Infer<typeof nginxSchema>
 export type NginxInput = InputOf<typeof nginxSchema>
+export type DockerConfig = Infer<typeof dockerSchema>
+export type DockerInput = InputOf<typeof dockerSchema>
 export type TransportConfig = Infer<typeof transportSchema>
 export type ActivationConfig = Infer<typeof activationSchema>
 export type HealthcheckConfig = Infer<typeof healthcheckSchema>
@@ -389,6 +453,7 @@ export const defineRelease = (c: InputOf<typeof releaseSchema>): ReleaseConfig =
 export const defineTarget = (c: InputOf<typeof targetSchema>): TargetConfig =>
   targetSchema.parse(c, 'target')
 export const defineNginx = (c: NginxInput): NginxConfig => nginxSchema.parse(c, 'nginx')
+export const defineDocker = (c: DockerInput): DockerConfig => dockerSchema.parse(c, 'docker')
 export const defineTransport = (c: InputOf<typeof transportSchema>): TransportConfig =>
   transportSchema.parse(c, 'transport')
 export const defineActivation = (c: InputOf<typeof activationSchema>): ActivationConfig =>

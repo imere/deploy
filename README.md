@@ -32,7 +32,7 @@ dp rollback        # 回到上一个版本
 | `@dp/transport` | ✅ | 传输协商与执行：`rsync-ssh` / `tar-ssh` / `sftp` / `scp` / `local-copy`，全部 argv-only；远端 `apply` 已走它 |
 | `@dp/template` | ✅ | 纯模板渲染：`${env.NAME}` / `${git.*}` / `${release.*}` 展开 + 按落点分档的危险字符校验。零 IO，`$host` 之类原样保留 |
 | `@dp/target-nginx` | ✅ | nginx 目标：conf 渲染 + 步骤规划 + 执行器 + CLI/schema 接线（反代默认头、影子校验、所有权保护、两步 `-t`、失败按步骤 undo 回收）。confd 由实测可写性推导 |
-| `@dp/target-docker` | 🚧 | docker 目标（`remote-cli`）：compose argv 构造 + `ps --format json` 解析 + 四个 plan 步骤 + 执行器（失败**不自动补偿**，只给可执行的 `healing`）。CLI/schema 接线待补 |
+| `@dp/target-docker` | ✅ | docker 目标（`remote-cli`）：compose argv 构造 + `ps --format json` 解析 + 四个 plan 步骤 + 执行器 + CLI/schema 接线。失败**不自动补偿**（既不 `down` 也不 up 上一版），只给可执行的 `healing` |
 
 远端 `apply` 的接线方式：**只把「把源搬进 staging」交给传输层**，`releases/<id>.incoming` →
 rename → 换 `current` → 健康检查 → 保留 N 版这条链仍由 `@dp/target-static` 独占 —— 补偿逻辑只有一份。
@@ -58,7 +58,7 @@ dp rollback --json      # 切回上一版并复查；只切换，不删任何版
 
 `dp apply` 在配了 `target.nginx` 时按 **install → deploy → activate** 三段走：先把 conf 渲染到影子目录过一遍 `nginx -t`（碰生产目录之前挡掉坏 conf），再切版本，最后原子换 conf 并 reload。activate 失败**不回滚发布**——版本本身是好的，旧 conf 指向 `current` 软链所以服务没断，但退出码非 0。
 
-尚未实现：`@dp/target-docker` 的 CLI/schema 接线、其它目标类型（`systemd` / `process`）、以及 `dp deploy` 这个「什么都不写也能用」的一键入口。
+尚未实现：其它目标类型（`systemd` / `process`）、以及 `dp deploy` 这个「什么都不写也能用」的一键入口。
 
 三条运维命令已接线，语义刻意分开：
 

@@ -25,6 +25,7 @@
     "@dp/ssh": "workspace:*",
     "@dp/target-static": "workspace:*",
     "@dp/target-nginx": "workspace:*",
+    "@dp/target-docker": "workspace:*",
     "@dp/template": "workspace:*",
     "@dp/transport": "workspace:*"
   },

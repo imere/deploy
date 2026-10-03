@@ -8,6 +8,14 @@
  */
 import { makePlan } from '@dp/core'
 import { listSourceEntries, normalizeSourceSpec, type SourceSpec } from '@dp/local'
+import {
+  activateDocker,
+  installDocker,
+  isDockerExecFailure,
+  verifyDocker,
+  type DockerExecResult,
+  type DockerTargetConfig,
+} from '@dp/target-docker'
 import { activateNginx, installNginx, type NginxExecResult, type NginxTargetConfig } from '@dp/target-nginx'
 import { deploy, rollback } from '@dp/target-static'
 import { chooseTransport, type TransferRequest, type TransportKind, type TransportPreference } from '@dp/transport'
@@ -17,7 +25,15 @@ import type { LoadedConfig } from '../config-file.js'
 import { defaultApplyDeps, type ApplyDeps } from '../deps.js'
 import { acquireFacts as acquireFactsDefault, parseSshTarget, readFactsFile, resolveAuth } from '../facts-source.js'
 import { nginxConfigFor, releaseCurrentPath, resolveConfd } from '../nginx-config.js'
-import { exitCodeFor, renderApplyJson, renderApplyPretty, type ApplyTargetResult, type NginxTargetResult } from '../output.js'
+import { dockerConfigFor } from '../docker-config.js'
+import {
+  exitCodeFor,
+  renderApplyJson,
+  renderApplyPretty,
+  type ApplyTargetResult,
+  type DockerTargetResult,
+  type NginxTargetResult,
+} from '../output.js'
 import { releaseIdFor } from '../release-id.js'
 import { selectTargets } from '../targets.js'
 import { staticConfigFor } from '../target-config.js'
@@ -420,6 +436,120 @@ function activateFailedWarning(
   ].join('\n')
 }
 
+/**
+ * docker 的「两个阶段」在本仓是什么关系 —— **与 nginx 相反**。
+ *
+ * 顺序是 ① deploy → ② installDocker → ③ activateDocker，不是随手排的：
+ * compose 文件是**随 release 上传**的，而 installDocker 做的只是「stat 确认它们都在」
+ * （它一条 exec 都不发，见 executor.ts）。所以把它排在 deploy 之前只有两种结局：
+ * 要么它永远失败（文件还没传上去），要么它通过但什么也没证明。
+ * 反过来，install 排在 deploy 之后是**唯一**有意义的顺序：传输刚落地就核对，
+ * 坏在传输阶段时能立刻指到「这个文件没传上去」，而不是在 up 之后报一句
+ * compose 自己找不到文件的、与部署毫无关系的话。
+ *
+ * static 负责 `releases/<id>` / `current` 切换 / keep N；docker 只做 ②③。
+ */
+interface DockerRun {
+  readonly config: DockerTargetConfig
+  /** compose 的项目目录。失败文案里要给用户「文件本该在哪」，所以提前算好同源的一份 */
+  readonly projectDir: string
+  /** 用户写的那一份（未经渲染）。报错与报告里说的是配置值，不是渲染后的 argv */
+  readonly projectName: string
+}
+
+function dockerRunFor(
+  target: ApplyTargetInput,
+  ctx: TargetContext,
+  env: string,
+  envVars: Readonly<Record<string, string | undefined>>,
+  now: Date,
+): DockerRun | undefined {
+  const spec = target.projectConfig.target?.docker
+  if (spec === undefined) return undefined
+  return {
+    config: dockerConfigFor({ project: target.project, env, envVars, targetCtx: ctx, now, docker: spec }),
+    // 与 argv 里的 cwd 同源：releaseDir 是 compose.ts 唯一的拼法，这里不另拼一次
+    projectDir: `${ctx.root.replace(/\/+$/, '')}/releases/${ctx.releaseId}`,
+    projectName: spec.compose.projectName,
+  }
+}
+
+/**
+ * install + activate 的结论并成一段。
+ *
+ * `services` 刻意不来自这两个阶段：它们不读 ps。verify / rollback 才读。
+ * 在这里造一个 services 字段就得编一份「服务列表」出来，而那正是「报告了没发生的事」。
+ */
+function dockerReport(
+  results: readonly DockerExecResult[],
+  run: Pick<DockerRun, 'projectDir'> & { readonly projectName: string },
+): DockerTargetResult {
+  const steps = results.flatMap((r) => r.steps.map((s) => ({ id: s.id, kind: s.kind, ok: s.ok, skipped: s.skipped })))
+  const last = results[results.length - 1]
+  if (last === undefined) {
+    // 调用点保证配了 docker 就有 install，所以这是代码错误而非部署失败
+    throw new Error('dockerReport 收到了空的结果列表')
+  }
+  const ran = (id: string): boolean => results.some((r) => r.steps.some((s) => s.id === id && s.ok && !s.skipped))
+  // services 只来自 verify/rollback 阶段。install / activate 不读 ps，
+  // 所以它们的结果里根本没有这个字段 —— 这里不编一个空数组出来
+  const services = results.find((r) => r.services !== undefined)?.services
+  return {
+    projectName: run.projectName,
+    projectDir: run.projectDir,
+    dryRun: last.dryRun,
+    pulled: ran('docker.pull'),
+    started: ran('docker.up'),
+    skipped: steps.filter((s) => s.skipped).map((s) => s.id),
+    steps,
+    warnings: results.flatMap((r) => r.warnings),
+    ...(services !== undefined ? { services: [...services] } : {}),
+  }
+}
+
+/**
+ * 失败时把执行器给的 healing 逐条带出来。
+ *
+ * 这不是「附赠信息」：执行器刻意**不做任何自动补偿**（自动 down 会连停掉目标机上
+ * 同名的其它项目，自动 up 上一版会把「失败」与「已回滚」两个语义混进一个结果），
+ * 所以那几条命令是用户唯一的下一步。吞掉它们等于留下一个「报失败但不说怎么修」
+ * 的部署。
+ */
+function dockerFailureWarning(failure: unknown, releaseId: string): string {
+  // 执行器把失败现场挂在 DpError.cause 上（ports 的 DpError 走 Error 的 cause，
+  // 不是自定义字段）。传错对象会让 healing 整段消失 —— 而那是唯一的下一步
+  if (!isDockerExecFailure(failure)) {
+    return 'docker 阶段失败，但没能拿到结构化的失败现场（这不该发生，请连同配置报 issue）'
+  }
+  const lines = [
+    `docker 阶段失败 [${failure.step}]：版本 ${releaseId} 已部署，但服务没有按新版本起来。`,
+    '**没有执行任何自动补偿** —— 跑着的可能是上一版的容器（它仍在服务），也可能已经被换了一半。',
+    '下一步（逐条执行）：',
+    ...failure.healing.map((h, i) => `  ${i + 1}. ${h}`),
+  ]
+  if (failure.output !== undefined) lines.push(`docker 原话：\n${failure.output}`)
+  return lines.join('\n')
+}
+
+/** 从抛出的错误里取出执行器挂上去的失败现场。传错对象会让 healing 整段消失 */
+function dockerFailureOf(err: unknown): unknown {
+  return err instanceof Error ? err.cause : undefined
+}
+
+/**
+ * 两个原因都有时，报更严重的那个（按退出码）。`undefined` 那个先被排除。
+ *
+ * 严重程度只由 `exitCodeFor` 决定，不在这里另立一套排序 —— 一旦这里有自己的
+ * 「哪个更严重」判断，它就会和 CI 看到的退出码对不上。
+ */
+function pickWorseError(a: unknown, b: unknown): { code: string; message: string; path?: string; hint?: string } {
+  const fa = a === undefined ? undefined : errorFields(a)
+  const fb = b === undefined ? undefined : errorFields(b)
+  if (fa === undefined) return fb as { code: string; message: string }
+  if (fb === undefined) return fa
+  return exitCodeFor(a) >= exitCodeFor(b) ? fa : fb
+}
+
 async function applyOne(
   context: RunContext,
   flags: ResolvedFlags,
@@ -492,6 +622,7 @@ async function applyOne(
     // nginx 装配。confd 推导不出会在这里抛（DP.PERM.CONFD_NOT_WRITABLE），
     // 发生时机是「一个字节都还没写」，所以它属于装配期失败而不是部署失败
     const nginx = nginxRunFor(target, ctx, flags.env ?? '', context.env, target.now, resolved.facts)
+    const docker = dockerRunFor(target, ctx, flags.env ?? '', context.env, target.now)
 
     // ④ --dry-run：算完就停，一个字节都不写
     if (flags.dryRun) {
@@ -521,6 +652,56 @@ async function applyOne(
           }),
         )
       }
+      // docker 侧：install 的 stat 照跑（文件在不在是真的），pull / up 不跑，
+      // ps 照跑（只读，结论是真的）。执行器自己按「在机器上有没有留下作用」记 skipped
+      const dockerDryRuns: DockerExecResult[] = []
+      const dockerDryRunWarnings: string[] = []
+      if (docker !== undefined) {
+        // dry-run 没部署，所以 release 目录里**本来就没有** compose 文件 ——
+        // install 的 stat 必然失败，而那不是配置错误，是「什么都没做」的正常结果。
+        // 把它当致命错会让 --dry-run 第一次跑必红，于是没人再跑它；
+        // 当成成功又会谎报「文件都在」。所以：如实说出来，然后继续跑 ps
+        // （那是真正有价值的只读信息：现在线上跑的是哪一版）
+        try {
+          dockerDryRuns.push(
+            await installDocker({
+              runner: resolved.runner,
+              ctx,
+              config: docker.config,
+              dryRun: true,
+              onStep: (step) => logger.info('apply.docker.install', { step: step.id, kind: step.kind, title: step.title }),
+            }),
+          )
+        } catch (err) {
+          const f = errorFields(err)
+          if (f.code !== 'DP.DOCKER.FILE_MISSING') throw err
+          dockerDryRunWarnings.push(
+            `DP.DOCKER.FILE_MISSING（--dry-run 预期如此）：${f.message}。` +
+              '--dry-run 不部署，所以这些文件现在还不在盘上；真跑 dp apply 时它们随 release 一起上传',
+          )
+        }
+        dockerDryRuns.push(
+          await activateDocker({
+            runner: resolved.runner,
+            ctx,
+            config: docker.config,
+            dryRun: true,
+            onStep: (step) => logger.info('apply.docker.activate', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+        // verify 也走一遍：ps 是只读的，dry-run 跑它给出的结论是真的。
+        // wait: false 时它更是唯一一道关 —— dry-run 跳过它就等于藏起了
+        // 「新版本起来之后服务到底是不是活的」这个唯一能回答的问题
+        dockerDryRuns.push(
+          await verifyDocker({
+            runner: resolved.runner,
+            ctx,
+            config: docker.config,
+            dryRun: true,
+            onStep: (step) => logger.info('apply.docker.verify', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+      }
       // --json 时 stdout 只能有那一个 JSON 文档，正文走日志
       if (flags.json) {
         logger.info('apply.dry_run', { releaseId, steps: plan.steps.length, wrote: false })
@@ -533,11 +714,13 @@ async function applyOne(
         releaseId,
         filesWritten: 0,
         rolledBack: false,
-        warnings: [],
+        warnings: dockerDryRunWarnings,
         steps: plan.steps.map((s) => ({ id: s.id, kind: s.kind, ok: true })),
         probeNotes: resolved.probeNotes,
         dryRun: true,
         ...(nginx !== undefined ? { nginx: nginxReport(nginx.confd, dryRuns) } : {}),
+        // install 没跑成时不造 docker 段：空段等于声称「拉过了、起过了」
+        ...(docker !== undefined && dockerDryRuns.length > 0 ? { docker: dockerReport(dockerDryRuns, docker) } : {}),
       }
       return { result, exitCode: 0 }
     }
@@ -662,6 +845,56 @@ async function applyOne(
     }
 
     const nginxSection = nginx === undefined ? undefined : nginxReport(nginx.confd, nginxResults)
+
+    // ⑦ docker：**install 在 deploy 之后**，activate 再其后。
+    // 顺序理由见 dockerRunFor 的注释：compose 文件随 release 上传，install 只是 stat 确认，
+    // 排在传输之前它永远失败或什么也没证明。
+    const dockerResults: DockerExecResult[] = []
+    let dockerError: { code: string; message: string; path?: string; hint?: string } | undefined
+    /** 保留原对象：退出码由 exitCodeFor 按错误码映射，只留结构化副本就映射不了 */
+    let dockerCause: unknown
+    if (docker !== undefined) {
+      try {
+        dockerResults.push(
+          await installDocker({
+            runner: resolved.runner,
+            ctx,
+            config: docker.config,
+            onStep: (step) => logger.info('apply.docker.install', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+        dockerResults.push(
+          await activateDocker({
+            runner: resolved.runner,
+            ctx,
+            config: docker.config,
+            onStep: (step) => logger.info('apply.docker.activate', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+        // verify 排在 activate 之后：up --wait 关掉时（compose.wait=false）
+        // 这是唯一一道关。失败不回滚 release —— 执行器也没做任何补偿，
+        // 机器上跑的是哪一版由 ps 说话，不由这里猜
+        dockerResults.push(
+          await verifyDocker({
+            runner: resolved.runner,
+            ctx,
+            config: docker.config,
+            onStep: (step) => logger.info('apply.docker.verify', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+      } catch (err) {
+        // 不回滚 release，理由与 nginx activate 失败同款：版本本身是好的
+        // （deploy 的健康检查过了），退掉它只会把「compose 的问题」变成「一次服务中断」。
+        // 执行器也没有做任何补偿动作，所以机器上跑的是什么由 ps 决定，不由这里猜
+        dockerError = errorFields(err)
+        dockerCause = err
+        logger.error('apply.docker.failed', { code: dockerError.code })
+      }
+    }
+
+    // install 失败时一个结果都没有（第一个阶段就抛了），这时**不造** docker 段：
+    // 报一个「没有步骤、没有拉取、没有启动」的段，等于在结果里声称这些事发生过
+    const dockerSection = docker === undefined || dockerResults.length === 0 ? undefined : dockerReport(dockerResults, docker)
     // activate 的告警排在发布告警**之后**：它描述的是「版本已切、conf 没换」，
     // 排在前面会让人以为发布本身也出了问题
     const warnings = [
@@ -670,6 +903,10 @@ async function applyOne(
       ...(nginx !== undefined && nginxError !== undefined
         ? [activateFailedWarning(deployed.releaseId, nginx.current, nginxError)]
         : []),
+      // docker 的告警排在最后：它描述的是「版本已切、服务没起来」，
+      // 排在前面会让人以为发布本身也出了问题
+      ...(dockerSection?.warnings ?? []),
+      ...(dockerCause !== undefined ? [dockerFailureWarning(dockerFailureOf(dockerCause), deployed.releaseId)] : []),
     ]
 
     result = {
@@ -684,12 +921,20 @@ async function applyOne(
       probeNotes: resolved.probeNotes,
       dryRun: false,
       ...(nginxSection !== undefined ? { nginx: nginxSection } : {}),
-      ...(nginxError !== undefined ? { error: nginxError } : {}),
+      ...(dockerSection !== undefined ? { docker: dockerSection } : {}),
+      // 两边都失败时取更严重的那个：nginx 报 conf 没换、docker 报服务没起来，
+      // 报其中一个而吞掉另一个，等于把「这次部署有两处问题」说成一处
+      ...(nginxError !== undefined || dockerError !== undefined
+        ? { error: pickWorseError(nginxCause, dockerCause) }
+        : {}),
     }
-    // 退出码不能因为「发布了但 conf 没换」就报成功：nginx 跑的还是旧 conf，
-    // CI 需要据此通知。取 activate 那个错误的映射
+    // 退出码不能因为「发布了但服务没起来」就报成功：CI 需要据此通知。
+    // 两个原因都可能有，取更严重的那次（映射规则全在 exitCodeFor 里）
+    if (dockerCause !== undefined) {
+      exitCode = exitCodeFor(dockerCause)
+    }
     if (nginxCause !== undefined) {
-      exitCode = exitCodeFor(nginxCause)
+      exitCode = Math.max(exitCode, exitCodeFor(nginxCause))
     }
     logger.info('apply.done', { releaseId: deployed.releaseId, filesWritten: deployed.filesWritten })
     return { result, exitCode }

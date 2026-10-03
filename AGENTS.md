@@ -40,7 +40,7 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：esbuild 的平台二进制�
 ## 目录
 
 ```
-packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / cli 已实现；target-docker 已完成纯函数侧）
+packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / target-docker / cli 均已接线）
 docs/           设计文档（★ 优先读：spikes.md failures.md decisions.md privilege.md）
 .agents/skills/ 可复用的操作流程（dp-spike-env / dp-subagent-dispatch）
 .tmp/           临时物（已 gitignore）
@@ -100,10 +100,16 @@ build/          覆盖率产物所在根目录（已 gitignore）
   验收用 `compose ps --format json`（不是 `docker ps`：后者列的是这台机器上所有容器），
   **读不出结论就报错，绝不判通过**；`services` 的判定范围也收口在 `parseComposePs` 里。
   回滚 = 用上一版 compose 重新 up 且**不 pull**；首次部署报 `DP.DOCKER.NO_PREVIOUS`
-  而不是假成功，也不自动 `down`（那会连停掉目标机上同名的其它项目）
+  而不是假成功，也不自动 `down`（那会连停掉目标机上同名的其它项目）。
+  **`dp apply` 里 docker 的顺序是 deploy → install → activate，与 nginx 相反**：
+  compose 文件是随 release 上传的，install 只做 stat 确认，排在传输之前它永远失败
+  或什么也没证明。照抄 nginx 的 install → deploy → activate 是本轮最容易犯的错。
+  `dp rollback` 里 docker 的 ctx 要**重建**一份：给 static 的那份 `previousReleaseId`
+  是「当前版本」（static 的语义是「从 current 退到 previous」），直接传下去会让执行器
+  拿当前版本的 compose 重新 up —— 那不是回滚，而且报告会显示成功
   执行器**不自动补偿**：up 失败既不停容器也不自动 up 上一版（后者是 `dp rollback` 的职责，
   自动做会把「失败」与「已回滚」两个语义混成一个），只把可执行的 `healing` 命令交给用户
-- **`dp apply` 的三段顺序是 install → deploy → activate**，不是随手排的：install 碰的是影子
+- **`dp apply` 里 nginx 的三段顺序是 install → deploy → activate**（docker 相反，见上一条），不是随手排的：install 碰的是影子
   目录，能在动任何生产路径之前挡掉坏 conf；conf 的 `root` 用 `${release.current}` **软链**
   所以先切版本再换 conf 安全（反过来会留下指向未就绪目录的 conf）。activate 失败
   **不回滚 release**：版本本身是好的（健康检查过了），退掉它只会把「一个 conf 问题」

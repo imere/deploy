@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DpError } from '@dp/ports'
-import { defineNginx, defineTarget, nginxSchema, type NginxInput } from './config.js'
+import { defineDocker, defineNginx, defineTarget, dockerSchema, nginxSchema, type DockerInput, type NginxInput } from './config.js'
 
 function codeOf(fn: () => unknown): { code: string; path?: string; hint?: string } {
   try {
@@ -163,5 +163,118 @@ describe('targetSchema 里的 nginx', () => {
   it('json schema 里 server 是联合（导出给编辑器的那份不能撒谎）', () => {
     const server = nginxSchema.toJsonSchema().properties?.['server']
     assert.ok(server?.anyOf !== undefined, '单块 / 多块必须导出成 anyOf')
+  })
+})
+
+// ------------------------------------------------------------
+// docker 段
+// ------------------------------------------------------------
+
+const DOCKER_BASE: DockerInput = { compose: { files: ['docker-compose.yml'], projectName: 'api' } }
+
+describe('docker · 默认值', () => {
+  it('mode / pull / wait 有默认值，省略时补齐', () => {
+    const parsed = defineDocker(DOCKER_BASE)
+    assert.equal(parsed.mode, 'remote-cli')
+    assert.equal(parsed.compose.pull, true)
+    assert.equal(parsed.compose.wait, true)
+  })
+
+  it('opt() 的键省略时不产生该键（默认行为归 @dp/target-docker 管）', () => {
+    const parsed = defineDocker(DOCKER_BASE)
+    assert.equal('envFile' in parsed.compose, false)
+    assert.equal('healthcheck' in parsed, false)
+  })
+
+  it('写了就原样保留（不做任何改写）', () => {
+    const parsed = defineDocker({
+      ...DOCKER_BASE,
+      compose: { ...DOCKER_BASE.compose, envFile: '.env.prod', pull: false, wait: false },
+      healthcheck: { services: ['api'], expectStates: ['running'] },
+    })
+    assert.equal(parsed.compose.pull, false)
+    assert.equal(parsed.compose.wait, false)
+    assert.deepEqual(parsed.healthcheck, { services: ['api'], expectStates: ['running'] })
+  })
+})
+
+describe('docker · compose.files', () => {
+  it('必填：缺了报「缺少必填字段」并指到具体那一层', () => {
+    const r = codeOf(() => dockerSchema.parse({ compose: { projectName: 'api' } }, 'docker'))
+    assert.equal(r.code, 'CONFIG_INVALID')
+    assert.equal(r.path, 'docker.compose.files')
+  })
+
+  it('projectName 必填', () => {
+    const r = codeOf(() => dockerSchema.parse({ compose: { files: ['c.yml'] } }, 'docker'))
+    assert.equal(r.path, 'docker.compose.projectName')
+  })
+
+  it('空串被拒，path 指到具体下标 —— 空路径拼进 -f 后面，报错与部署毫无关系', () => {
+    const r = codeOf(() => defineDocker({ compose: { files: ['ok.yml', ''], projectName: 'api' } }))
+    assert.equal(r.code, 'CONFIG_INVALID')
+    assert.equal(r.path, 'docker.compose.files[1]')
+    assert.match(String(r.hint), /no such file or directory/)
+  })
+
+  it('首元素空串同样被拒', () => {
+    assert.equal(codeOf(() => defineDocker({ compose: { files: [''], projectName: 'api' } })).code, 'CONFIG_INVALID')
+  })
+
+  it('**空数组不在这里拒** —— 那是 DP.DOCKER.COMPOSE_FILES_EMPTY，hint 里有「不带 -f 会去找当前工作目录」的解释', () => {
+    // 少一条语义判定就是少一个错误码的归属地。两处都拒会让用户先撞到哪条变得看运气
+    const parsed = defineDocker({ compose: { files: [], projectName: 'api' } })
+    assert.deepEqual(parsed.compose.files, [])
+  })
+})
+
+describe('docker · 语义判定不在这层', () => {
+  it('绝对路径 / .. / 反斜杠 / 重复文件 / 非法 projectName 一律放过（归 @dp/target-docker）', () => {
+    // 逐条列出来是为了钉住纪律：这里放过 = 那里必须接住。若哪天这里开始拒，
+    // 对应的那条 compose.ts 测试会开始「两处都拒」，用户撞到哪个全看配置形状
+    const parsed = defineDocker({
+      compose: { files: ['/etc/compose.yml', '../escape.yml', 'a\\b.yml', 'dup.yml', 'dup.yml'], projectName: 'API' },
+    })
+    assert.equal(parsed.compose.files.length, 5)
+    assert.equal(parsed.compose.projectName, 'API')
+  })
+
+  it('files 里出现非字符串元素在加载期就报（类型对不上不许留到部署时）', () => {
+    const r = codeOf(() => dockerSchema.parse({ compose: { files: ['ok.yml', 42], projectName: 'api' } }, 'docker'))
+    assert.equal(r.code, 'CONFIG_INVALID')
+    assert.equal(r.path, 'docker.compose.files[1]')
+  })
+})
+
+describe('docker · 未知字段被拒', () => {
+  it('顶层未知键报出可用字段（发布根不是这里的字段）', () => {
+    const r = codeOf(() => dockerSchema.parse({ ...DOCKER_BASE, root: '/srv/api' }, 'docker'))
+    assert.equal(r.code, 'CONFIG_INVALID')
+    assert.equal(r.path, 'docker.root')
+    // 报的是**顶层**可用字段。projectName 嵌在 compose 里，不出现在这一层
+    assert.match(String(r.hint), /compose/)
+  })
+
+  it('compose 里的未知键定位到具体路径', () => {
+    const r = codeOf(() => dockerSchema.parse({ compose: { ...DOCKER_BASE.compose, network: 'x' } }, 'docker'))
+    assert.equal(r.path, 'docker.compose.network')
+  })
+})
+
+describe('targetSchema 里的 docker', () => {
+  it('opt() 后省略不产生该键（零回归的前提）', () => {
+    const target = defineTarget({ type: 'static' })
+    assert.equal('docker' in target, false)
+  })
+
+  it('配了就能取到', () => {
+    const target = defineTarget({ type: ['static', 'docker'], docker: DOCKER_BASE })
+    assert.equal(target.docker?.compose.projectName, 'api')
+  })
+
+  it('json schema 里 compose 与 mode 都在 required（withDefault 的输入可省、输出必填），mode 带默认值', () => {
+    const json = dockerSchema.toJsonSchema()
+    assert.deepEqual(json.required, ['mode', 'compose'])
+    assert.equal(json.properties?.['mode']?.default, 'remote-cli')
   })
 })

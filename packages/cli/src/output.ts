@@ -275,6 +275,29 @@ export interface NginxTargetResult {
   readonly warnings: readonly string[]
 }
 
+/**
+ * docker 阶段的结论。字段全部来自 DockerExecResult，不另造一套。
+ *
+ * 刻意不含「回滚了没有」：docker 执行器**不做任何自动补偿**（compose.ts 的注释里
+ * 写了理由），所以这一段没有任何自动动作可报 —— 它的失败只以 apply 的 error +
+ * warnings 出现。列一个恒为 false 的字段会让读结果的人以为「查过、没回滚」。
+ */
+export interface DockerTargetResult {
+  readonly projectName: string
+  /** compose 的项目目录（= release 目录）。up / ps 的 cwd 都固定在这里 */
+  readonly projectDir: string
+  readonly dryRun: boolean
+  /** install + activate 的合并结论。verify 阶段的 services 不混进来 */
+  readonly pulled: boolean
+  readonly started: boolean
+  /** 本次在机器上没留下作用的步骤 id */
+  readonly skipped: readonly string[]
+  readonly steps: ReadonlyArray<{ id: string; kind: string; ok: boolean; skipped: boolean }>
+  readonly warnings: readonly string[]
+  /** verify / rollback 读到的服务状态。install / activate 没有 */
+  readonly services?: ReadonlyArray<{ service: string; state: string; status: string; health: string }>
+}
+
 /** 一个目标机的执行结果。刻意**不含** ok / command —— 那两个是信封级字段 */
 export interface ApplyTargetResult {
   readonly project: string
@@ -293,6 +316,8 @@ export interface ApplyTargetResult {
   readonly needsHealing?: boolean
   /** 配了 target.nginx 才有。conf 这一半的结论与 release 那一半分开记 */
   readonly nginx?: NginxTargetResult
+  /** 配了 target.docker 才有 */
+  readonly docker?: DockerTargetResult
 }
 
 /**
@@ -342,6 +367,31 @@ export function renderApplyPretty(result: ApplyTargetResult): string {
     }
     if (n.warnings.length > 0) {
       lines.push('', 'nginx 告警', ...n.warnings.map((w) => `  ! ${w}`))
+    }
+  }
+  if (result.docker !== undefined) {
+    const d = result.docker
+    lines.push('', `docker · ${d.projectName}`)
+    lines.push(`  项目目录:   ${d.projectDir}`)
+    lines.push(
+      `  启动:       ${d.dryRun ? '未启动（--dry-run）' : d.started ? '已启动' : '未启动'}`,
+    )
+    for (const step of d.steps) {
+      // skipped 的判据是「机器上有没有留下作用」。pull 与 up 在 dry-run 下没跑过，
+      // 而 ps 跑了 —— 把它们渲染成同一个 ✓ 会让报告看起来像是真拉过真起过
+      const mark = step.skipped ? '-' : step.ok ? '✓' : '✗'
+      const note = step.skipped ? '（未在机器上留下作用）' : ''
+      lines.push(`  ${mark} [${step.kind}] ${step.id}${note}`)
+    }
+    if (d.services !== undefined && d.services.length > 0) {
+      lines.push('', 'docker 服务状态')
+      for (const s of d.services) {
+        const health = s.health === '' ? '（没配 healthcheck）' : s.health
+        lines.push(`  ${s.service}: state=${s.state} health=${health} status=${s.status}`)
+      }
+    }
+    if (d.warnings.length > 0) {
+      lines.push('', 'docker 告警', ...d.warnings.map((w) => `  ! ${w}`))
     }
   }
   if (result.warnings.length > 0) {

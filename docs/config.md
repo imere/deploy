@@ -401,6 +401,18 @@ projects:
 上一版换成新镜像）。首次部署没有上一版 → `DP.DOCKER.NO_PREVIOUS`，**不返回假成功**；
 也不自动 `down`（那会连停掉目标机上同名的其它项目）。
 
+`dp apply` 里的位置是 **deploy → install → activate**（与 nginx 的 install → deploy →
+activate 相反）：compose 文件是随 release 上传的，install 只做「确认它们在盘上」，
+排在传输之前它永远失败或什么也没证明。compose 文件没传上去 →
+`DP.DOCKER.FILE_MISSING`，且一条 `pull` / `up` 都不发（结果里也不造 docker 段：
+空段等于声称拉过起过）。activate 失败**不回滚发布**，退出码非 0，并把执行器给的
+`healing` 逐条带出来（执行器刻意零补偿，那几条命令是用户唯一的下一步）。
+
+三条运维命令：`dp verify` 跑只读的 `compose ps`，不通过**退 2**（CI 的闸）；
+`dp status` 把 ps 读到的服务状态放进结果，`composeRead` 区分「读到了 0 个服务」与
+「没读到」（ps 失败只给 warning，不让 status 整条变红）；`dp rollback` 没有上一版时
+报错而不是假成功。
+
 ### delegate：项目自带部署方式
 
 很多项目已经有自己的部署脚本/compose/Makefile，我们不该抢活。此时本项目的角色变成：**在一旁提供版本布局、锁、日志、回滚与验证**。

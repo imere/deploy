@@ -35,6 +35,9 @@ importers:
       '@dp/ssh':
         specifier: workspace:*
         version: link:../ssh
+      '@dp/target-docker':
+        specifier: workspace:*
+        version: link:../target-docker
       '@dp/target-nginx':
         specifier: workspace:*
         version: link:../target-nginx

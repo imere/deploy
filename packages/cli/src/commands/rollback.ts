@@ -9,9 +9,11 @@
  * 一次失败的回滚就可能顺手毁掉唯一的退路。
  */
 import { readReleaseState, rollback, verifyRelease } from '@dp/target-static'
+import { rollbackDocker } from '@dp/target-docker'
 import { DpError, type TargetContext } from '@dp/ports'
 import type { HostConfig, ProjectConfig } from '@dp/schema'
 import { defaultApplyDeps } from '../deps.js'
+import { dockerConfigFor } from '../docker-config.js'
 import { EXIT_FAILURE, EXIT_VERIFY_FAILED, exitCodeFor } from '../output.js'
 import { renderOpsJson, renderOpsPretty, type RollbackResult } from '../output-ops.js'
 import { selectTargets } from '../targets.js'
@@ -42,7 +44,7 @@ export async function runRollback(context: RunContext, flags: ResolvedFlags): Pr
       projectConfig: target.projectConfig,
       hostConfig: target.hostConfig,
       logger,
-    })
+    }, flags)
     results.push(result)
     worst = Math.max(worst, exitCode)
   }
@@ -67,6 +69,7 @@ async function rollbackOne(
   context: RunContext,
   deps: ResolvedTargetInput['deps'],
   input: RollbackInput,
+  flags: ResolvedFlags,
 ): Promise<{ readonly result: RollbackResult; readonly exitCode: number }> {
   const { host, project, logger } = input
   const warnings: string[] = []
@@ -102,6 +105,43 @@ async function rollbackOne(
     }
 
     logger.info('rollback.begin', { from: state.current, to: state.previous })
+
+    // docker：**先**让 compose 回到上一版，**再**切 current。
+    // 反过来（先切 current 再 up）会在 up 失败时留下一份指向新版本、
+    // 而容器还跑着新版本 compose 的状态 —— 指针与实际服务对不上，
+    // 而 current 已经是新的，排查者会以为服务已经退回去了
+    const dockerSpec = input.projectConfig.target?.docker
+    if (dockerSpec !== undefined) {
+      // **ctx 的语义要按 docker 执行器的读法重建一遍**：
+      // planRollback 把 ctx.previousReleaseId 当作「要退回的那一版」，
+      // 而上面那个 ctx（给 static 的 rollback 用）里 previousReleaseId = state.current ——
+      // 正好是反的。直接传下去会让它拿**当前版本**的 compose 重新 up，
+      // 那不是回滚，那是「用同一版再起一次」，而且报告会显示成功。
+      // state.previous 已经过了上面的判定，这里必然存在。
+      // **不吞它的错误**：没有上一版时执行器抛 DP.DOCKER.NO_PREVIOUS，
+      // 把它报成「回滚成功」是本仓最不能接受的一种假结果
+      const dockerCtx: TargetContext = {
+        host,
+        root: resolved.releaseRoot,
+        releaseId: state.current,
+        previousReleaseId: state.previous,
+        keep: resolved.keep,
+      }
+      await rollbackDocker({
+        runner: resolved.runner,
+        ctx: dockerCtx,
+        config: dockerConfigFor({
+          project: input.project,
+          env: flags.env ?? '',
+          envVars: context.env,
+          targetCtx: dockerCtx,
+          now: new Date(0),
+          docker: dockerSpec,
+        }),
+        onStep: (step) => logger.info('rollback.docker', { step: step.id, kind: step.kind }),
+      })
+    }
+
     const to = await rollback(resolved.runner, ctx)
 
     // 实测结果与预期对不上，必须报出来。
