@@ -14,6 +14,7 @@ import {
 } from './paths.js'
 
 export * from './paths.js'
+export * from './detect.js'
 
 export interface PlanInput {
   readonly name: string

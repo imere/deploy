@@ -23,7 +23,7 @@ dp rollback        # 回到上一个版本
 | --- | --- | --- |
 | `@dp/ports` | ✅ | 零依赖纯类型：Facts / Capabilities / Layout / Runner / SourceEntry / Target / DpError |
 | `@dp/schema` | ✅ | schema DSL（类型推导 + 路径定位 + JSON Schema 导出）、`define*` 辅助、偏好链 |
-| `@dp/core` | ✅ | `makePlan()` 纯函数：跨平台路径校验、布局推导、release root 候选推导、step 生成 |
+| `@dp/core` | ✅ | `makePlan()` 纯函数：跨平台路径校验、布局推导、release root 候选推导、step 生成；另有目标类型探测（证据表 + 保守仲裁：0 命中报错不假装 static、同分报错不暗选） |
 | `@dp/local` | ✅ | 本机 Runner：能力**实证**、命令执行包装（不经 shell / 不交互 / 不无限等待）、源枚举 |
 | `@dp/target-static` | ✅ | 静态投放：releases/\<id\> + current 原子切换 + keep N + 自动回退与 rollback |
 | `@dp/log` | ✅ | 结构化日志：JSONL 输出、出口统一脱敏（词段匹配 key + 值模式）、字段对齐 OTel、零运行时依赖 |

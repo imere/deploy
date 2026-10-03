@@ -69,7 +69,12 @@ build/          覆盖率产物所在根目录（已 gitignore）
 
 ## 架构要点（改动前先读）
 
-- **分层**：`schema`（类型/define\*）→ `ports`（接口）→ `core`（编排）→ 实现包 → `cli`
+- **分层**：`schema`（类型/define\*）→ `ports`（接口）→ `core`（编排 + 目标探测）→ 实现包 → `cli`
+- **目标探测（`@dp/core/detect.ts`）**：源清单与 `package.json` 的 scripts **都由调用方注入**
+  （它零 IO，否则 `makePlan()` 那套纯函数断言就不成立了）。仲裁比探测更保守：
+  0 命中报错（列出它看到了哪些文件，不假装 static）、未实现的类型报错而不降级、
+  `pick: auto` 下**最高分并列就报错**（并列还靠数组顺序选 = 暗选）。
+  未实现的候选**不参与**取最高 —— 否则源里躺一个 `Caddyfile` 就能否决一个 compose 项目
 - **偏好链**：transport / jump / transfer / supervisor 都是候选链，全失败时输出结构化错误（每项原因 + 建议）
 - **护栏层**：目标机状态日志 + 带租约的部署锁 + 两阶段激活 `trial→promote`；unit 必须注入 `MemoryMax`/`StartLimitBurst`/`Restart=on-failure`
 - **抗量子**：ssh2 **不支持**，只能靠 `native-ssh` 驱动；密码登录用 `SSH_ASKPASS`（不需要 sshpass）

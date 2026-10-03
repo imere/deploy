@@ -319,9 +319,21 @@ flowchart TB
 
 仲裁策略必须保守：
 
-- **0 命中** → 报错并列出「它看到了哪些文件」，而不是假装 static
+实现在 `@dp/core` 的 `detect.ts`（纯函数，源清单与 `package.json` 的 scripts 都由调用方注入）。
+
+- **0 命中** → 报错并列出「它看到了哪些文件」（超过 10 条截断并给总数），而不是假装 static
 - **1 命中** → 用它，日志打印：`检测到 docker-compose.yml → target.type=docker（可用 target.type 覆盖）`
-- **多命中** → 默认**报错**（不猜），除非配 `target.pick: highest | first`；报错信息里列出所有候选与排除办法
+- **1 命中但本仓还没实现**（如只有 `Dockerfile` 的单镜像、Caddyfile、`*.service`、pm2、k8s、
+  delegate）→ 报错，列出已实现的类型供显式指定，**绝不静默降级成 static**
+- **多命中** → `target.pick: fail`（默认 `auto`）直接报错，列出所有候选与排除办法；
+  `auto` 取 confidence 最高的那个，**最高分有并列就报错**（并列时靠数组顺序选 = 暗选）。
+  未实现的候选**不参与**「取最高」—— 源里躺一个 `Caddyfile` 不该让 compose 项目报
+  「不支持」；但**全部**候选都未实现时报「都还没实现」。
+
+置信度档位（越难被巧合凑出来越高）：compose 90 > nginx.conf 80 > systemd / pm2 60
+（**刻意同档**：两者都是「项目自带进程监管配置」，没有依据偏向谁，撞档就是歧义）>
+单镜像 Dockerfile 50 > Caddyfile 45 > delegate 40 > Chart.yaml 30 > index.html 20
+（它几乎每个前端产物都有，是兜底档，排前面会把 compose 项目判成 static）。
 
 ### nginx：`target.nginx`
 

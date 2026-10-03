@@ -132,6 +132,7 @@ service: defineService({
 | `DP.TPL.UNKNOWN_VAR` | 配置渲染 | ✅ | abort（**绝不留下 `${x}` 原文**） | `@dp/template` |
 | `DP.TPL.MISSING_ENV` | 配置渲染 | ✅ | abort（空值同缺值处理） | `@dp/template` |
 | `DP.TPL.MISSING_VALUE` | 配置渲染 | ✅ | abort（同上：路径塌成 `/srv//` 要到中途才暴露） | `@dp/template` |
+| `CONFIG_INVALID` / `DP.CONFIG.INVALID` | 配置加载/装配 | ✅ | abort（**歧义靠拒绝**：列出候选与排除办法，不猜一个默认值继续跑）。前者是命名空间化之前的历史名，`@dp/schema` 仍在用；新代码一律用后者 | `@dp/schema` / `@dp/core` / `@dp/cli` |
 | `DP.TPL.SYNTAX` | 配置渲染 | ✅ | abort（未闭合 / 嵌套） | `@dp/template` |
 | `DP.TPL.UNSAFE_VALUE` | 配置渲染 | ✅ | abort（按落点 text/path/shell/conf 分档） | `@dp/template` |
 | `DP.NGX.CONF_INVALID` | conf 渲染 | ✅ | abort（**不产出 conf**，更不写目标机） | `@dp/target-nginx` |
