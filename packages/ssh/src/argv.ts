@@ -3,9 +3,9 @@
  *
  * 这里是"命令注入"的唯一出口。铁律：任何用户可控的片段（路径、远端脚本、
  * known_hosts 里的主机名）都必须先过 `quoteArg`，且它是**唯一**允许把
- * 字符串拼进 shell 语义的地方（docs/security.md §4）。
+ * 字符串拼进 shell 语义的地方。
  *
- * 关于 rsync `--rsh`：spikes.md S5 是实测契约，四条事实逐条影响本文件：
+ * 关于 rsync `--rsh`：下面的契约都是实测出来的，四条事实逐条影响本文件：
  *  1. `%h` **不会**被替换 —— 所以 rshArgv 里绝不能出现 `%h`
  *  2. 不经过 shell —— rsync 侧没有注入面
  *  3. 无 user 前缀时 rsync 会省略 `-l <user>`，用它自己的本地用户名
@@ -46,7 +46,7 @@ export function quoteArgv(argv: readonly string[]): string {
  * 存在的理由：ssh2 的 `exec()` 只接受一个字符串（`client.exec(command, ...)`），
  * 所以这条路径上**没有 ssh 帮我们转义** —— 拼接时的转义是这里唯一的防线。
  * 原生 ssh 路径不需要它：`buildSshArgv` 把远端命令作为独立 argv 追加，
- * 转义由 ssh 自己负责（spikes.md S5 事实 2：不过 shell）。
+ * 转义由 ssh 自己负责（事实 2：不过 shell）。
  *
  * 换行一律**拒绝**而不是转义：换行在远端 shell 里是命令分隔符，
  * 而且任何 argv 元素里出现换行本身就说明上游拼接错了。
@@ -86,7 +86,7 @@ export function setEnvOptions(env: Readonly<Record<string, string>>): string[] {
     }
     if (v.includes('\n') || v.includes('\r') || v.includes('\0')) {
       throw new DpError('DP.CONFIG.INVALID', `环境变量 ${k} 的值含换行或 NUL，已拒绝`, {
-        hint: '凭据与多行内容不走环境变量（security.md §3）',
+        hint: '凭据与多行内容不走环境变量',
       })
     }
     out.push('-o', `SetEnv=${k}=${v}`)
@@ -110,7 +110,7 @@ export interface SshArgvOptions {
   /** accept-new / tofu / off 时用于隔离的 known_hosts 路径；strict 时用系统默认 */
   readonly userKnownHostsFile?: string
   readonly proxyJump?: string
-  /** 调用方追加的裸选项，如 `-o KexAlgorithms=...`（抗量子策略，security.md §2） */
+  /** 调用方追加的裸选项，如 `-o KexAlgorithms=...`（抗量子策略） */
   readonly extraOptions?: readonly string[]
   /** 远端环境变量。走 OpenSSH 的 SetEnv；服务端 AcceptEnv 没放行时 ssh 会静默忽略 */
   readonly setEnv?: Readonly<Record<string, string>>
@@ -121,7 +121,7 @@ export interface SshArgvOptions {
  * 认证相关的三个选项。
  *
  * 为什么 password 分支**不加** `BatchMode=yes`：OpenSSH 的 BatchMode 会关闭
- * 密码/键盘交互式询问，而 SSH_ASKPASS 正是靠这条询问被触发的（spikes.md S3 实测
+ * 密码/键盘交互式询问，而 SSH_ASKPASS 正是靠这条询问被触发的（实测
  * 走的就是 `SSH_ASKPASS_REQUIRE=force` 而非 BatchMode）。所以非密钥认证的兜底是：
  *  - stdin 直接 ignore（`stdio: ['ignore', ...]`）
  *  - 输出里嗅探 prompt 立即杀掉（prompt.ts）
@@ -192,7 +192,7 @@ export function buildSshArgv(options: SshArgvOptions): string[] {
   argv.push(...authOptions(options.authKind, options.identitiesOnly ?? true))
   argv.push(...knownHostsOptions(options.knownHostsMode, options.userKnownHostsFile))
 
-  // 永远不要转发 agent（security.md §2：把钥匙交给中间机器）
+  // 永远不要转发 agent（把钥匙交给中间机器）
   argv.push('-o', 'ForwardAgent=no')
   // BatchMode 下我们要的是干净的非 tty 流；不声明 pty，\n 不会被 CRLF 污染
   argv.push('-T')
@@ -219,14 +219,14 @@ export function hostTarget(host: string, user?: string): string {
  * 给 rsync 的 `--rsh` 前缀。
  *
  * **不含 host，也不含 `%h`** —— rsync 会自己在后面追加 `[-l user] host rsync --server ...`
- * （spikes.md S5 实测样本：`ARGC=8 [-l][dpuser][dp-target][rsync][--server][flags][.][/tmp/dst1/]`）。
+ * （实测样本：`ARGC=8 [-l][dpuser][dp-target][rsync][--server][flags][.][/tmp/dst1/]`）。
  * 写上 host 会变成"连错两次"。
  */
 export function buildRshArgv(options: SshArgvOptions & { readonly sshPath: string }): string[] {
   return [options.sshPath, ...buildSshArgv({ ...options, remoteArgv: undefined })]
 }
 
-/** rsync 的 `-e` 只接受单个字符串；按空白拆分（spikes.md S5 事实 2：rsync 侧不过 shell） */
+/** rsync 的 `-e` 只接受单个字符串；按空白拆分（事实 2：rsync 侧不过 shell） */
 export function rshOptionValue(rshArgv: readonly string[]): string {
   for (const a of rshArgv) {
     if (/[\s"'\\$`]/.test(a)) {

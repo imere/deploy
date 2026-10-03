@@ -34,7 +34,7 @@ export function makeFacts(overrides: {
   }
 }
 
-/** 本机典型组合：无 rsync，有 tar（AGENTS.md 明写的事实） */
+/** 本机典型组合：无 rsync，有 tar（明写的事实） */
 export const LOCAL_NO_RSYNC = makeFacts({
   host: 'local',
   tools: { ssh: '/usr/bin/ssh', tar: '/usr/bin/tar', scp: '/usr/bin/scp', rsync: null, sftp: '/usr/bin/sftp' },

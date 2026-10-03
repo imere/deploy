@@ -1,7 +1,7 @@
 /**
  * 目标机事实的获取 —— `plan` 与 `facts` 两个命令共用。
  *
- * 这是本包**唯一**组装具体实现的地方（DESIGN.md §12 第 4 条）：core / local /
+ * 这是本包**唯一**组装具体实现的地方：core / local /
  * ssh 都互不认识，只有 CLI 知道「local 主机走 probeLocalFacts，ssh 主机走
  * connectSsh」。
  *

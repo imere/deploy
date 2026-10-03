@@ -1,10 +1,10 @@
 /**
  * ssh2 驱动 —— **纯 JS 降级实现，运行时可选加载**。
  *
- * 为什么排在 native-ssh 之后（spikes.md S1 实测，最硬的约束）：
+ * 为什么排在 native-ssh 之后（实测，最硬的约束）：
  *   传入 `mlkem768x25519-sha256` → ssh2 直接抛 `Unsupported algorithm`，
  *   且它的 SUPPORTED_KEX 列表里**没有任何** PQ 算法。所以「抗量子」这条路
- *   ssh2 走不通，只能靠系统 ssh（spikes.md S2 实测本机 OpenSSH 10.3 默认
+ *   ssh2 走不通，只能靠系统 ssh（实测本机 OpenSSH 10.3 默认
  *   就协商出 mlkem768x25519-sha256）。若 `crypto.kexPolicy: pq-required`，
  *   这条驱动**根本不该被选中**。
  *
@@ -82,7 +82,7 @@ let cached: Ssh2Load | undefined
  * 可选加载 ssh2。
  *
  * 失败**不是**异常 —— 它是一个正常的"这条驱动不可用"状态，要进偏好链的
- * 失败原因列表里（AGENTS.md：错误要能指导下一步）。
+ * 失败原因列表里（错误要能指导下一步）。
  */
 export function loadSsh2(force = false): Ssh2Load {
   if (cached !== undefined && !force) return cached
@@ -97,7 +97,7 @@ export function loadSsh2(force = false): Ssh2Load {
     cached = {
       ok: false,
       reason,
-      hint: '它是可选运行时依赖：`pnpm add -D ssh2`。但注意 ssh2 **不支持任何抗量子 KEX**（spikes.md S1 实测），若 crypto.kexPolicy=pq-required 只能走 native-ssh',
+      hint: '它是可选运行时依赖：`pnpm add -D ssh2`。但注意 ssh2 **不支持任何抗量子 KEX**（实测），若 crypto.kexPolicy=pq-required 只能走 native-ssh',
     }
   }
   return cached
@@ -226,14 +226,14 @@ export class Ssh2Driver implements SshDriver {
 
   /**
    * ssh2 隧道。**本批未实现**，显式说明而不是留空 ——
-   * spikes.md S6 已实测「rsync over 自建 ssh2 隧道完全可用」，方案是存在的
+   *已实测「rsync over 自建 ssh2 隧道完全可用」，方案是存在的
    * （起一个 loopback TCP + 一个 stdin/stdout 直通的 `dp-rsh.mjs` 助手），
    * 但它需要一个常驻的父子 IPC 端点，与本批的"每次 exec 一次性连接"模型
    * 不合。留到下一批。
    */
   async openTunnel(): Promise<Tunnel> {
     throw new DpError('DP.SSH.TUNNEL_FAILED', 'ssh2 隧道将在下一批实现', {
-      hint: '本批请用 native-ssh 驱动 —— 它的 --rsh 前缀可以直接给 rsync（spikes.md S5 契约）。ssh2 侧的 rsync 隧道方案 spikes.md S6 已实测可行，只差 IPC 助手',
+      hint: '本批请用 native-ssh 驱动 —— 它的 --rsh 前缀可以直接给 rsync（契约）。ssh2 侧的 rsync 隧道方案已实测可行，只差 IPC 助手',
     })
   }
 
@@ -287,7 +287,7 @@ export class Ssh2Driver implements SshDriver {
    * 认证配置。**只声明我们用到的键**。
    *
    * 注意：ssh2 支持 password 与 keyboard-interactive 直接在协议里发密码，
-   * 这是它比"无 sshpass 的系统 ssh"方便的地方（transport.md §2）。
+   * 这是它比"无 sshpass 的系统 ssh"方便的地方。
    * 但密码仍然**不**进 argv / 环境变量 / 临时文件 —— 它只出现在这条内存对象里。
    */
   private connectConfig(): Record<string, unknown> {
@@ -297,7 +297,7 @@ export class Ssh2Driver implements SshDriver {
       host: opts.host,
       port: opts.port ?? 22,
       username: opts.user,
-      // 默认永远不要 agent forwarding（security.md §2）
+      // 默认永远不要 agent forwarding
       agentForward: false,
       readyTimeout: resolveTimeoutMs(opts.timeoutMs),
     }
@@ -333,7 +333,7 @@ export function classifyConnectError(message: string, auth: AuthConfig): DpError
   }
   if (/Handshake failed|no matching (key exchange|cipher|mac|host key)/i.test(message)) {
     return new DpError('DP.SSH.CONNECT_FAILED', `握手失败：${message.slice(0, 200)}`, {
-      hint: '确认目标 sshd 支持的算法；若目标是老设备，crypto 侧可能要放宽（ssh2 不支持任何 PQ KEX，spikes.md S1）',
+      hint: '确认目标 sshd 支持的算法；若目标是老设备，crypto 侧可能要放宽（ssh2 不支持任何 PQ KEX）',
     })
   }
   return new DpError('DP.SSH.CONNECT_FAILED', message.slice(0, 300), {

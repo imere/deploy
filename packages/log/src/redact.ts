@@ -1,7 +1,7 @@
 /**
- * 脱敏 —— 出口的最后一道闸门（docs/security.md：统一在 sink 层做，禁止单点 console.log）。
+ * 脱敏 —— 出口的最后一道闸门（统一在 sink 层做，禁止单点 console.log）。
  *
- * 两条识别路径（decisions.md §7）：
+ * 两条识别路径：
  *   1. **key 名**：对 key 小写化后做**包含**匹配；命中即整值替换。
  *      例外是 `key` —— 它必须按**单词边界**匹配，否则 `keyboard`/`monkey` 会被误伤。
  *   2. **值模式**：字符串里的凭据指纹（PEM 私钥 / Bearer / JWT / ssh 公钥 / 各家 token）。

@@ -178,7 +178,7 @@ export function parseLinger(stdout: string): boolean {
 /**
  * 解析 `sudo -n -l`。
  *
- * 目标是「**能 sudo 哪几条命令**」而不是「能不能 sudo」（privilege.md §1）。
+ * 目标是「**能 sudo 哪几条命令**」而不是「能不能 sudo」。
  * 典型输出：
  *   Matching Defaults ...
  *   User deploy may run the following commands on host:

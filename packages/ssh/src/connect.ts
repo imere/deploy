@@ -2,8 +2,7 @@
  * 连接工厂 —— 偏好链 + 事实探测 + Runner 组装。
  *
  * 这是 `@dp/ssh` 唯一的"从配置到可用 Runner"的入口。@dp/core **不 import
- * 本文件**：core 只认 `Runner` 接口，具体是本机还是远端由实现包决定
- * （transport.md §1 纪律 3）。
+ * 本文件**：core 只认 `Runner` 接口，具体是本机还是远端由实现包决定。
  */
 import type { Facts, Runner } from '@dp/ports'
 import { DpError } from '@dp/ports'
@@ -103,7 +102,7 @@ export async function connectSsh(
     tunnel: async () => {
       if (driver.openTunnel === undefined) {
         throw new DpError('DP.SSH.TUNNEL_FAILED', `${driver.kind} 驱动没有实现 openTunnel`, {
-          hint: 'rsync 需要一条到远端的通道。换用 native-ssh 驱动，或用 transport.strategy: tar-ssh / sftp（transport.md §7）',
+          hint: 'rsync 需要一条到远端的通道。换用 native-ssh 驱动，或用 transport.strategy: tar-ssh / sftp',
         })
       }
       return driver.openTunnel()

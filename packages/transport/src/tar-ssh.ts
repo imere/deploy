@@ -1,7 +1,7 @@
 /**
  * tar-ssh —— 本机 tar 打包流经 ssh 送到远端 tar 解包。
  *
- * 存在的理由（docs/transport.md §7）：本机没 rsync 是**常态**（本仓 AGENTS.md
+ * 存在的理由：本机没 rsync 是**常态**（本仓
  * 明写 `facts.tools.rsync === null`），而 tar 两端几乎总有。所以它是 rsync 之后的
  * 主力退路，代价是全量传输。
  *
@@ -36,7 +36,7 @@ export interface TarArgvPair {
 /**
  * 纯函数：两侧的 argv。
  *
- * `--` 之后才是文件清单：tar 会把以 `-` 开头的文件名当选项解析（AGENTS.md 铁律 2，
+ * `--` 之后才是文件清单：tar 会把以 `-` 开头的文件名当选项解析（铁律 2，
  * 歧义靠拒绝）。`--no-same-owner` 是**故意的**：非 root 解包时保留 owner 会失败，
  * 而且提权解包时保留 owner 也不是我们要的语义。
  */

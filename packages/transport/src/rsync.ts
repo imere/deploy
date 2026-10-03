@@ -5,7 +5,7 @@
  * 而它完全由两个 Facts + 一个请求决定。所以它必须能在**没有任何 rsync 二进制、
  * 没有任何网络**的机器上被 100% 断言。IO 只从 `runRsync` 才开始。
  *
- * 提权走 `--rsync-path`（docs/transport.md §6），复用 `@dp/ssh` 的 `wrapCommand`，
+ * 提权走 `--rsync-path`，复用 `@dp/ssh` 的 `wrapCommand`，
  * 不自己拼 sudo —— 拼错一次就是"以为提权了其实没提权"，最坏情况是静默以普通
  * 用户身份写一半然后失败。
  */
@@ -24,7 +24,7 @@ export interface RsyncArgvOptions {
   readonly remoteTarget: string
   /**
    * 保留 owner/group。默认**不带** `-o -g`：多数部署用户没有 chown 权限，
-   * 带了会在每台机器上稳定失败（spikes.md S7 的教训：看起来有 ≠ 真能用）。
+   * 带了会在每台机器上稳定失败（的教训：看起来有 ≠ 真能用）。
    */
   readonly preserveOwner?: boolean
 }

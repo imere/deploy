@@ -12,7 +12,7 @@ import {
   unknownCommandMessage,
 } from './help.js'
 
-describe('help · 每个命令都够用（decisions.md §18）', () => {
+describe('help · 每个命令都够用', () => {
   it('根帮助含用法、开关表、至少 2 个例子、退出码', () => {
     const text = rootHelp('0.0.0')
     assert.match(text, /用法/)

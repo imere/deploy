@@ -5,7 +5,7 @@
  * @dp/core（纯函数的跨平台路径校验）。**@dp/core 不依赖本包** ——
  * 依赖方向永远是 core ← ssh，不是反过来。
  *
- * 零硬依赖：ssh2 是运行时可选的（spikes.md S1：它不支持任何抗量子 KEX，
+ * 零硬依赖：ssh2 是运行时可选的（它不支持任何抗量子 KEX，
  * 所以排在系统 ssh 之后，且 `crypto.kexPolicy=pq-required` 时只能用 native）。
  *
  * 纯函数在 `argv.ts` / `become.ts` / `parse.ts` / `posix.ts` / `prompt.ts` ——

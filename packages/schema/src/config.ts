@@ -145,7 +145,7 @@ export const hostSchema = obj(
     ),
     transport: opt(transportSchema),
   },
-  '一台目标主机。路径不写在这里 —— 由能力推导（docs/privilege.md）',
+  '一台目标主机。路径不写在这里 —— 由能力推导',
 )
 
 // ============================================================
@@ -282,7 +282,7 @@ const dockerComposeSchema = obj(
     pull: withDefault(bool('拉取镜像。浮动 tag 不 pull 等于部署上一轮的镜像'), true),
     wait: withDefault(bool('up --wait 等到健康。关掉后 verify 是唯一一道关'), true),
   },
-  'compose 配置。发布根目录不是这里的字段 —— 它由能力推导（docs/privilege.md §6）',
+  'compose 配置。发布根目录不是这里的字段 —— 它由能力推导',
 )
 
 const dockerHealthcheckSchema = obj(
@@ -320,7 +320,7 @@ export const targetSchema = obj(
 
 export const releaseSchema = obj(
   {
-    root: opt(str('发布根目录。不写则由能力推导，见 docs/privilege.md §6')),
+    root: opt(str('发布根目录。不写则由能力推导')),
     keep: withDefault(num('保留的历史版本数'), 5),
     shared: opt(arr(str('跨版本共享的相对路径，如 uploads'))),
     owner: opt(str('属主')),

@@ -33,7 +33,7 @@ export default defineConfig({
 
 跑起来：`dp deploy web --env prod`。
 
-**上面的配置里省掉了什么？** 传输方式（自动协商 rsync/tar-ssh/sftp）、target 类型（自动识别，见 §8）、release 布局与回滚（默认开启）、日志脱敏（默认开启）、是否提权（探测后再决定要不要问密码）、CONF passiert 步骤（没有 target 就不需要）。
+**上面的配置里省掉了什么？** 传输方式（自动协商 rsync/tar-ssh/sftp）、target 类型（自动识别）、release 布局与回滚（默认开启）、日志脱敏（默认开启）、是否提权（探测后再决定要不要问密码）、CONF passiert 步骤（没有 target 就不需要）。
 
 只有三个字段是真正必填的：**谁（source）、去哪（host）、放哪（to 或 target）**。
 
@@ -103,7 +103,7 @@ profiles: {
 }
 ```
 
-`dp deploy --all --env prod` → 一次把整个环境推上去（见 §5 的扇出策略）。
+`dp deploy --all --env prod` → 一次把整个环境推上去（按主机逐个扇出）。
 
 ### 3.3 环境变量插值与 secretRef
 
@@ -229,7 +229,7 @@ projects:
       image:
         name: registry.example.com/team/api
         tags: ['${git.sha}', '${env}-latest']     # 多标签
-        platform: 'linux/arm64'      # 交叉构建目标架构（见 §7）
+        platform: 'linux/arm64'      # 交叉构建目标架构
       build:
         where: local                # local | remote | buildHost
         buildHost: builder-arm64    # where=buildHost 时用它
@@ -338,7 +338,7 @@ flowchart TB
 ### nginx：`target.nginx`
 
 conf **不手写**，由 `@dp/target-nginx` 从结构化配置生成。`confd` 不在这里 —— 它是
-`target.confd`，由实测可写性推导（见 §4：目标机上的路径不是配置项）。
+`target.confd`，由实测可写性推导（目标机上的路径不是配置项）。
 
 ```yaml
 projects:
@@ -484,8 +484,8 @@ transport.strategy = auto ← defaults（本次协商结果：tar-ssh）
 | `projects.*.transfer` | `strategy`、`delete`、`compress`、`checksum`、`bandwidthLimit` |
 | `projects.*.rollout` | `strategy`、`batch`、`pauseMs`、`failPolicy`、`healthWaitMs` |
 | `projects.*.target` | `type`、`pick`、`confd`、`service` + 各 target 自有段（`target.nginx.*` / `docker.image` / ...） |
-| `projects.*.target.nginx` | `server`（块或块数组）、`filename`、`force`、`reload`（argv[] 或 `false`）。见 §8 |
-| `projects.*.target.docker` | `mode`（仅 `remote-cli`）、`compose.{files[],projectName,envFile,pull,wait}`、`healthcheck.{services[],expectStates[]}`。见 §8 |
+| `projects.*.target.nginx` | `server`（块或块数组）、`filename`、`force`、`reload`（argv[] 或 `false`）。 |
+| `projects.*.target.docker` | `mode`（仅 `remote-cli`）、`compose.{files[],projectName,envFile,pull,wait}`、`healthcheck.{services[],expectStates[]}`。 |
 | `projects.*.healthcheck` | `command` / `http` / `tcp` / `fileExists` |
 | `projects.*.hooks` | `before|after × prepare|transfer|install|activate|verify`，每条带 `where: local|remote` |
 | `projects.*.rollback` | `enabled`、`onFailure: auto|ask|never` |

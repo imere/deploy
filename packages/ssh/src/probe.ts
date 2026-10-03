@@ -2,7 +2,7 @@
  * 远端事实探测 —— 与 packages/local/src/probe.ts 同一套哲学：
  * **能力一律实证，不推断。**
  *
- * `command -v su` 返回了路径，但 `su` 本身可能是坏的（spikes.md S7 实测
+ * `command -v su` 返回了路径，但 `su` 本身可能是坏的（实测
  * busybox su 缺 suid 位，`su -c 'id' root` 直接失败）。所以：
  *  - 工具路径 = `command -v`（只能说明"存在"）
  *  - 能力     = 真做一次（建临时文件再删、真 bind 一次端口、真 `sudo -n`）
@@ -108,7 +108,7 @@ export async function probeFacts(driver: SshDriver, options: ProbeOptions): Prom
   try {
     const res = await driver.exec({
       // 一条复合脚本拿完平台/身份/工具/可写性 —— 每次 exec 都要穿整条连接
-      // （transport.md §8：多跳环境里往返就是钱）
+      // （多跳环境里往返就是钱）
       argv: ['sh', '-c', compositeProbe(toolNames, writePaths)],
       timeoutMs,
     })
@@ -272,7 +272,7 @@ async function probeSystemdScope(
 /**
  * canBindPrivilegedPort：**真 bind 一次** 80/443。
  * 「uid 是不是 0」这种推断在容器、macOS、网络命名空间里都会失真
- * （privilege.md §3.1 明确禁止）。
+ * （ 明确禁止）。
  */
 async function probePrivilegedPort(
   driver: SshDriver,
@@ -315,7 +315,7 @@ async function probePrivilegedPort(
  * sudoAllowlist：`sudo -n -l`。
  *
  * **绝不用 `sudo -S` 探测** —— 它会从 stdin 读密码，没有密码时挂在那里，
- * 而铁律 0 禁止任何等待。`-n` 是唯一安全的探测形式（spikes.md S7 实测：
+ * 而铁律 0 禁止任何等待。`-n` 是唯一安全的探测形式（实测：
  * `sudo -n id` 退出 1 并报 "a password is required"，这正是我们要的结论）。
  */
 async function probeSudoAllowlist(
@@ -352,7 +352,7 @@ export interface CanElevateResult {
 /**
  * 提权能不能成 —— **实证**（`sudo -n true`），不推断。
  *
- * 这正是 spikes.md S7 的教训：`command -v su` 有，但它缺 suid 位，
+ * 这正是的教训：`command -v su` 有，但它缺 suid 位，
  * 实际调用会失败。所以每种 become 都要真跑一次。
  */
 export async function canElevate(
@@ -387,7 +387,7 @@ export async function canElevate(
       const who = res.stdout.trim()
       const first = res.stderr.split(/\r?\n/)[0]?.trim() ?? ''
       if (/must be suid/i.test(first) || /must be a suid/i.test(res.stderr)) {
-        return { available: false, reason: `${first} —— 这台机器的 su 缺 suid 位（spikes.md S7 实测同款失败）` }
+        return { available: false, reason: `${first} —— 这台机器的 su 缺 suid 位（实测同款失败）` }
       }
       return { available: true, reason: `实证通过：${who}`, targetUser: who }
     }

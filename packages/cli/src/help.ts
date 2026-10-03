@@ -1,7 +1,7 @@
 /**
  * 帮助文本。**纯函数** —— 只拼字符串，不读环境、不看 argv。
  *
- * 两类读者同时在用（decisions.md §18）：人靠「这段到底干什么」和例子；
+ * 两类读者同时在用：人靠「这段到底干什么」和例子；
  * agent 靠「用法行 + 开关全名 + 退出码」照着拼命令行。所以每条帮助都必须同时
  * 给出：用途 / 用法行 / 开关 / **至少两个可直接复制的例子** / 相关命令。
  * 缺任何一样，对其中一类读者就是死的 —— 而 agent 读不懂就会瞎猜参数。
@@ -26,7 +26,7 @@ export interface CommandDoc {
 }
 
 const GLOBAL_FLAGS: readonly (readonly [string, string])[] = [
-  ['-c, --config <path>', '指定配置文件；不给则按 DP_CONFIG → 自动发现（decisions.md §6）'],
+  ['-c, --config <path>', '指定配置文件；不给则按 DP_CONFIG → 自动发现'],
   ['--env <name>', '环境档案名，对应 config.profiles.<name>'],
   ['--host <id>', '目标主机；候选多于一个又没指定时报错并列出可选值'],
   ['--project <name>', '项目名；候选多于一个又没指定时报错并列出可选值'],

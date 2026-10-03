@@ -2,9 +2,9 @@
  * @dp/log —— 结构化日志。
  *
  * 输出 JSONL，字段对齐 OpenTelemetry 语义约定，**不依赖** OTel 包
- * （decisions.md §7）：零运行时依赖，桥接留给可选包 @dp/log-otel。
+ * 零运行时依赖，桥接留给可选包 @dp/log-otel。
  *
- * 脱敏集中在出口：调用方只管写字段，不许自己 scrub（docs/security.md）。
+ * 脱敏集中在出口：调用方只管写字段，不许自己 scrub。
  * 日志的任何失败都不得冒泡 —— 部署比日志重要。
  */
 export type { LogLevel, LogRecord, LogSink } from '@dp/ports'

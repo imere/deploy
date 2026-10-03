@@ -1,7 +1,7 @@
 /**
  * SSH 驱动抽象与**偏好链**。
  *
- * 为什么要两条驱动（spikes.md 对设计的冲击 #1）：
+ * 为什么要两条驱动：
  *  - `native-ssh` 走系统 ssh 二进制：抗量子 KEX ✅（S2 实测默认就协商出
  *    mlkem768x25519-sha256）、ssh_config ✅、ProxyJump ✅、密码靠 SSH_ASKPASS（S3）
  *  - `ssh2` 是纯 JS：零外部依赖、keyboard-interactive ✅、rsync 隧道 ✅，
@@ -9,7 +9,7 @@
  *    Unsupported algorithm）
  *
  * 所以 native 排第一，ssh2 是降级。链上全失败时必须把**每一项的失败原因**都
- * 报出来（AGENTS.md：没有 hint 的错误等于没报错）。
+ * 报出来（没有 hint 的错误等于没报错）。
  */
 import { DpError } from '@dp/ports'
 import type { SshArgvOptions } from './argv.js'
@@ -27,7 +27,7 @@ export interface ExecRequest {
   readonly argv: readonly string[]
   readonly timeoutMs?: number
   readonly cwd?: string
-  /** 远端额外环境变量。凭据绝不许走这里（security.md §3） */
+  /** 远端额外环境变量。凭据绝不许走这里 */
   readonly env?: Readonly<Record<string, string>>
 }
 
@@ -107,7 +107,7 @@ export interface SshConnectionOptions {
   readonly timeoutMs?: number
   readonly maxOutputBytes?: number
   /**
-   * 多跳。本批**未实现**（spikes.md S4：加固跳板机普遍禁 TCP 转发，
+   * 多跳。本批**未实现**（加固跳板机普遍禁 TCP 转发，
    * 降级链 direct-tcpip → nc → ssh-relay 留到下一批）。
    * 给了非空值就报错，而不是悄悄按单跳处理。
    */
@@ -123,7 +123,7 @@ export function assertNoHops(hops: readonly HopSpec[] | undefined): void {
   if (hops !== undefined && hops.length > 0) {
     throw new DpError('DP.CONFIG.INVALID', `多跳尚未支持：收到 ${hops.length} 跳配置`, {
       path: 'hosts.*.ssh.hops',
-      hint: '本批只做单跳。带跳板机请改用 native-ssh + ssh.proxyJump（单跳由系统 ssh 的 ProxyJump 处理）；多跳降级链（direct-tcpip → nc → ssh-relay）见 docs/spikes.md S4，下一批实现',
+      hint: '本批只做单跳。带跳板机请改用 native-ssh + ssh.proxyJump（单跳由系统 ssh 的 ProxyJump 处理）；多跳降级链（direct-tcpip → nc → ssh-relay）下一批实现',
     })
   }
 }
@@ -180,7 +180,7 @@ export async function resolveDriver(
       ? '安装 OpenSSH 客户端（Windows 10+ 自带 ssh.exe，Linux 用 openssh-client），或装 ssh2'
       : `你显式指定了 ${options.explicit} 但它不可用`,
     'ssh2 是可选依赖：`pnpm add -D ssh2` 后本包会自动降级使用它',
-    '注意：ssh2 **不支持抗量子 KEX**（spikes.md S1 实测），若 crypto.kexPolicy=pq-required 只能走 native-ssh',
+    '注意：ssh2 **不支持抗量子 KEX**（实测），若 crypto.kexPolicy=pq-required 只能走 native-ssh',
   ].join('；')
 
   throw new DpError('DP.SSH.DRIVER_UNAVAILABLE', `没有可用的 SSH 驱动，已尝试：\n${detail}`, { hint })

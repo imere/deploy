@@ -61,7 +61,7 @@ describe('collectVars', () => {
     assert.deepEqual(collectVars('plain text'), [])
   })
 
-  it('KNOWN_VARS 覆盖 config.md §3.3 的全部变量', () => {
+  it('KNOWN_VARS 覆盖变量表的全部变量', () => {
     for (const name of ['env.NAME', 'git.sha', 'git.branch', 'git.tag', 'release.id', 'release.current', 'project', 'env', 'now']) {
       assert.ok(KNOWN_VARS.includes(name), `KNOWN_VARS 缺 ${name}`)
     }

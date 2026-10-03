@@ -1,7 +1,7 @@
 /**
  * 给 rsync 的 `--rsh` 造 argv —— **纯函数，零 IO**。
  *
- * 契约来自 docs/spikes.md S5（实测 rsync 3.5.0）：
+ * 契约来自（实测 rsync 3.5.0）：
  *
  * ```
  * < -e 的 argv（按空白拆分）... >  [ -l <user> ] <host> rsync --server [--sender] <flags> <src> <dst>
@@ -24,7 +24,7 @@
  * 结论：
  *  - `proxy-jump`（`-J a,b`）**无空白**，可以直接走 `-e`；
  *  - 两种 ProxyCommand 形态的 argv 可以构造（单测覆盖），但**不能**经由
- *    `rshOptionValue()` 交给 rsync —— 那条路要换 docs/transport.md §6 的
+ *    `rshOptionValue()` 交给 rsync —— 那条路要换 的
  *    dp-rsh 自建助手（argv 走 IPC，不经空白拆分）。本文件把这条边界做成显式断言。
  */
 import { DpError } from '@dp/ports'
@@ -46,7 +46,7 @@ export type HopMode =
   | 'proxy-jump'
   /** `-o ProxyCommand=ssh <jump> -W %h:%p`，直连转发被拒时的退路 */
   | 'proxy-command-w'
-  /** `-o ProxyCommand=ssh <jump> nc %h %p`，跳板禁 TCP 转发但允许 exec 时的退路（spikes.md S4） */
+  /** `-o ProxyCommand=ssh <jump> nc %h %p`，跳板禁 TCP 转发但允许 exec 时的退路 */
   | 'proxy-command-nc'
 
 export const DEFAULT_CONNECT_TIMEOUT_SEC = 15
@@ -77,7 +77,7 @@ const hasWhitespace = (s: string): boolean => /[\s]/.test(s)
  * 构造 `--rsh` 的 argv 前缀。
  *
  * **返回的 argv 不含主机名，也不含 `rsync --server`** —— 那半截是 rsync 自己追加的
- * （spikes.md S5 实测样本 `ARGC=8 [-l][dpuser][dp-target][rsync][--server]...`）。
+ * （实测样本 `ARGC=8 [-l][dpuser][dp-target][rsync][--server]...`）。
  * 写上主机名会变成"连错两次"。
  */
 export function buildRshArgv(options: RshOptions): readonly string[] {
@@ -157,9 +157,9 @@ export function rshValueForRsync(argv: readonly string[]): string {
       throw new DpError('DP.CONFIG.INVALID', 'ProxyCommand 形态的 rsh 无法通过 rsync 的 -e 传递', {
         path: 'hosts.*.hops',
         hint:
-          `原因：rsync 把 -e 的值按空白拆分且不过 shell（spikes.md S5），而 ${proxyCommand.slice(0, 40)}… 里含空格。` +
+          `原因：rsync 把 -e 的值按空白拆分且不过 shell，而 ${proxyCommand.slice(0, 40)}… 里含空格。` +
           '两条出路：1) 改用 -J 形态（hopMode 缺省即 proxy-jump，无空白）；' +
-          '2) 走 docs/transport.md §6 的 dp-rsh 自建 remote-shell 助手，argv 经 IPC 传递不拆分',
+          '2) 走 dp-rsh 自建 remote-shell 助手，argv 经 IPC 传递不拆分',
         cause: err,
       })
     }

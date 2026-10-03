@@ -4,7 +4,7 @@
  * 铁律 1 在这里是**结构性**保证而不是靠 try/catch 补救：
  * 1. 级别不够 → 直接 return，连 record 都不组装（省掉脱敏与格式化的开销）
  * 2. 脱敏 → 格式化 → sink.write，三步各自都有兜底
- * 3. `sink.write` 拿到的**一定是脱敏后**的 record（见 §3：脱敏属于出口职责）
+ * 3. `sink.write` 拿到的**一定是脱敏后**的 record（脱敏属于出口职责）
  */
 import type { LogLevel, LogRecord, Logger as LoggerPort, LogSink } from '@dp/ports'
 import { formatRecord } from './format.js'

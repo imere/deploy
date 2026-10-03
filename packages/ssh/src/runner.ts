@@ -2,7 +2,7 @@
  * 远端 Runner —— 把 `Runner` 接口落到 SSH 上。
  *
  * 与 packages/local/src/runner.ts 形状完全一致，target 与 core 不需要知道
- * 对面是本机子进程还是三跳之外的机器（transport.md §1 纪律 3）。
+ * 对面是本机子进程还是三跳之外的机器。
  *
  * 路径安全的落点：**任何路径在发出去之前**都先过两道 ——
  *  1. `normalizeRemotePath`：归一化 + 绝对路径 + 允许根校验（防 `..` 逃逸）

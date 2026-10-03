@@ -31,7 +31,7 @@ describe('buildScpArgv', () => {
     assert.equal(argv[0], '/usr/bin/scp')
     assert.ok(argv.includes('-r'))
     assert.ok(argv.includes('-p'))
-    // OpenSSH 9+ 的 scp 默认走 sftp，显式 -O 让行为确定（spikes.md S8）
+    // OpenSSH 9+ 的 scp 默认走 sftp，显式 -O 让行为确定
     assert.ok(argv.includes('-O'))
   })
 

@@ -1,7 +1,7 @@
 /**
  * SSH_ASKPASS 助手 —— 本机临时可执行文件，**只在密码认证时用**。
  *
- * 为什么需要它（spikes.md S3 实测）：本机没有 sshpass，也不允许用。而
+ * 为什么需要它（实测）：本机没有 sshpass，也不允许用。而
  * OpenSSH 只肯从 TTY 或 askpass 助手读密码 —— `SSH_ASKPASS=<helper>
  * SSH_ASKPASS_REQUIRE=force DISPLAY=:0 ssh ... < /dev/null` 是实测可行的那条路。
  *

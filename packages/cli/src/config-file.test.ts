@@ -14,7 +14,7 @@ import {
   validateConfig,
 } from './config-file.js'
 
-/** 临时目录必须清干净 —— 测试不许在系统里留垃圾（AGENTS.md 铁律 4 的延伸） */
+/** 临时目录必须清干净 —— 测试不许在系统里留垃圾（铁律 4 的延伸） */
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = await fs.mkdtemp(join(tmpdir(), 'dp-cli-cfg-'))
   try {

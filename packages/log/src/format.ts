@@ -8,7 +8,7 @@ import type { LogRecord } from '@dp/ports'
 import type { LogFormat } from './options.js'
 
 /**
- * 固定字段，**顺序即输出顺序**（decisions.md §7）。
+ * 固定字段，**顺序即输出顺序**。
  * 机器读日志的人会按这个顺序做 grep/awk，硬编码在类型上就不容易漂移。
  */
 export const FIXED_FIELDS: readonly string[] = [
@@ -102,7 +102,7 @@ export function formatLogfmt(record: LogRecord): string {
 // ------------------------------------------------------------
 
 /**
- * pretty 的最终格式（decisions.md §7 未定死，这里定版）：
+ * pretty 的最终格式（这里定版）：
  *
  *   `07:00:00.000 INFO  transfer.begin  host=web-01 bytes=1048576`
  *   ^ 时:分:秒.毫秒  ^ 右对齐到 5   ^ 事件名  ^ logfmt 风格字段

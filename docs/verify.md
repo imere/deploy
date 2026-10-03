@@ -51,7 +51,7 @@ flowchart LR
 | `tcp` | 端口连通 | `host`、`port`、`timeoutMs` |
 | `command` | 任意命令（`nginx -t`、`curl`、自己写的脚本） | `run`、`expectExit`、`expectStdout` |
 | `fileExists` | 关键文件已就位 | `path`、`minSizeBytes` |
-| `mount`（容器专属） | 校验数据卷挂载是否符合预期 | 见 §5 |
+| `mount`（容器专属） | 校验数据卷挂载是否符合预期 |  |
 
 所有探针统一带：超时（严格小于发布超时）、重试次数与退避、以及**失败时的取证动作**。
 

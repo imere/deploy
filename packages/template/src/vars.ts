@@ -5,7 +5,7 @@
  * 前提下说清「这个配置里有哪几个变量、分别从哪来」，而真正替换发生在执行期。
  * 同一套扫描产出两处使用，错误码与顺序才会一一对应。
  *
- * 语法（docs/config.md §3.3）：
+ * 语法：
  *   ${env.NAME}  环境变量        ${git.sha|branch|tag}  git 状态
  *   ${release.id|current}        ${project} ${env} ${now}
  *
@@ -189,7 +189,7 @@ function missingValue(name: string, hint: string): DpError {
  *
  * **空串一律按缺值处理**，不静默渲染成空：`${env.FOO}` 变成空会让路径塌成
  * `/srv//`，而这种故障要等到远端写入之后、甚至服务起不来时才暴露，
- * 那时的现场已经被后续步骤覆盖了（docs/failures.md 的同一个教训）。
+ * 那时的现场已经被后续步骤覆盖了（的同一个教训）。
  */
 export function resolveVar(name: string, ctx: RenderContext, options?: { path?: string }): string {
   const path = options?.path

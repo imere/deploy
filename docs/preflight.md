@@ -72,9 +72,9 @@ flowchart TB
 | 提权可用性 | `sudo -n true` / `su -c 'true'` 的成败 | 决定这条部署会不会需要密码 |
 | confd 可写 | 用带随机后缀、必将被删除的临时文件名试探 | 常见坑：confd 是只读挂载、或属于别的用户 |
 | **状态目录链可写且未被抢占** | 逐层校验状态目录（system 布局 `/var/lib/dp`，user 布局 `$XDG_STATE_HOME/dp`）的 owner 与写权限 | 租约锁若可被他人伪造，等于永久阻塞所有部署（可用性攻击，不只是权限问题） |
-| **带外脚本目录链安全**（仅 `--with-rescue`） | 逐层校验代码域每一级 owner == 布局所有者且非 group/other 可写 | **不合格即拒绝安装**，报 `DP.SEC.RESCUE_UNSAFE_PATH`；这是提权面，不能降级为警告（见 `failures.md` §7.1） |
-| **布局推导与一致性** | 由能力集推导 `system|hybrid|user`，与状态索引里记录的布局比对 | 前后身份不一致会让状态目录 owner 错乱 → `DP.LAYOUT.MISMATCH` 并中止（见 `privilege.md` §2.2） |
-| **能力实证**（而非身份推断） | `canBindPrivilegedPort`、`systemdScope` + linger、`sudoAllowlist` 逐条试探 | 见 `privilege.md` §1；不能靠"是不是 root"推断 |
+| **带外脚本目录链安全**（仅 `--with-rescue`） | 逐层校验代码域每一级 owner == 布局所有者且非 group/other 可写 | **不合格即拒绝安装**，报 `DP.SEC.RESCUE_UNSAFE_PATH`；这是提权面，不能降级为警告 |
+| **布局推导与一致性** | 由能力集推导 `system|hybrid|user`，与状态索引里记录的布局比对 | 前后身份不一致会让状态目录 owner 错乱 → `DP.LAYOUT.MISMATCH` 并中止 |
+| **能力实证**（而非身份推断） | `canBindPrivilegedPort`、`systemdScope` + linger、`sudoAllowlist` 逐条试探 | ；不能靠"是不是 root"推断 |
 
 试探文件必须在同一个 try 里创建并删除，且路径带随机后缀，避免留下垃圾。
 

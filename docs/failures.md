@@ -27,7 +27,7 @@
 
 ### 2.1 目标机状态日志 `state journal`
 
-路径：`<状态目录>/state/<project>/journal.jsonl`，append-only，每步一行。状态目录**随布局而定**（system 布局 `/var/lib/dp/`，user 布局 `$XDG_STATE_HOME/dp/`），见 `privilege.md` §2。
+路径：`<状态目录>/state/<project>/journal.jsonl`，append-only，每步一行。状态目录**随布局而定**（system 布局 `/var/lib/dp/`，user 布局 `$XDG_STATE_HOME/dp/`），。
 
 ```jsonl
 {"ts":"...","deployId":"d-7f3a","step":"transfer","status":"begin","host":"web-01"}
@@ -126,7 +126,7 @@ service: defineService({
 | `DP.PERM.*` / `DP.LSM.SELINUX_*` | 预检 | ✅ | abort 或 auto-remedy | `@dp/preflight` + `@dp/lsm` |
 | `DP.PERM.CONFD_NOT_WRITABLE` | 装配 | ✅ | abort（**一个字节都没写就退**，不猜路径） | `@dp/cli`（`dp apply`，nginx 目标的 confd 推导） |
 | `DP.PORT.OCCUPIED` | 预检 | ✅ | abort（或 `portPolicy`） | `@dp/preflight` |
-| `DP.FILE.LOCKED` | 传输/激活 | ⚠️ | 见 §5 | `@dp/target-*` |
+| `DP.FILE.LOCKED` | 传输/激活 | ⚠️ |  | `@dp/target-*` |
 | `DP.LOCK.HELD` | 并发 | ✅ | abort + 打印持锁者 | `@dp/core` |
 | `DP.STATE.INCONSISTENT` | 运行期 | ✅ | abort + 打印索引现状（**不**静默改动 current） | `@dp/cli`（`dp rollback`） |
 | `DP.TPL.UNKNOWN_VAR` | 配置渲染 | ✅ | abort（**绝不留下 `${x}` 原文**） | `@dp/template` |
@@ -232,7 +232,7 @@ dp rescue <host> --mask-service | --rollback | --release-lock
 
 讽刺的是：为了让普通用户也能部署，我们恰恰最倾向于把状态目录设成对部署用户可写 —— 那正是这个漏洞最容易被触发的时刻。
 
-**修法是代码/数据分离，两个域的路径随布局走**（布局定义见 `privilege.md` §2）：
+**修法是代码/数据分离，两个域的路径随布局走**（布局定义见 `privilege.md`）：
 
 | 布局 | 代码域（不可被部署身份写） | 数据域（可写） |
 |---|---|---|
@@ -259,7 +259,7 @@ dp rescue <host> --mask-service | --rollback | --release-lock
 
 `dp status` / plan 必须标注本次能力（`rescue: full | user-level | inband-only`）并告警 —— 不能让人以为自己有兜底。
 
-user 布局还有个连带问题：没有 linger 时用户一注销，timer 本身也停了（见 `privilege.md` §3.3）。**带外救援在纯用户模式下几乎不可靠**，这点要写进文档，不能含糊。
+user 布局还有个连带问题：没有 linger 时用户一注销，timer 本身也停了。**带外救援在纯用户模式下几乎不可靠**，这点要写进文档，不能含糊。
 
 ### 7.3 三种身份要分清（否则权限一定配错）
 
@@ -271,7 +271,7 @@ user 布局还有个连带问题：没有 linger 时用户一注销，timer 本�
 
 服务身份若需要读取状态（如当前 releaseId），只能读**单独导出的只读子集**（`0644`），不能因此给它写权限。
 
-**布局一致性**：同一项目前后用不同身份部署，会让状态目录 owner 错乱（今天 root、明天 deploy）→ 报 `DP.LAYOUT.MISMATCH` 并中止（见 `privilege.md` §2.2）。
+**布局一致性**：同一项目前后用不同身份部署，会让状态目录 owner 错乱（今天 root、明天 deploy）→ 报 `DP.LAYOUT.MISMATCH` 并中止。
 
 ### 7.4 SELinux
 
@@ -283,10 +283,10 @@ user 布局还有个连带问题：没有 linger 时用户一注销，timer 本�
 
 | 文档 | 承接内容 |
 |---|---|
-| `preflight.md` | §4 中所有"可预检 ✅"项的实现，§6 磁盘预算 |
-| `transaction.md` | §2.1 日志、§2.2 租约锁、补偿动作编排 |
-| `verify.md` | §2.3 健康检查与 promote 判据 |
-| `targets.md` | §3 资源护栏注入、§5 版本目录替换 |
+| `preflight.md` | 中所有"可预检 ✅"项的实现，磁盘预算 |
+| `transaction.md` | 日志、租约锁、补偿动作编排 |
+| `verify.md` | 健康检查与 promote 判据 |
+| `targets.md` | 资源护栏注入、版本目录替换 |
 | `security.md` | 故障响应中的凭据处理、救援通道的鉴权 |
 
 ---
@@ -302,7 +302,7 @@ user 布局还有个连带问题：没有 linger 时用户一注销，timer 本�
 | 字段 | 默认值 | 依据 |
 |---|---|---|
 | `trialTimeout` | `10m` | 够人发现不对劲，又不至于让坏版本活太久（已确认） |
-| `autoPromote` | `'when-healthcheck-passes'` | 见 §2.3；无健康检查时退化为 `'never'` 并告警 |
+| `autoPromote` | `'when-healthcheck-passes'` | ；无健康检查时退化为 `'never'` 并告警 |
 | `promoteConsecutivePasses` / `promoteWindow` | `3` / `30s` | 抖一次不算过，持续通过才算 |
 
 ## 仍开放

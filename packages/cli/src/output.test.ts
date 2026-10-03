@@ -61,7 +61,7 @@ describe('output · 退出码映射（纯函数）', () => {
   })
 
   it('2 = 验证失败且已回滚：DP.VERIFY.FAILED 独立于「部署失败已回滚」的 1', () => {
-    // docs/transaction.md：CI 要能对验证失败单独发通知，所以它不能和 1 混同
+    //：CI 要能对验证失败单独发通知，所以它不能和 1 混同
     assert.equal(exitCodeFor(new DpError('DP.VERIFY.FAILED', '健康检查未通过')), EXIT_VERIFY_FAILED)
     assert.equal(exitCodeFor(new DpError('DP.VERIFY.NO_HEALTHCHECK', 'x')), EXIT_FAILURE)
     // 而「其余部署失败但已完整回滚」仍然是 1
@@ -83,7 +83,7 @@ describe('output · 退出码映射（纯函数）', () => {
   })
 
   it('其余 DpError → 1，不编造新码', () => {
-    // DP.VERIFY.FAILED 已从这条移走：它按 docs/transaction.md 有了专属映射（→ 2），
+    // DP.VERIFY.FAILED 已从这条移走：它有了专属映射（→ 2），
     // 不再属于「其余」。断言的是行为契约，契约改了断言就得跟着改。
     assert.equal(exitCodeFor(new DpError('DP.TIMEOUT.EXEC', 'x')), EXIT_FAILURE)
     assert.equal(exitCodeFor(new DpError('DP.PERM.ELEVATION_REQUIRED', 'x')), EXIT_FAILURE)

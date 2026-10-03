@@ -27,7 +27,7 @@ pnpm verify   # build + test
 pnpm clean    # tsc -b --clean
 ```
 
-Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：esbuild 的平台二进制在本机装不上（见 `docs/troubleshooting.md` §2），
+Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：esbuild 的平台二进制在本机装不上，
 而 Node 24 内置测试运行器够用且零依赖。
 
 测试文件与源码同目录（`src/*.test.ts`），经 `tsc -b` 落到 `build/` 后由 `node --test` 执行；
@@ -35,7 +35,7 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：esbuild 的平台二进制�
 
 本机 pnpm 的 isolated 布局会因缺开发者模式而静默丢链接，`postinstall` 里的
 `scripts/link-workspace.mjs` 用 junction 补上。**不要为了绕坑改成 hoisted** ——
-那等于丢掉 pnpm 的核心价值。解除条件见 `docs/troubleshooting.md` §1。
+那等于丢掉 pnpm 的核心价值。解除条件。
 
 ## 目录
 
@@ -62,6 +62,12 @@ build/          覆盖率产物所在根目录（已 gitignore）
 ## 写作纪律（文档与注释）
 
 - **注释只解释「为什么这么定 / 不这么定会怎样」**，不复述代码在做什么。复述型注释是噪声，见到就删。
+- **不引用文档章节**：注释、`hint`、schema 的 description（用户看得见的那几处）里都不写
+  「见 docs/x.md §N」「与 x.md §N 逐字符一致」这类指向章节号的引用。**章节号会漂移** ——
+  实测撞过一次：文档写 `target.pick: highest | first`，schema 实际是 `auto | fail`。
+  而且读代码的人手边没有文档，写了等于没写。依据要么**就地把事实写清楚**，要么指向代码
+  （`@dp/template` 的 `KNOWN_VARS`、`canElevate()` 之类）；代码里连文档名都不要出现，
+  `spikes.md S5 实测 …` 只留「实测 …」。文档之间的指路不算这条（那是导航，不是依据）。
 - **不写私有环境**：本机绝对路径、代理端口、token、用户名一律不进文档与注释，用占位符或参数化写法。
   （容器靶机地址 `127.0.0.1:2222` / `dpuser` 是可复现的实验环境，不算。）
 - **不注水**：文档按"改代码顺手改对应文档"维护，不新增说明性 markdown；套话式的"总结"不写。
@@ -83,7 +89,7 @@ build/          覆盖率产物所在根目录（已 gitignore）
   **多跳对用户未开放**：`@dp/ssh` 的 `connect()` 对非空 `hops` 显式抛 `DP.CONFIG.INVALID`；
   `@dp/transport` 的 rsh 能构造 `-J a,b` 与 `ProxyCommand` 两种 argv，但配置里没有 `hops` 字段。
   开放要同时动 schema 与 ssh 驱动，别在 apply 里 cast 一个不存在的字段假装接上了
-- **模板**：渲染一律走 `@dp/template`，变量表以 `docs/config.md` §3.3 为准（不发明变量名）；
+- **模板**：渲染一律走 `@dp/template`，变量表以 为准（不发明变量名）；
   `$host` / `$request_uri` / `$1` 之类**必须原样保留**（吃掉它们产出的 nginx conf 直接废掉），
   要字面量 `${x}` 写 `$${x}`。包本身零 IO：环境变量、git 状态、时钟都由调用方注入，
   否则 `makePlan()` 就不再是纯函数。缺值与空值一律报 `DP.TPL.*`，**绝不留下 `${x}` 原文**

@@ -1,7 +1,7 @@
 /**
  * 传输层的**形状**。本文件零 IO —— 只有类型。
  *
- * 一条贯穿全包的原则（docs/transport.md §7）：**协商必须显式可见**。
+ * 一条贯穿全包的原则：**协商必须显式可见**。
  * 所以 `TransferResult` 必带 `kind` 与 `reasons`，`TransferChoice` 必带被拒绝的
  * 每一项 —— 只给结论等于没法排障（"为什么这次比上次慢" 是真实存在的用户问题）。
  */
@@ -30,7 +30,7 @@ export interface TransferRequest {
   readonly port?: number
   /** 远端提权（@dp/ports）。rsync 走 --rsync-path，tar 走命令包装 */
   readonly become?: BecomeConfig
-  /** 是否删目标上多出来的文件。默认关：往非我们管理的目录做删除不可接受（transport.md §6） */
+  /** 是否删目标上多出来的文件。默认关：往非我们管理的目录做删除不可接受 */
   readonly deleteExtraneous?: boolean
   readonly dryRun?: boolean
   readonly timeoutMs?: number
@@ -127,7 +127,7 @@ export interface TransportDeps {
   readonly timeoutMs?: number
   /** 显式偏好链。给了就按它选，不可用则抛 DP.PREF.UNSUPPORTED */
   readonly preferred?: TransportPreference
-  /** 主机密钥策略。缺省 strict（AGENTS.md 铁律 3） */
+  /** 主机密钥策略。缺省 strict（铁律 3） */
   readonly knownHostsMode?: import('@dp/ssh').KnownHostsMode
   /** sftp 子系统是否可用，缺省 true */
   readonly sftpAvailable?: boolean

@@ -1,7 +1,7 @@
 /**
  * scp 传输 —— 纯 argv + 注入式执行。
  *
- * 定位：**最后手段**（spikes.md S8：OpenSSH 9+ 的 scp 默认走 sftp 协议，
+ * 定位：**最后手段**（OpenSSH 9+ 的 scp 默认走 sftp 协议，
  * `-O` 只是为兼容老目标）。所以 `buildScpArgv` 显式带 `-O`，让行为确定，
  * 不依赖本机 scp 的版本默认值。
  *

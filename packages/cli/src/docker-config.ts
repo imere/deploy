@@ -8,7 +8,7 @@
  * 与 nginx 侧的关键差异：**这里不推导任何目标机路径**。发布根由 resolveTarget 从
  * 实测能力推导（compose 文件随 release 上传后就在那个目录之下），而 compose 文件
  * 自己的路径是**相对 release 目录**的（compose.ts 的 assertRelative 强制）——
- * 也就是说这里没有任何一个字段能承载「部署到哪」，这是对的（docs/config.md §4）。
+ * 也就是说这里没有任何一个字段能承载「部署到哪」，这是对的。
  */
 import type { TargetContext } from '@dp/ports'
 import type { DockerConfig } from '@dp/schema'

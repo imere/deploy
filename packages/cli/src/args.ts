@@ -16,8 +16,7 @@ import { DpError } from '@dp/ports'
  *
  * 为什么需要这个子类：`DpErrorCode` 是 @dp/ports 的封闭联合，**不允许**在 CLI
  * 里加新码（改 ports 属于跨包改动），而 `CONFIG_INVALID` 同时覆盖「命令行写错」
- * 和「配置文件写错」两种完全不同的失败 —— 退出码不一样（2 vs 3，transaction.md
- * L99），CI 也要区别对待。所以用法错误靠**类型**区分，不靠码。
+ * 和「配置文件写错」两种完全不同的失败 —— 退出码不一样（用法错退 2、配置错退 3），CI 也要区别对待。所以用法错误靠**类型**区分，不靠码。
  */
 export class CliUsageError extends DpError {
   constructor(message: string, options: { readonly path?: string; readonly hint?: string } = {}) {

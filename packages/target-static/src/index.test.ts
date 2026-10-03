@@ -3,7 +3,7 @@
  *
  * 为什么要有这一层：Release/切换/清理的语义与文件系统无关，
  * 把它抽出来就能在任何平台上断言，不需要真 Windows / 真 macOS 机器
- * （docs/testing.md §3.1 —— 纯函数夹具层）。
+ * （ —— 纯函数夹具层）。
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'

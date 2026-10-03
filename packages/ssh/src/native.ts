@@ -1,7 +1,7 @@
 /**
  * native-ssh 驱动 —— spawn 系统 `ssh` 二进制。
  *
- * 排第一的理由只有一个，但它不可替代（spikes.md S1/S2 实测）：
+ * 排第一的理由只有一个，但它不可替代（/S2 实测）：
  * **只有它能协商抗量子 KEX**。本机 OpenSSH 10.3 默认就协商出
  * mlkem768x25519-sha256；ssh2 传这个算法直接抛 Unsupported algorithm。
  *
@@ -252,7 +252,7 @@ export class NativeSshDriver implements SshDriver {
       const secret = this.options.secrets?.password ?? this.options.secrets?.passphrase
       if (secret === undefined) {
         throw new DpError('DP.SSH.AUTH_FAILED', `认证方式是 ${this.options.auth.type}，但没有解析出凭据`, {
-          hint: '本包不解析 passwordRef（那是 schema/config 层的职责，security.md §3）。请在 SshConnectionOptions.secrets 里传入明文',
+          hint: '本包不解析 passwordRef（那是 schema/config 层的职责）。请在 SshConnectionOptions.secrets 里传入明文',
         })
       }
       askpass = createAskpassHelper(secret)
@@ -268,7 +268,7 @@ export class NativeSshDriver implements SshDriver {
     // 代价要说清楚：sshd 的 `AcceptEnv` 没放行这个名字时，ssh 会**静默忽略**
     // SetEnv。所以这仍然是「目标机配了才生效」的能力，setEnvOptions 的注释与
     // 这里的注释都写明了这一点，不假装它必然生效。
-    // 凭据永远不走这里（security.md §3）。
+    // 凭据永远不走这里。
     const argv = [
       ...buildSshArgv({ ...this.sshArgvBase(req.env), remoteArgv: req.argv }),
       hostTarget(this.options.host, this.options.user),
@@ -387,7 +387,7 @@ export class NativeSshDriver implements SshDriver {
    * 给 rsync 的 `--rsh` 前缀。
    *
    * **不含 host、不含 `%h`** —— rsync 自己会追加 `[-l user] host rsync --server ...`
-   * （spikes.md S5 实测）。前置 host 会连错两次；写 `%h` 会把字面量传给 ssh。
+   * （实测）。前置 host 会连错两次；写 `%h` 会把字面量传给 ssh。
    */
   async openTunnel(): Promise<Tunnel> {
     if (this.sshPath === null) {

@@ -1,7 +1,7 @@
 /**
  * 路径：模板展开、发布目录候选、跨平台校验。
  *
- * 全部是**纯函数** —— 注入 Facts 即可断言，不需要任何机器（见 testing.md §3.1）。
+ * 全部是**纯函数** —— 注入 Facts 即可断言，不需要任何机器。
  */
 import { DpError, type Facts, type Layout, type Platform } from '@dp/ports'
 
@@ -34,7 +34,7 @@ export function expandTemplate(tpl: string, ctx: TemplateContext): string {
 }
 
 // ------------------------------------------------------------
-// 发布目录候选（规则明示，见 docs/privilege.md §6.2）
+// 发布目录候选（规则明示）
 // ------------------------------------------------------------
 
 export const RELEASE_ROOT_CANDIDATES: Readonly<
@@ -140,7 +140,7 @@ export function pickReleaseRoot(input: PickReleaseRootInput): ReleaseRootChoice 
 
 const SYSTEM_PROBE_PATHS = ['/var/lib', '/usr/local', 'C:/ProgramData'] as const
 
-/** 由**实证能力**推导布局，不靠 uid 推断（docs/privilege.md §1） */
+/** 由**实证能力**推导布局，不靠 uid 推断 */
 export function deriveLayout(facts: Facts): Layout {
   const c = facts.capabilities
   const systemWritable = SYSTEM_PROBE_PATHS.some((p) => c.canWrite[p] === true)

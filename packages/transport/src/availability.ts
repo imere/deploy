@@ -2,8 +2,8 @@
  * 传输方式协商 —— **纯函数，零 IO**。
  *
  * 判定一律看 `facts.tools.<name>`（不存在为 `null`），**绝不看平台**。
- * 原因在 docs/decisions.md：能力必须实证。本机没有 rsync 不是错误而是常态
- * （AGENTS.md：本机 `facts.tools.rsync === null`），按平台猜会在这台机器上
+ * 原因在：能力必须实证。本机没有 rsync 不是错误而是常态
+ * （本机 `facts.tools.rsync === null`），按平台猜会在这台机器上
  * 直接给出错误的结论。
  *
  * 三条纪律：
@@ -11,7 +11,7 @@
  *  1. **必须给出被拒绝的每一种及其原因**。只给结论等于没法排障 —— 用户会问
  *     "为什么这次没走 rsync"，而这个问题的答案就是 `rejected`。
  *  2. **降级必须留痕**。选了 tar-ssh 要能说清"因为本机没 rsync"，否则用户
- *     只会看到"这次比上次慢"（transport.md §7）。
+ *     只会看到"这次比上次慢"。
  *  3. **显式指定不可用就抛错，不静默降级**。用户写了 `rsync-ssh` 而我们偷偷
  *     换成 tar，那是在骗人；`DP.PREF.UNSUPPORTED` 的 message 逐项列清楚。
  */
@@ -103,7 +103,7 @@ function evaluate(
         return {
           kind,
           ok: false,
-          reason: 'sftp 可用，不需要退到 scp：OpenSSH 9+ 的 scp 默认就走 sftp 协议（spikes.md S8），scp -O 只为兼容老目标',
+          reason: 'sftp 可用，不需要退到 scp：OpenSSH 9+ 的 scp 默认就走 sftp 协议，scp -O 只为兼容老目标',
         }
       }
       if (localScp === null || remoteScp === null) {

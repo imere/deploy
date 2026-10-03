@@ -2,7 +2,7 @@
  * 协商的逐分支断言。
  *
  * 断言的重点**不是**选了哪个（那是结论），而是**为什么没选别的** ——
- * `rejected` 是排障入口，丢它等于让用户去猜（transport.md §7）。
+ * `rejected` 是排障入口，丢它等于让用户去猜。
  */
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'

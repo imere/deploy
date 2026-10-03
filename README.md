@@ -169,7 +169,7 @@ flowchart TB
 | 项 | 要求 |
 | --- | --- |
 | `typecheck` | 源码与测试各一个 project，均 `--noEmit` |
-| `lint` | 含 §五条硬规则里的 **import 边界**限制（`no-restricted-imports`），违规即失败 |
+| `lint` | 含五条硬规则里的 **import 边界**限制（`no-restricted-imports`），违规即失败 |
 | 依赖检查 | **严禁循环依赖**与跨层反向依赖，工具校验而不是靠自觉 |
 | 死代码 | 没有未被引用的导出/文件；**见到冗余代码就删，不留「以后可能用」** |
 | 测试 | 纯逻辑包（`schema` / `core` / `template` / 协商策略）**四项 100%**；IO 层靠契约测试与集成，不追数字 |

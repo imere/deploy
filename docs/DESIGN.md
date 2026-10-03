@@ -410,7 +410,7 @@ type DeployError = {
 | 构建 | 根 `rollup.config.js` + `@rollup/plugin-swc`，每包产 ESM + UMD，`.d.ts` 由 `tsc` 出 | 目标 Node 22，**不需要 ES5 降级**，SWC target 调到 node22；保留统一 `build/` 目录约定 |
 | 测试 | vitest，别名直接指向 `src` | 同；分层阈值见 [`testing.md`](./testing.md) |
 | 覆盖报告 | 输出到根 `build/coverage`，`.gitignore` 一条 `build/` | 同；**clean 脚本不许 `rm -rf`**（本机有批量删除保护钩子，参考仓库已踩过，用改名/回收站） |
-| Lint | eslint 平铺配置 + prettier | 增加针对本文 §2 四条边界规则的 import 限制 |
+| Lint | eslint 平铺配置 + prettier | 增加针对四条边界规则的 import 限制 |
 | JSDoc | 抄 `scripts/check-jsdoc.mjs`：每个函数中文描述 + 逐个 `@param` + `@returns`，描述写「为什么」不写「干了什么」 | 同 |
 | 提交 | Conventional Commits + changesets 发版 | 同 |
 | CI | `pnpm verify` = typecheck → lint → test → build | 增加远端-only 的 job：真机/容器集成默认跳过 |

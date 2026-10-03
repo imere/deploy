@@ -1,7 +1,7 @@
 /**
  * 真机集成测试 —— **默认跳过**。
  *
- * 需要真 SSH 目标时按 `.agents/skills/dp-spike-env/SKILL.md` 起 podman 容器，
+ * 需要真 SSH 目标时按 `.agents/skills/dp-spike-env/` 起 podman 容器，
  * 然后：
  *
  * ```
@@ -130,7 +130,7 @@ describe('真机：rsync --rsh 前缀契约', { skip: SKIP }, () => {
     try {
       const t = await conn.tunnel()
       assert.ok(!t.rshArgv.includes(host), 'rsync 会自己追加 host')
-      assert.ok(!t.rshArgv.some((a) => a.includes('%h')), 'spikes.md S5 实测 %h 不会被替换')
+      assert.ok(!t.rshArgv.some((a) => a.includes('%h')), '实测 %h 不会被替换')
       await t.close()
     } finally {
       await conn.close()

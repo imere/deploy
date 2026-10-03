@@ -4,7 +4,7 @@
  * 为什么要在运行时嗅探：`sudo` 的措辞、`su` 的措辞、`ssh` 的确认提示，
  * 各发行版/各语言都不同，穷举不完（local/src/exec.ts 也留了同样的口子）。
  * 与其穷举，不如**认出一个就立刻失败** —— 挂起等人类输入是比失败恶劣得多的
- * 行为，在 CI 里表现为永久挂起（AGENTS.md 铁律 0）。
+ * 行为，在 CI 里表现为永久挂起（铁律 0）。
  *
  * 难点是**别误伤**：远端日志里出现 `password` 这个词是极常见的
  * （`nginx: password file updated`、`sshd: PasswordAuthentication changed`）。

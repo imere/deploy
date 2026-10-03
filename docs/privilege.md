@@ -15,11 +15,11 @@
 | 能力 | 实证方式 | 说明 |
 |---|---|---|
 | `canWrite[path]` | 建带随机后缀的临时文件后立刻删除 | 只读挂载 / SELinux / ACL 都能让"看着有"变成"实际没有" |
-| `canChown[owner]` | `getent passwd` 存在性 + 试 chown 一个自己新建的文件 | 见 `preflight.md` §2.3 |
+| `canChown[owner]` | `getent passwd` 存在性 + 试 chown 一个自己新建的文件 |  |
 | `systemdScope` | `systemctl --user` 可用性 + `loginctl` linger 状态 | 决定 `system` / `user` / `none` |
 | `canBindPrivilegedPort` | 实际试探绑定 | 普通用户绑不了 80/443 |
 | `sudoAllowlist` | 逐条 `sudo -n <cmd> --dry-run` 式试探 | **能 sudo 哪几条命令**，而不是"能不能 sudo" |
-| `become` | `sudo -n true` / `su -c true` 成败 | 见 `transport.md` §提权 |
+| `become` | `sudo -n true` / `su -c true` 成败 | 见 `transport.md` 提权 |
 
 实证优先于推断这条原则，和已有设计一致（提权从来都要求实证），这里只是**把它推广到所有能力**。
 
@@ -127,10 +127,10 @@ host: defineHost({
 
 | 文档 | 修改 |
 |---|---|
-| `failures.md` §7 | rescue 位置随布局走；纯用户模式下带外救援是**用户级**的，只能切 symlink，不能 mask 系统服务 |
-| `security.md` §6.1 | 状态目录路径随布局；`<root>/.dp/trace/` 改为 XDG 路径；校验条件改为"owner = 布局所有者" |
-| `preflight.md` §2.3 | 目录链校验的"root 拥有"改为"布局所有者拥有" |
-| `decisions.md` §16 | 同上 |
+| | rescue 位置随布局走；纯用户模式下带外救援是**用户级**的，只能切 symlink，不能 mask 系统服务 |
+| | 状态目录路径随布局；`<root>/.dp/trace/` 改为 XDG 路径；校验条件改为"owner = 布局所有者" |
+| | 目录链校验的"root 拥有"改为"布局所有者拥有" |
+| | 同上 |
 | `config.md` | `hosts.*` 增加 `layout` 字段 |
 
 ---
@@ -232,7 +232,7 @@ Windows 上 `current` 软链可能需要特权 → 退化到 `copy` 并**明确�
 
 ### 7.3 测试矩阵要覆盖
 
-`docs/testing.md` 的矩阵层扩展为 `{linux, darwin, win32, freebsd} × {system, hybrid, user} × {release.root 显式 / 推导}`，并对 §7.1 四条各配**纯单元夹具**（不需要真机器）。
+`docs/testing.md` 的矩阵层扩展为 `{linux, darwin, win32, freebsd} × {system, hybrid, user} × {release.root 显式 / 推导}`，并对 四条各配**纯单元夹具**（不需要真机器）。
 
 ---
 

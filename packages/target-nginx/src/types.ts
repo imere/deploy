@@ -2,7 +2,7 @@
  * nginx 目标的配置形状。
  *
  * 这里是**用户写的东西**与**上层注入的东西**的分界。`confd` / `render` /
- * `shadowDir` 都不是配置项：它们由实测能力与部署上下文推导（docs/config.md §4
+ * `shadowDir` 都不是配置项：它们由实测能力与部署上下文推导（
  * 的「路径不是配置项」），所以在本包里是必填的依赖而不是可选项 ——
  * 缺了就得猜，猜出来的路径会让 `nginx -t` 验到另一台机器的配置上去。
  */
@@ -64,7 +64,7 @@ export interface NginxTargetConfig {
    */
   readonly filename?: string
   /**
-   * 目标机上的 confd 目录。**由上层从 layout 推导后注入**（docs/config.md §4：
+   * 目标机上的 confd 目录。**由上层从 layout 推导后注入**（
    * 目标机路径不是配置项）。本包不读环境也不探测，只能要求调用方给。
    */
   readonly confd: string

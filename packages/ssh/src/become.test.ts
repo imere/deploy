@@ -170,7 +170,7 @@ describe('become: su', () => {
     assert.equal(argv[3], `grep 'it'\\''s'`)
   })
 
-  it('转义后的脚本按 POSIX 规则反解析回原参数（属性测试，docs/security.md §4）', () => {
+  it('转义后的脚本按 POSIX 规则反解析回原参数（属性测试）', () => {
     // 随机但确定的一组串：含引号、空格、$、反引号、换行、shell 元字符
     const samples = [
       "it's",

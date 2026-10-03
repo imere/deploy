@@ -6,7 +6,7 @@
  * 不起子进程 —— 它一旦开始读盘，`makePlan()` 就不再是纯函数，plan 也就没法在
  * 没有任何机器的情况下断言。
  *
- * 仲裁刻意保守（docs/config.md §8）：**猜错的代价是「部署到了错误的目标类型」**，
+ * 仲裁刻意保守：**猜错的代价是「部署到了错误的目标类型」**，
  * 而那通常表现为一次线上事故，所以拿不准一律报错 + 列出候选 + 给出排除办法。
  */
 import { DpError } from '@dp/ports'
@@ -18,7 +18,7 @@ export type TargetPick = 'auto' | 'fail'
  * 本仓**已实现**的目标类型。
  *
  * 刻意不等于 `TARGET_KINDS`：schema 里还有 `systemd` / `process`，但它们没有执行器
- * （AGENTS.md：systemd 目标只有 unit 渲染的规则，尚未接线）。两处都叫「目标类型」但
+ * （systemd 目标只有 unit 渲染的规则，尚未接线）。两处都叫「目标类型」但
  * 含义不同，把 schema 的枚举直接当「已实现」用，错误信息就会把用户指向一个跑不了的选项。
  */
 export const IMPLEMENTED_KINDS: readonly string[] = ['static', 'nginx', 'docker']

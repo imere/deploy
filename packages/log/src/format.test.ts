@@ -36,7 +36,7 @@ describe('format / json', () => {
     assert.equal(line.includes('\\n'), true)
   })
 
-  it('decisions.md §7 的示例行逐字符一致', () => {
+  it('示例行逐字符一致', () => {
     const rec: LogRecord = {
       ts: '2026-10-02T07:00:00.000Z',
       level: 'info',

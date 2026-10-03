@@ -115,7 +115,7 @@ async function verifyOne(
     }
 
     if (!check.ok) {
-      // 失败也要给一条能直接敲的下一步（docs/verify.md §6 的 onFailure 思路）：
+      // 失败也要给一条能直接敲的下一步：
       // 只说「不健康」而不说「现在该干什么」，等于把判断成本全推给用户
       throw new DpError('DP.VERIFY.FAILED', `健康检查未通过：${check.reason}`, {
         path: `releases/${state.current}`,

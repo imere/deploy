@@ -187,7 +187,7 @@ function renderSeconds(value_: number, field: string): string {
 /**
  * 反代指令。
  *
- * 默认头是 DESIGN §8.2 要求的「默认正确而不是记得才写」：少写 `X-Forwarded-For`
+ * 默认头是 要求的「默认正确而不是记得才写」：少写 `X-Forwarded-For`
  * 的后果是后端拿不到真实来源 IP，而这件事在日志里看不出来。
  */
 function proxyDirectives(proxy: ReverseProxy, ctx: RenderContext, base: string | undefined, out: (line: string) => void): void {

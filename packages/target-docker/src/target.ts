@@ -96,7 +96,7 @@ export const dockerTarget: Target<DockerTargetConfig> = {
   /**
    * ps → 解析 → 断言。
    *
-   * 用 `compose ps` 而不是 `docker ps`（DESIGN §8.3）：后者列的是这台机器上**所有**
+   * 用 `compose ps` 而不是 `docker ps`：后者列的是这台机器上**所有**
    * 容器，与本项目是否健康无关；前者给的是 compose 级别的期望状态。
    */
   planVerify(ctx, config): readonly Step[] {

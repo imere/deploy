@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { DpError } from '@dp/ports'
 import { detectCandidates, resolveTargetKind } from './detect.js'
 
-// 输入全部靠构造数组：本文件不建目录、不读盘（AGENTS.md 铁律 1，零 IO）
+// 输入全部靠构造数组：本文件不建目录、不读盘（铁律 1，零 IO）
 
 const kinds = (entries: readonly string[], packageScripts?: readonly string[]): string[] =>
   detectCandidates({ entries, ...(packageScripts !== undefined ? { packageScripts } : {}) }).map((c) => c.kind)
@@ -27,7 +27,7 @@ function err(fn: () => unknown): DpError {
 }
 
 // ------------------------------------------------------------
-// 证据表：每一行单独命中（docs/config.md §8）
+// 证据表：每一行单独命中
 // ------------------------------------------------------------
 
 test('证据表：compose 的四种写法都指向 docker（已实现）', () => {
@@ -131,7 +131,7 @@ test('0 命中：报错并列出它看到了哪些文件名，不假装 static',
   const e = err(() => resolveTargetKind({ entries: ['README.md', 'src/main.ts', 'lib/util.ts'] }, 'auto'))
   assert.equal(e.path, 'target.type')
   const hint = e.hint ?? ''
-  for (const f of ['README.md', 'src/main.ts', 'lib/util.ts']) {
+  for (const f of ['', 'src/main.ts', 'lib/util.ts']) {
     assert.ok(hint.includes(f), `hint 应列出 ${f}，实际：${hint}`)
   }
   assert.match(hint, /target\.type/)

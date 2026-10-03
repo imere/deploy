@@ -14,7 +14,6 @@ export type InitSystem = 'systemd' | 'sysvinit' | 'openrc' | 'launchd' | 'winsvc
 
 /**
  * 能力集 —— 一律**实证**得出，不从 uid / 平台推断。
- * 见 docs/privilege.md §1。
  */
 export interface Capabilities {
   /** path → 是否可写（建临时文件后删除的实测结果） */
@@ -136,7 +135,7 @@ export type DpErrorCode =
   | 'DP.DOCKER.FILE_MISSING'
   | 'DP.DOCKER.PULL_FAILED'
   | 'DP.DOCKER.PLAN_MISMATCH'
-  // ↓ 激活失败（failures.md §4 在册，但类型里一直缺这一条）。它单列而不是复用
+  // ↓ 激活失败（在册，但类型里一直缺这一条）。它单列而不是复用
   // DP.VERIFY.FAILED：处置方向相反 —— 验收没过是「已经起来了但状态不对」，
   // 激活失败是「根本没起来」，上层 `dp apply` 据此决定回滚与否。
   | 'DP.ACTIVATE.START_FAILED'
@@ -232,8 +231,7 @@ export interface FileStat {
  * 一条待投递的源条目。
  *
  * 关键是 `read()` 是**惰性**的：传入拒可以先枚举清单（做跨平台校验、
- * 算 releaseId、打印 plan）而完全不读内容。这让 streaming（见
- * docs/transfer-streaming.md）和校验都成为可能。
+ * 算 releaseId、打印 plan）而完全不读内容。这让 streaming 和校验都成为可能。
  */
 export interface SourceFile {
   readonly kind: 'file'
@@ -357,9 +355,9 @@ export interface Logger {
 /**
  * 提权方式的**运行期**形状。
  *
- * 这是 config.md §4 里 `hosts.*.become` 经 schema 层归一化之后的产物：
+ * 这是配置里 `hosts.*.become` 经 schema 层归一化之后的产物：
  * `method: auto|nopasswd|stdin|pty` 与 `passwordRef` 属于配置与凭据解析层，
- * 不该混进这条运行时契约（解析 ref 是 schema 的职责，见 security.md §3）。
+ * 不该混进这条运行时契约（解析 ref 是 schema 的职责）。
  *
  * 硬约束：任何一种取值都**不允许产生会等待 stdin 的命令**（铁律 0）。
  * `nonInteractive: false` 只是"不要 `-n`"，密码通道必须由调用方显式提供。
@@ -369,14 +367,14 @@ export type BecomeConfig =
   /** `nonInteractive` 默认 true，即 `sudo -n`（完全免密） */
   | { readonly type: 'sudo'; readonly user?: string; readonly group?: string; readonly nonInteractive?: boolean }
   | { readonly type: 'doas'; readonly user?: string }
-  /** 已知 busybox su 可能缺 suid 位（spikes.md S7 实测失败），所以只做包装不保证可用 */
+  /** 已知 busybox su 可能缺 suid 位（实测失败），所以只做包装不保证可用 */
   | { readonly type: 'su'; readonly user: string; readonly shell?: string }
   | { readonly type: 'custom'; readonly template: string }
 
 /**
  * 提权的**实证结论**，不是配置声明。
  *
- * 存在它是因为 privilege.md §1 的铁律：能力一律实证。配置里写了
+ * 存在它是因为「能力一律实证」这条铁律：配置里写了
  * `become: { type: 'sudo' }` 不代表这台机器上 `sudo -n` 真能成
  * —— 所以每次部署都要用 `canElevate()` 跑一次并把结论记在这里。
  */

@@ -4,7 +4,7 @@
  * 为什么自研而不是引入库：
  *  1. 错误消息必须带**配置路径**（`projects.web.source.root`），且必须能挂 hint
  *  2. 需要偏好链（preference chain）这种本项目专属语义
- *  3. 零依赖 —— 见 security.md §7 供应链
+ *  3. 零依赖 —— 供应链要可审计
  *
  * 三个用途（对应第 4 条要求）：TS 类型推导 / 运行时校验 / 导出 JSON Schema。
  *

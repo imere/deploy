@@ -174,7 +174,7 @@ function errorFields(err: unknown): { code: string; message: string; path?: stri
 }
 
 /**
- * needsHealing（docs/transaction.md §3）时的告警文案。
+ * needsHealing 时的告警文案。
  *
  * 这是「明确承认」而不是把错误吞掉：保留现场不继续自动操作，说清现在环境是
  * A 部分生效、B 部分没回滚，并给一条**人能直接敲**的下一步命令。
@@ -287,7 +287,7 @@ async function makeTransferHook(
     ...(preferred !== undefined ? { preferred } : {}),
   })
 
-  // 协商结论必须显式可见（transport.md §7）：用户有权知道「为什么这次没走 rsync」
+  // 协商结论必须显式可见：用户有权知道「为什么这次没走 rsync」
   logger.info('apply.transport', {
     kind: choice.kind,
     remoteRoot: `${releaseRoot}/releases/${releaseId}.incoming`,
@@ -299,7 +299,7 @@ async function makeTransferHook(
       : {}),
   })
 
-  // 多跳还没进 schema（AGENTS.md：多跳尚未实现）。不加 `hops` 字段是对的 ——
+  // 多跳还没进 schema（多跳尚未实现）。不加 `hops` 字段是对的 ——
   // 为一个还不存在的配置项写 `(hostConfig as { hops?: ... })` 只是换个写法骗过类型
   // 检查，运行时永远是 undefined，还会让人以为多跳已经通了。
   // 端口走 rsh 的 -p，不进 sshTarget：rsync 自己会在目标串后追加 host，

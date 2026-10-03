@@ -1,13 +1,13 @@
 /**
  * 提权包装 —— **纯函数，零 IO**。
  *
- * 关键设计（docs/transport.md §4）：提权是两个正交问题 ——
+ * 关键设计：提权是两个正交问题 ——
  *  **包装**（`wrap(argv) → argv`，本文件）与**投喂**（提示符出现时怎么答，运行期）。
  * 本文件只管包装，且只管**不产生任何等待 stdin 的命令**（铁律 0）。
  *
- * 为什么 `su` 只做包装、不保证可用：spikes.md S7 实测 busybox `su` 缺 suid 位，
+ * 为什么 `su` 只做包装、不保证可用：实测 busybox `su` 缺 suid 位，
  * `su -c 'id' root` 直接报 `su: must be suid to work properly`。`command -v su`
- * 却返回有 —— 这就是 privilege.md §1「能力必须实证」的典型样本。
+ * 却返回有 —— 这就是「能力必须实证」的典型样本。
  * 所以能不能用由 `canElevate()` 跑一次 `sudo -n true` 说了算，不由本函数决定。
  */
 import { DpError, type BecomeConfig } from '@dp/ports'
@@ -30,7 +30,7 @@ const escape = (o: WrapOptions | undefined): ((a: string) => string) => o?.shell
 function refuseInteractive(what: string): never {
   throw new DpError('DP.CONFIG.INVALID', `become.${what} 会产生一个等待 stdin 的命令，已拒绝`, {
     path: `become.${what}`,
-    hint: '铁律 0：永不交互。要么配免密（sudoers NOPASSWD 白名单，spikes.md S7 实测 `sudo -n` 可用），要么由调用方显式提供密码通道（options.passwordChannel = true，走 stdin 投喂 / pty 会话）',
+    hint: '铁律 0：永不交互。要么配免密（sudoers NOPASSWD 白名单，实测 `sudo -n` 可用），要么由调用方显式提供密码通道（options.passwordChannel = true，走 stdin 投喂 / pty 会话）',
   })
 }
 
@@ -117,7 +117,7 @@ export function wrapCommand(
       if (nonInteractive) out.push('-n')
       if (become.group !== undefined) out.push('-g', become.group)
       if (become.user !== undefined) out.push('-u', become.user)
-      // 永远不带 -E：默认不保留用户环境（security.md §6），否则 LD_PRELOAD 之类会跟着过去
+      // 永远不带 -E：默认不保留用户环境，否则 LD_PRELOAD 之类会跟着过去
       out.push('--', ...argv)
       return out
     }
@@ -133,7 +133,7 @@ export function wrapCommand(
       // su 的密码走 tty，wrap 阶段管不了。能不能用由 canElevate() 实证。
       const out = ['su', become.user]
       if (become.shell !== undefined) out.push('-s', become.shell)
-      // 双层引号是这里最容易写错的地方（docs/transport.md §4 坑 1）：
+      // 双层引号是这里最容易写错的地方：
       // 逐参数转义后再拼，所以用户输入里的单引号已经变成 '\''。
       out.push('-c', argv.map(esc).join(' '))
       return out
@@ -162,7 +162,7 @@ export function wrapCommand(
 
 /** 提权失败时的统一 hint —— 三种机制共用，因为建议的动作是同一个：在目标机配免密白名单 */
 export const ELEVATE_FAILED_HINT =
-  '在目标机给这几条命令加 sudoers NOPASSWD 白名单（spikes.md S7 实测 `sudo -n` 可用），或改用 become.type=none 以普通用户身份部署到可写目录。我们不会替你改 /etc/sudoers.d/ —— 授权必须由运维显式完成（docs/security.md §6）'
+  '在目标机给这几条命令加 sudoers NOPASSWD 白名单（实测 `sudo -n` 可用），或改用 become.type=none 以普通用户身份部署到可写目录。我们不会替你改 /etc/sudoers.d/ —— 授权必须由运维显式完成'
 
 /** 把远端 `sudo -n` 的原话转成安全的、可进 message 的一句话 */
 export function summarizeElevateFailure(stderr: string): string {

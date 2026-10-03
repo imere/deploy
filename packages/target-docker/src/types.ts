@@ -1,7 +1,7 @@
 /**
  * docker 目标的配置形状。
  *
- * 本轮只覆盖 DESIGN §8.3 的**默认模式 `remote-cli`**：compose 文件随 release 上传，
+ * 本轮只覆盖 的**默认模式 `remote-cli`**：compose 文件随 release 上传，
  * 然后在远端跑 `docker compose`。另外两种（build-load / registry）要本机 docker，
  * 依赖与失败模型完全不同，另开回合再长。
  *
@@ -41,7 +41,7 @@ export interface DockerCompose {
 /**
  * 健康检查。`services` 为空 = ps 输出里的每个服务都要通过。
  *
- * 不接受「跳过健康检查」这种配置：DESIGN §2 的结论是没有健康检查就不存在
+ * 不接受「跳过健康检查」这种配置： 的结论是没有健康检查就不存在
  * 「验证通过」，真要跳过由用户在编排层决定，不该由 target 悄悄放行。
  */
 export interface DockerHealthcheck {

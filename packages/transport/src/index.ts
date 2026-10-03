@@ -4,7 +4,7 @@
  * 分层：ports（类型/错误）→ ssh（argv 与提权的唯一出口）→ 本包（编排）→ 调用方。
  * 本包**不发明**任何转义：所有需要拼成 shell 语义的地方都调 `@dp/ssh` 的
  * `quoteArg` / `wrapCommand`。自己再写一套转义是这类系统最典型的严重缺陷来源
- * （docs/security.md §4：转义必须是唯一出口）。
+ * （转义必须是唯一出口）。
  *
  * 纯 / 非纯的分界：`availability` / `rsh` / `rsync` 的 argv / `scp` / `tar-ssh`
  * 的 argv / `local-copy` 的路径计算 —— 零 IO，可 100% 断言。
@@ -50,13 +50,13 @@ export { buildTarArgv, remoteExtractCommand, runTarSsh, type TarArgvOptions, typ
 export { copyLocal, type CopyLocalResult } from './local-copy.js'
 export { runProcess, realSpawn, DEFAULT_TIMEOUT_MS, summarizeFailure, type RunProcessOptions } from './proc.js'
 
-/** 主机密钥策略的缺省：strict（AGENTS.md 铁律 3：主机密钥默认 strict） */
+/** 主机密钥策略的缺省：strict（铁律 3：主机密钥默认 strict） */
 const DEFAULT_KNOWN_HOSTS: KnownHostsMode = 'strict'
 
 /**
  * 传输一次。
  *
- * 步骤固定为 **协商 → 构造 argv → 执行**，每一步的结论都进日志（transport.md §7：
+ * 步骤固定为 **协商 → 构造 argv → 执行**，每一步的结论都进日志（
  * 协商必须显式可见，用户有权知道为什么这次比上次慢）。
  */
 export async function transfer(
@@ -65,7 +65,7 @@ export async function transfer(
 ): Promise<TransferResult> {
   if (deps.localFacts === undefined) {
     throw new DpError('DP.CONFIG.INVALID', 'transfer 需要 localFacts', {
-      hint: '协商的唯一输入是两端 Facts（docs/transport.md §8：一次探完，别一问一答）',
+      hint: '协商的唯一输入是两端 Facts（一次探完，别一问一答）',
     })
   }
   const logger: Logger = deps.logger ?? createLogger()
@@ -139,7 +139,7 @@ async function runRemote(
   const sshPath = localFacts.tools.ssh ?? null
   if (sshPath === null) {
     throw new DpError('DP.SSH.TOOL_MISSING', '本机没有 ssh，远程传输无法进行', {
-      hint: '本包走系统 ssh 作为 rsync 的 remote-shell。装 OpenSSH，或在 ssh2 驱动上走 transport.md §6 的 dp-rsh 助手',
+      hint: '本包走系统 ssh 作为 rsync 的 remote-shell。装 OpenSSH，或在 ssh2 驱动上走 dp-rsh 助手',
     })
   }
 

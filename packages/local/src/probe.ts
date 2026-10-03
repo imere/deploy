@@ -2,8 +2,7 @@
  * 本机事实探测。
  *
  * 铁律：**能力一律实证，不推断。** 不看 uid 就断定能写 /etc，不看平台就断定有 systemd。
- * 每条结论都是「真的做了一次」，代价是一点启动耗时，收益是预检不会说谎
- * （docs/privilege.md §1、docs/preflight.md）。
+ * 每条结论都是「真的做了一次」，代价是一点启动耗时，收益是预检不会说谎。
  */
 import { createServer } from 'node:net'
 import { homedir as osHomedir, tmpdir as osTmpdir, platform as osPlatform, arch as osArch } from 'node:os'

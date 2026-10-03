@@ -30,7 +30,7 @@ function opts(argv: readonly string[]): Record<string, string> {
 /**
  * `quoteArg` 的逆运算：按 POSIX 规则把加了引号的串解回原串。
  *
- * 有了它才能写文档里要求的那种属性测试（docs/security.md §4）：
+ * 有了它才能写「转义后能原样解析回来」那种属性测试：
  * 随机串 → quote → 反解析 → 必须等于原串。
  */
 function unquoteArg(q: string): string {
@@ -234,7 +234,7 @@ describe('hostTarget', () => {
   })
 })
 
-describe('buildRshArgv —— rsync --rsh 契约（spikes.md S5）', () => {
+describe('buildRshArgv —— rsync --rsh 契约', () => {
   const rsh = buildRshArgv({ ...BASE, sshPath: '/usr/bin/ssh' })
 
   it('第一个 argv 是 ssh 的绝对路径', () => {
@@ -270,10 +270,10 @@ describe('buildRshArgv —— rsync --rsh 契约（spikes.md S5）', () => {
     assert.throws(() => rshOptionValue(['/usr/bin/ssh', 'a"b']))
   })
 
-  // 说明：`a;id` 这种**不**该抛。spikes.md S5 事实 2 实测 rsync 侧不过 shell，
+  // 说明：`a;id` 这种**不**该抛。事实 2 实测 rsync 侧不过 shell，
   // 它只按空白切分 `-e`，所以分号在那个位置没有注入含义。为此拒绝只会让
   // 合法路径（目录名带分号）不可用 —— 那是过度约束，不是有用的防线。
-  it('rsync 侧不过 shell，所以分号不构成注入面（spikes.md S5 事实 2）', () => {
+  it('rsync 侧不过 shell，所以分号不构成注入面（事实 2）', () => {
     assert.equal(rshOptionValue(['/usr/bin/ssh', 'a;id']), '/usr/bin/ssh a;id')
   })
 })

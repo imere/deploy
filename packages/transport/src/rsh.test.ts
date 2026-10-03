@@ -2,7 +2,7 @@
  * `--rsh` argv 的契约测试。
  *
  * 核心断言只有一句：**rsync 会追加的那半截（`-l user` / host / `rsync --server`）
- * 一个都不许出现在我们的 argv 里**。写上去就是"连错两次"（spikes.md S5）。
+ * 一个都不许出现在我们的 argv 里**。写上去就是"连错两次"。
  */
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
@@ -80,7 +80,7 @@ describe('buildRshArgv · 多跳', () => {
     assert.match(pc, /-W %h:%p/)
   })
 
-  test('nc 形态：跳板禁 TCP 转发时的退路（spikes.md S4）', () => {
+  test('nc 形态：跳板禁 TCP 转发时的退路', () => {
     const argv = buildRshArgv({ ...base, hops: ['jump@host'], hopMode: 'proxy-command-nc' })
     const pc = argv.find((a) => a.startsWith('ProxyCommand='))
     assert.ok(pc !== undefined)
