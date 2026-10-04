@@ -7,10 +7,10 @@
 
 | 项 | 值 |
 |---|---|
-| 本机 SSH | OpenSSH 10.3p1 / OpenSSL 3.5.7 |
-| 本机 rsync | **无** |
-| 本机 sshpass | **无** |
-| Node | 22.22.2（已备 24.21.0） |
+| 验证环境 · SSH | OpenSSH 10.3p1 / OpenSSL 3.5.7 |
+| 验证环境 · rsync | **无** |
+| 验证环境 · sshpass | **无** |
+| Node | 22.22.2（spike 当时）；仓库门槛现已提到 ≥ 24 |
 | ssh2 | 1.17.0 |
 | 靶机容器 | OpenSSH 10.2p1 + rsync 3.5.0（alpine） |
 
@@ -30,9 +30,9 @@ SUPPORTED_KEX = curve25519-sha256@libssh.org, curve25519-sha256,
 - 无 `sntrup761x25519-sha512@openssh.com`
 - 默认协商结果：`curve25519-sha256@libssh.org` + `aes128-gcm@openssh.com` + `ssh-ed25519`
 
-**结论：抗量子这条路 ssh2 走不通，只能靠本机 ssh。** 这是整个安全设计里最硬的一个约束。
+**结论：抗量子这条路 ssh2 走不通，只能靠系统 ssh 客户端。** 这是整个安全设计里最硬的一个约束。
 
-## S2 · 本机 ssh 默认就是抗量子的
+## S2 · 系统 ssh 客户端默认就是抗量子的
 
 ```
 $ ssh -p 2222 dpuser@127.0.0.1 id
@@ -48,7 +48,7 @@ debug1: kex: client->server cipher: chacha20-poly1305@openssh.com
 SSH_ASKPASS=<helper> DISPLAY=:0 SSH_ASKPASS_REQUIRE=force ssh ... < /dev/null
 → ASKPASS_OK / uid=1000(dpuser)
 ```
-Windows 上用 `.cmd` 助手实测通过。**"本机没有 sshpass" 不再是个约束**——它只是把我们从"只能走 ssh2"里解放出来。
+Windows 上用 `.cmd` 助手实测通过。**"没有 sshpass" 不再是个约束**——它只是把我们从"只能走 ssh2"里解放出来。
 
 ## S4 · 多跳：跳板机常常禁 TCP 转发
 
@@ -127,6 +127,6 @@ ARGC=8  [-l][dpuser][dp-target][rsync][--server][-vlogDtpre.iLsfxCIvu][.][/tmp/d
 | 原假设 | 实测 |
 |---|---|
 | ssh2 在 Node ≥24 下支持 ML-KEM | ❌ 与 Node 版本无关，ssh2 根本没实现 |
-| 没 sshpass 就只能用 ssh2 | ❌ SSH_ASKPASS 让本机 ssh 也能无交互密码登录 |
+| 没 sshpass 就只能用 ssh2 | ❌ SSH_ASKPASS 让系统 ssh 客户端也能无交互密码登录 |
 | ProxyJump 通用可用 | ❌ 加固跳板机普遍禁 TCP 转发 |
 | `%h` 会被 rsync 替换 | ❌ 不会 |

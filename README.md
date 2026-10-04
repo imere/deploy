@@ -120,7 +120,7 @@ docs/
   spikes.md     ★ 实测结论：ssh2 不支持抗量子 / SSH_ASKPASS / 多跳降级 / rsync --rsh 契约
   failures.md   ★ 故障分类学与护栏层：两阶段激活、租约锁、资源护栏、带外救援
   decisions.md  ★ 决策清单（第 3–24 条）：偏好链、define*、日志、hook、SELinux、scp、CLI
-  troubleshooting.md  本机环境坑：pnpm 链接 / esbuild / 覆盖率落盘 / NUL 文件 / 容器代理
+  troubleshooting.md  环境相关故障：pnpm 链接 / esbuild / 覆盖率落盘 / NUL 文件 / 容器代理
 ```
 
 ---
@@ -168,20 +168,24 @@ flowchart TB
 
 ---
 
-## 质量门禁（与参考项目同一强度）
+## 质量门禁
 
-`pnpm verify` = **typecheck → lint → 依赖检查 → 死代码检查 → test → build → smoke**，顺序不可改（产物层的断言依赖构建产物）。
+**当前 `pnpm verify` = `build` + `test`**（见根 `package.json`）。下面这张表是这套门禁**想达到的强度**，
+其中只有一部分已经落地 —— 没落地的标 ❌，别当成已经在跑的保障。
 
-| 项 | 要求 |
-| --- | --- |
-| `typecheck` | 源码与测试各一个 project，均 `--noEmit` |
-| `lint` | 含五条硬规则里的 **import 边界**限制（`no-restricted-imports`），违规即失败 |
-| 依赖检查 | **严禁循环依赖**与跨层反向依赖，工具校验而不是靠自觉 |
-| 死代码 | 没有未被引用的导出/文件；**见到冗余代码就删，不留「以后可能用」** |
-| 测试 | 纯逻辑包（`schema` / `core` / `template` / 协商策略）**四项 100%**；IO 层靠契约测试与集成，不追数字 |
-| 变异测试 | nightly 跑：故意改坏源码，红 = 真守着，绿 = 形同虚设。100% 覆盖率不等于行为被验证 |
-| JSDoc | 每个函数都要中文描述 + 逐个 `@param` + `@returns`，描述写「为什么」 |
-| 提交 | Conventional Commits，scope 用包名；版本由 changesets 推导 |
+| 项 | 要求 | 状态 |
+| --- | --- | --- |
+| `typecheck` | 源码与测试各一个 project，均 `--noEmit` | ✅ 由 `tsc -b` 承担 |
+| `build` | 产物落各包 `build/`，测试跑的是产物不是源码 | ✅ |
+| `test` | `node --test`（Node 24 内置运行器），lcov 落 `build/coverage` | ✅ |
+| `lint` | 含五条硬规则里的 **import 边界**限制（`no-restricted-imports`），违规即失败 | ❌ 未配置：仓库里没有 lint 工具与配置文件 |
+| 依赖检查 | **严禁循环依赖**与跨层反向依赖，工具校验而不是靠自觉 | ❌ 无工具，目前靠评审 |
+| 死代码 | 没有未被引用的导出/文件；**见到冗余代码就删，不留「以后可能用」** | ❌ 无工具，目前靠评审 |
+| `smoke` | 发布产物能被真实 import | ❌ 未接入 |
+| JSDoc | 每个函数都要中文描述 + 逐个 `@param` + `@returns`，描述写「为什么」 | ❌ 无校验脚本，靠评审与约定 |
+| 变异测试 | nightly 跑：故意改坏源码，红 = 真守着，绿 = 形同虚设 | ❌ 未接入（关键改动目前手工做变异验证） |
+| 覆盖率 | 纯逻辑包（`schema` / `core` / `template` / 协商策略）**四项 100%**；IO 层靠契约测试与集成，不追数字 | ⚠️ 有 lcov 产出，阈值未强制 |
+| 发版 | Conventional Commits，scope 用包名；版本由 changesets 推导 | ❌ changesets 未接入，版本号手工维护 |
 
 对**不可达分支**的处理沿用参考项目的定式：先分清是「没测到」还是「根本走不到」；走不到就**改代码删掉**，不许写替身去凑。
 
@@ -209,15 +213,15 @@ exit code 约定：成功 `0` / 部署失败 `1` / **验证失败且已回滚 `2
 
 | 项 | 选择 | 理由 |
 | --- | --- | --- |
-| SSH 客户端 | `ssh2@1.17.0`（纯 JS） | 本机实测**没有 sshpass**；`ssh2` 在协议层解决密码/键盘交互认证，顺带把多跳与 rsync 隧道一起解决。它还自带 SSH 服务端，测试能用假服务器 |
+| SSH 客户端 | 双驱动，偏好链 `native-ssh` → `ssh2@1.17.0` | 抗量子只能靠系统 ssh（spike 实测 ssh2 不支持任何 PQC KEX），所以 native-ssh 排在前；ssh2 零外部依赖，且自带 SSH 服务端可起假服务器做测试。退化到 ssh2 时必须明示「这条连接不抗量子」 |
 | 校验 | `zod` v4 | 类型 + 运行时校验 + JSON Schema 导出一套产出 |
 | 传输 | rsync + `tar-ssh` + sftp 三选协商 | 本机没有 rsync 时自动降级，且降级原因要打进日志 |
-| 测试 | vitest + 进程内 ssh2 服务端 | 多跳、pty 提权、断连全部无外部依赖可测 |
+| 测试 | `node --test`（Node 24 内置运行器）+ 进程内假 ssh 服务端 | **不用 vitest**：它的 esbuild 平台二进制在部分环境装不上，而内置运行器零依赖且够用 |
 | 语言/包管理 | TypeScript + pnpm workspace | 与参考项目 `ds-foundation` 的约定保持一致 |
 
 ### 需要动手就先查清的两件事
 
-1. **抗量子只能走 `native-ssh` 驱动**：spike 实测 `ssh2` 不支持任何 PQC KEX（`mlkem768x25519-sha256` / `sntrup761` 都没有），而本机 OpenSSH 默认就协商 `mlkem768x25519-sha256`。所以驱动偏好链是 `native-ssh` → `ssh2`，且**退化到 ssh2 时必须明示"这条连接不抗量子"**。结论见 `docs/spikes.md`。
+1. **抗量子只能走 `native-ssh` 驱动**：spike 实测 `ssh2` 不支持任何 PQC KEX（`mlkem768x25519-sha256` / `sntrup761` 都没有），而 OpenSSH 10.3 默认就协商 `mlkem768x25519-sha256`。所以驱动偏好链是 `native-ssh` → `ssh2`，且**退化到 ssh2 时必须明示"这条连接不抗量子"**。结论见 `docs/spikes.md`。
 2. **`ssh2` 的可选依赖会触发原生编译**：`cpu-features` / `nan` 需要本地编译且被 pnpm 的构建脚本白名单拦着。**建议跳过可选依赖**（只影响默认 cipher 择优，而我们本来就会显式指定 cipher 列表）。
 
 ---

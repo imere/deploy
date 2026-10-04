@@ -12,7 +12,7 @@ description: 用 podman 起一次性 SSH 靶机（跳板机 + 内网靶机），
 
 - **podman 虚拟机里配了一个容器网络内不可达的代理** → 拉镜像和 `apk` 都会失败。
   解法：给容器传空代理 `-e http_proxy= -e https_proxy= -e HTTP_PROXY= -e HTTPS_PROXY=`，容器内可直连外网。
-- 本机（Windows）**没有 rsync、没有 sshpass**，本机 OpenSSH 10.3。
+- Windows 环境通常**没有 rsync、没有 sshpass**；OpenSSH 版本视机器而定（spike 用的是 10.3）。
 - 不要为了测试去改 WSL 发行版（会引入不必要的安全面）。用容器。
 - **永不交互**：ssh 一律 `BatchMode=yes`（密钥）或 `SSH_ASKPASS`+`force`（密码）+ `< /dev/null`；所有命令带 `timeout`。
   Windows 上 ssh 缺口令会弹 `ssh-askpass` GUI，git 缺凭据会弹 Credential Manager GUI——两者都绝不依赖。

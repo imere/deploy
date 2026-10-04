@@ -1,6 +1,6 @@
 # 排障手册
 
-本机环境导致、与代码无关的问题，全部集中在这里。每条给出**现象 / 根因 / 临时绕法 / 解除条件**。
+环境导致、与代码无关的问题，全部集中在这里。每条给出**现象 / 根因 / 临时绕法 / 解除条件**。
 
 ---
 
@@ -18,14 +18,14 @@
 
 ### 根因（已实证）
 
-本机**未开启 Windows 开发者模式**，因此在未提升的权限下：
+**Windows 未开启开发者模式**时，在未提升的权限下：
 
 | 链接类型 | Node `fs.symlinkSync` |
 |---|---|
 | `junction` | ✅ 成功 |
 | `dir` / `file`（真正的 symlink） | ❌ `EPERM` |
 
-pnpm 的 isolated 布局（`node-linker=isolated`，默认）依赖真正的 symlink 建立 `node_modules/<pkg>` → `.pnpm/<pkg>/node_modules/<pkg>`，因此全部失败。更糟的是 **pnpm 12.6.0 在本机不报错、也不回退**。
+pnpm 的 isolated 布局（`node-linker=isolated`，默认）依赖真正的 symlink 建立 `node_modules/<pkg>` → `.pnpm/<pkg>/node_modules/<pkg>`，因此全部失败。更糟的是 **pnpm 12.6.0 在该场景下不报错、也不回退**。
 
 虽然 pnpm 官方 FAQ 写着 *"For Windows, if the Developer Mode is off, we use junctions instead"*，但实测回退没有生效。已验证无效的尝试：
 
@@ -132,7 +132,7 @@ node --test --test-reporter=lcov --test-reporter-destination=build/coverage/lcov
 
 两层原因叠加：
 
-1. 本机安全策略是 **fail-closed**：所有删除都被重定向到回收站工具，而它处理不了 Windows 保留名（`NUL` `CON` `AUX` `COM1`…`LPT9`）
+1. 某些环境的安全策略是 **fail-closed**：所有删除都被重定向到回收站工具，而它处理不了 Windows 保留名（`NUL` `CON` `AUX` `COM1`…`LPT9`）
 2. WSL 命令被安全规则拒绝
 
 ### 已成事实的用法
@@ -143,7 +143,7 @@ node --test --test-reporter=lcov --test-reporter-destination=build/coverage/lcov
 podman run --rm -v "<仓库的绝对路径>:/mnt/dp:rw" alpine:latest sh -c 'rm -rf /mnt/dp/node_modules'
 ```
 
-这条同时是清理 `node_modules` 的可靠办法（`rm -rf` 在本机同样会被拦）。
+这条同时是清理 `node_modules` 的可靠办法（`rm -rf` 同样会被拦）。
 
 ### 预防
 
@@ -186,7 +186,7 @@ podman exec -e http_proxy= -e https_proxy= -e HTTP_PROXY= -e HTTPS_PROXY= ...
 
 ### 根因
 
-本机 `credential.helper` 配了 Git Credential Manager。远程操作缺凭据时会尝试交互。
+Git 若把 Git Credential Manager 配成 `credential.helper`。远程操作缺凭据时会尝试交互。
 
 ### 规则
 

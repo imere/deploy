@@ -174,7 +174,7 @@ commands: {
 
 **决策**：`engines.node: ">=24"`，`.nvmrc` 写 `24`，CI 与 `dp doctor` 都校验。
 
-**修正一条之前的说法**：Node 版本**不是**抗量子的门槛（ssh2 根本没实现 PQC，与 Node 版本无关）。但 Node 24 仍然要，理由是语言/API 一致性（`import attributes`、测试运行器等），且已在本机备好 24.21.0。
+**修正一条之前的说法**：Node 版本**不是**抗量子的门槛（ssh2 根本没实现 PQC，与 Node 版本无关）。但 Node 24 仍然要，理由是语言/API 一致性（`import attributes`、测试运行器等）。
 
 ---
 

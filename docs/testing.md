@@ -152,7 +152,7 @@ const net = await createCluster([
 | --- | --- | --- |
 | rsync `--rsh` 契约 | 本机 rsync 二进制 | **必须打印**：`跳过：本机无 rsync（降级路径已由 L3 覆盖）` |
 | nginx conf 校验 | 容器里的 nginx | 打 `docker` 标签，nightly 跑 |
-| 真 sshd 握手 + PQC | OpenSSH ≥ 10（本机 10.3 可测） | 输出实际协商出的 kex/cipher，作为 PQC 能力的活证据 |
+| 真 sshd 握手 + PQC | OpenSSH ≥ 10（10.3 可测） | 输出实际协商出的 kex/cipher，作为 PQC 能力的活证据 |
 | docker compose 三模式 | docker | 打 `docker` 标签 |
 
 这一层存在的意义是把 L3 的「我以为是这样」变成「它就是那样」。特别是 nginx conf：黄金快照只能证明「渲染出来了」，只有 `nginx -t` 能证明「它合法」。

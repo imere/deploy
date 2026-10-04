@@ -22,7 +22,7 @@
 **Q2. 为什么 plan 必须是纯函数？**
 因为「我要在远端执行什么命令」这件事，**完全可以由配置 + 探测结果决定**，不需要真的连上去才知道。一旦它是纯的：(a) `--dry-run` 就是免费的；(b) 测试不用起服务器；(c) 相同输入必然相同输出，可做快照；(d) 出了问题，`deploy.json` 就是事故回放的一手证据。反之，如果 plan 里夹着「连上去看看再决定」，以上四条全部作废。
 
-**Q3. 本机没有 sshpass，怎么喂密码？**
+**Q3. 环境下没有 sshpass，怎么喂密码？**
 根本不需要 sshpass。sshpass 存在的唯一理由是**系统 ssh 二进制只从 TTY 读密码**。如果我们自己用 `ssh2`（纯 JS SSH 实现）做客户端，密码、键盘交互认证都是在协议层解决的 —— 这也顺带解决了多跳和 rsync 隧道。详见 [`transport.md`](./transport.md)。
 
 **Q4. 远端和本地要分开写两套逻辑吗？**
@@ -504,10 +504,10 @@ flowchart TB
 
 1. **ssh2 不支持任何抗量子 KEX**（没有 `sntrup761`、没有 `mlkem768`，传进去直接抛错）。
    → SSH 客户端必须有两条实现：
-   - `native-ssh`：抗量子 ✅（本机 OpenSSH 10.3 默认协商 `mlkem768x25519-sha256`）、ssh_config ✅、ProxyJump ✅，密码登录靠 `SSH_ASKPASS`
+   - `native-ssh`：抗量子 ✅（OpenSSH 10.3 默认协商 `mlkem768x25519-sha256`）、ssh_config ✅、ProxyJump ✅，密码登录靠 `SSH_ASKPASS`
    - `ssh2`：零外部依赖、rsync 隧道 ✅、抗量子 ❌
    走偏好链 `['native-ssh', 'ssh2']`；`cryptoPolicy=pq-required` 且只剩 ssh2 时报结构化错误（见 `docs/decisions.md` 第 5 条）。
-2. **没 sshpass 不再是约束**：`SSH_ASKPASS` + `SSH_ASKPASS_REQUIRE=force` 实测通过，本机 ssh 也能无交互密码登录。
+2. **没 sshpass 不再是约束**：`SSH_ASKPASS` + `SSH_ASKPASS_REQUIRE=force` 实测通过，ssh 客户端本身也能无交互密码登录。
 3. **跳板机普遍禁 TCP 转发**（alpine 默认 `AllowTcpForwarding no`）：`direct-tcpip` / `ssh -W` 直接失败，`ProxyCommand ssh jump nc %h %p` 成功。→ 多跳同样做成偏好链 `['direct-tcpip', 'nc', 'ssh-relay']`。
 
 `rsync --rsh` 契约已钉死：`[-e argv...] [-l user] host rsync --server [--sender] <flags> <src> <dst>`，`%h` **不替换**，且**不经 shell**（无注入面）。rsync 3.5.0 经 ssh2 隧道完整跑通，增量同步生效。

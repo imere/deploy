@@ -453,6 +453,10 @@ flowchart TB
 
 ## 19. 工程质量门禁与发布
 
+> ⚠️ **这张图画的是目标流水线，不是当前状态**：其中的 eslint、依赖检查工具、死代码检查、
+> vitest、ESM/UMD 双产物、包 smoke、changesets **都还没接入**。当前真正跑的只有
+> `tsc -b` 与 `node --test`（见 README 的「质量门禁」表）。
+
 ```mermaid
 flowchart LR
     PR["PR"] --> TS["tsc --noEmit<br/>源码 + 测试两个 project"]
