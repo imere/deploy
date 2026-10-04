@@ -74,7 +74,7 @@ podman exec -e NODE_PATH=/root/spikes/node_modules dp-jump sh -c \
 ```
 
 > Windows/Git Bash 下 `-o UserKnownHostsFile=/dev/null` 会在 cwd 落一个名为 `NUL` 的文件，
-> 用 `.tmp/known_hosts` 代替（详见 `docs/troubleshooting.md` §4）。
+> 用 `.tmp/known_hosts` 代替（排障文档里「known_hosts」那节有展开）。
 
 ## 清理
 

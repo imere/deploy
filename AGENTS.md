@@ -42,14 +42,21 @@ Windows 未开启开发者模式时，pnpm 的 isolated 布局会静默丢链接
 ```
 packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / target-docker / cli 均已接线）
 docs/           设计文档（★ 优先读：spikes.md failures.md decisions.md privilege.md）
-.agents/skills/ 可复用的操作流程（dp-spike-env / dp-subagent-dispatch）
+.agents/skills/ 可复用流程。**通用方法论**（与本项目无关，可整体搬到别处）：
+                 subagent-dispatch mutation-verify fake-test-audit accept-script
+                 doc-truthfulness single-source-of-truth cleanup-not-silent
+                 automation-iron-rules secret-hygiene repo-sanitize-history
+                 git-noninteractive windows-sandbox-gotchas
+                 **本仓专属**：dp-subagent-dispatch（通用版之上的本仓必读清单与包名）
+                 dp-spike-env（容器 SSH 靶机）
 .tmp/           临时物（已 gitignore）
 build/          覆盖率产物所在根目录（已 gitignore）
 ```
 
 ## 派发子代理（mcode）
 
-大块实现交给子代理，但**派发与验收都在这里**，见 `.agents/skills/dp-subagent-dispatch/SKILL.md`。三条不能省：
+大块实现交给子代理，但**派发与验收都在这里**。通用方法见 `.agents/skills/subagent-dispatch/SKILL.md`，
+本仓的必读清单与包名见 `.agents/skills/dp-subagent-dispatch/SKILL.md`。三条不能省：
 
 1. **必读清单写进 prompt 第一节**，并强制先读：`AGENTS.md` + `packages/ports/src/index.ts`（Runner 只有 `exec(argv[])`）
    + 同层参照实现（写 ssh 就看 `local/src/{exec,probe,runner}.ts`）+ 对应设计文档（`spikes.md` 是**实测硬约束**）。
