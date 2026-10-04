@@ -43,8 +43,14 @@ DP_SSH_PASSWORD=dppass123 \
   node --test packages/ssh/build/e2e.test.js
 ```
 
-不给 `DP_SSH_PASSWORD` 就走 agent/key 认证。**多跳场景当前未实现**（`hops` 非空会显式报错），
-要验多跳仍用下面的 `ProxyCommand ... nc` 手工方式。
+不给 `DP_SSH_PASSWORD` 就走 agent/key 认证。
+
+多跳已落地，但**两种驱动能力不对称**，选哪个要先想清楚：
+- `native-ssh`（默认）：`hops` → `-o ProxyJump=`。**逐跳只能 key/agent**
+  （`-J` 由系统 ssh 发起跳板连接，我们没有它的凭据通道），所以多跳 e2e 用密钥认证
+- `ssh2`：逐跳 direct-tcpip 串成链，逐跳认证独立（可密码），
+  但**本机靶机的 `AllowTcpForwarding` 默认是 no**（见下表）→ `direct-tcpip` 必失败，
+  要么改靶机配置，要么开 `allowNcHopFallback` 走跳板上的 nc
 
 ## 已知实测事实（别再试一遍）
 

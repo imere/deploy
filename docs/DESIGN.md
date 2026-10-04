@@ -432,7 +432,7 @@ type DeployError = {
 | --- | --- | --- | --- | --- |
 | **P0 骨架** | ✅ | `schema` / `ports` / `core` / `template` / `local` / `target-static` | `plan()` 纯函数可用；本地目标端到端部署成功；CLI 能 `--dry-run` | 达成 |
 | **P1 SSH 基础** | ⚠️ | `ssh` 单跳：key/agent/password 认证、exec、Facts 探测、sftp 传输 | 真机单跳部署通；假 SSH 服务器测试全绿 | 驱动偏好链（`native-ssh` → `ssh2`）、主机密钥四态、`SSH_ASKPASS`、Facts 实证都已落地并由假服务器覆盖；**真机判据未跑**（`e2e` 用例默认跳过，需 `DP_SSH_E2E=1`） |
-| **P2 多跳与提权** | ⚠️ | hop chain、known_hosts、sudo/su/doas、pty/stdin 响应器 | 两跳 + sudo 场景在假服务器全套验证 | 提权（`become`）已落地；**多跳只对内具备**：argv 层能构造 `-J` 与 `ProxyCommand`，但配置层没有 `hops` 字段，`@dp/ssh` 的 `connect()` 对非空 `hops` 显式报错 —— 对用户不可用 |
+| **P2 多跳与提权** | ⚠️ | hop chain、known_hosts、sudo/su/doas、pty/stdin 响应器 | 两跳 + sudo 场景在假服务器全套验证 | 提权（`become`）已落地；多跳配置层 `hops` 已开放，两种驱动都能跑：`native-ssh` 走 `-o ProxyJump=`（逐跳只能 key/agent）、`ssh2` 走逐跳 direct-tcpip 链式转发（逐跳认证独立，禁转发时可开 nc 兜底）。**仍差判据里的「假服务器全套验证」** —— 链是真串起来的，但没在真跳板机上跑过；多跳 + rsync 隧道只有 native-ssh 能走 |
 | **P3 传输协商** | ✅ | `rsync`（走 dp-rsh 隧道）+ `tar-ssh` 降级 | 没有 rsync 时自动降级并被测试覆盖 | 达成；另有 `sftp` / `scp` / `local-copy` |
 | **P4 nginx** | ⚠️ | conf 渲染（含反代）、影子校验、原子替换、两步 `-t`、reload | `nginx -t` 在容器里真验过；conf golden 快照 | 渲染 / 影子校验 / 原子替换 / 两步 `-t` 都已落地并被单测覆盖；**容器内真验未跑** |
 | **P5 docker** | ⚠️ | `remote-cli` 三模式、健康检查、compose 上传 | 三种模式各一条集成测试（无 docker 时 skip 并说明） | 只实现了 `remote-cli`（schema 的 `mode` 目前只有这一个取值）；`local-build-remote-load` 与 `registry` 未实现 |

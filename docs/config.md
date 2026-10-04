@@ -129,7 +129,7 @@ scheme 有 `env:` / `file:` / `prompt:` / `cmd:`，注册表化，未来可加 `
 ## 4. 主机与多跳、提权、传输
 
 > **这一节混了「已落地」与「设计形态」，逐项标注如下，别照抄。**
-> 已落地的字段：`ssh`（单跳连接串）、`hops`（多跳，仅 native-ssh）、`local`、`become`、`layout`、`transport`。
+> 已落地的字段：`ssh`（单跳连接串）、`hops`（多跳，两种驱动都支持）、`local`、`become`、`layout`、`transport`。
 > **未落地**：`crypto` / `knownHosts` / `timeouts` —— 这三个 schema 里没有，
 > 抗量子目前由驱动偏好链决定（只能走 `native-ssh`，`ssh2` 不支持 PQC），不是配置项。
 
@@ -163,13 +163,23 @@ hosts:
 
 三条限制都会在配置加载或拼 argv 时**显式报错**，不会静默降级：
 
-- **逐跳只能 key / agent**。`-J` 由系统 ssh 自己发起跳板连接，我们既没有它的凭据通道，
-  也保证不了不交互（它会去读 tty，在 CI 里就是一次永久挂起）。改用密钥/agent，
+下面三条是 **`native-ssh`（`-o ProxyJump=`）路径**的限制，由「跳板连接由系统 ssh 自己发起」
+这一点决定，不是 hops 本身的限制：
+
+- **逐跳只能 key / agent**。我们既没有它的凭据通道，也保证不了不交互
+  （它会去读 tty，在 CI 里就是一次永久挂起）。改用密钥/agent，
   或把逐跳的端口与密钥写进 ssh_config 的 `Host` 块。
 - **逐跳不能单独设 knownHosts**。`-J` 只有一条命令行，跳板机与目标机共用同一组
   `StrictHostKeyChecking` / `UserKnownHostsFile`；逐跳要不同策略只能走 ssh_config。
-- **`ssh2` 驱动不支持多跳**。链式转发在它那侧还没实现，显式指定
-  `ssh.driver: native-ssh`（默认顺序已经是 native 优先）。
+
+`ssh2` 驱动走的是另一条路（逐跳 direct-tcpip 串成链），所以限制不同：
+
+- **逐跳认证独立**，可以逐跳用密码 —— 通道是我们自己开的，凭据也是我们发的
+- **不支持抗量子 KEX**（ssh2 没有任何 PQ 算法），需要 PQC 就只能走 native-ssh
+- 跳板禁 TCP 转发（`AllowTcpForwarding no`）时 `direct-tcpip` 会直接失败。
+  可开 `allowNcHopFallback` 用跳板上的 `nc` 兜底，**默认关**：nc 是在跳板机上起进程，
+  等于把「目标能不能到」交给跳板上装了什么。两次都失败时报错会列出两次各自的原因
+- 凭据**绝不向下继承**：每一跳都要显式给 `auth`。继承意味着把目标机的密码发给了跳板机
 
 `hops: []` 按「没给」处理（等同单跳）。
 
@@ -496,7 +506,7 @@ transport.strategy = auto ← defaults（本次协商结果：tar-ssh）
 | 层级 | 关键字段 |
 | --- | --- |
 | `defaults` / `profiles` | `hosts`、`projects`、`release`、`transport`、`crypto`、`timeouts` |
-| `hosts.*` | `ssh`（**单跳**连接串）、`local`、`become`、`layout`、`transport`。**未落地**：多跳 `hops[]`、`crypto`、`knownHosts`、`timeouts`、`retry` |
+| `hosts.*` | `ssh`（**单跳**连接串）、`hops`（多跳）、`local`、`become`、`layout`、`transport`。**未落地**：`crypto`、`knownHosts`、`timeouts`、`retry` |
 | `projects.*.source` | `root`、`include`、`exclude`、`files`、`dotfiles`、`prepare`（本机前置命令） |
 | `projects.*.build` | `where`、`buildHost`、`platform`、`strategy`、`command`、`env`、`artifact` |
 | `projects.*.release` | `root`、`keep`、`shared[]`、`owner`、`dirMode`、`fileMode`、`switchStrategy` |

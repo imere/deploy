@@ -78,9 +78,18 @@ dp rollback --json  # 切回上一版，然后**再验一次**；新版本不健
 把清理混进回滚，一次失败的回滚就可能顺手毁掉唯一的退路）。它也**不接受 `--dry-run`** ——
 回滚要么做要么不做，「演练回滚」本身就是切一次。
 
-多跳：**argv 层已具备，配置层未开放**。`@dp/transport` 的 rsh 能构造 `-J a,b`（多跳）与
-`ProxyCommand` 两种形态，但配置里没有 `hops` 字段、`@dp/ssh` 的 `connect()` 对非空 `hops`
-仍是显式拒绝 —— 所以对用户来说仍是单跳。开放它需要同时补 schema 字段与 ssh 驱动，不是加个参数的事。
+多跳：**已落地**。配置写 `hosts.*.ssh.hops`，逐跳 `{ ssh, auth, knownHosts, port }`，
+最后一跳就是目标机。两种驱动的实现方式不同，能力也不对称：
+
+- `native-ssh`（默认）：把链拼成 `-o ProxyJump=`，由系统 ssh 自己发起跳板连接。
+  **代价是逐跳只能用 key / agent**，且逐跳不能单独设 knownHosts —— `-J` 只有一条命令行，
+  我们既没有它的凭据通道，也保证不了不交互（它会去读 tty，在 CI 里就是一次永久挂起）
+- `ssh2`（降级路径）：逐跳 direct-tcpip 串成链，把通道当 `sock` 交给下一跳的 Client。
+  **逐跳认证独立**（可以密码），代价是 ssh2 不支持任何抗量子 KEX。跳板禁 TCP 转发时可开
+  `allowNcHopFallback` 用跳板上的 `nc` 兜底（默认关 —— nc 是在跳板机上起进程）
+
+多跳 + rsync 隧道只有 `native-ssh` 能走：ssh2 侧的隧道要一条常驻的父子 IPC 端点，
+与「每次 exec 一次性连接」不合，所以那里明确失败而不是给一条走不通的通道。
 
 ```bash
 pnpm verify      # build + test + 覆盖率（产物落在 build/，lcov 在 build/coverage/）
