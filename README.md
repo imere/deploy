@@ -58,7 +58,10 @@ dp rollback --json      # 切回上一版并复查；只切换，不删任何版
 
 `dp apply` 在配了 `target.nginx` 时按 **install → deploy → activate** 三段走：先把 conf 渲染到影子目录过一遍 `nginx -t`（碰生产目录之前挡掉坏 conf），再切版本，最后原子换 conf 并 reload。activate 失败**不回滚发布**——版本本身是好的，旧 conf 指向 `current` 软链所以服务没断，但退出码非 0。
 
-尚未实现：其它目标类型（`systemd` / `process`）、以及 `dp deploy` 这个「什么都不写也能用」的一键入口。
+尚未实现：其它目标类型（`systemd` / `process`）。
+
+`dp deploy` 的零配置**装配层**已落地（`@dp/cli` 的 `deriveZeroConfig`）：源根、目标类型、环境三件事
+自动决定，每一步打印理由；产物只在内存里 —— dp 不会替你写一份配置文件到磁盘。命令入口尚未接线。
 
 三条运维命令已接线，语义刻意分开：
 

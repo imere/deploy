@@ -302,10 +302,19 @@ export const dockerSchema = obj(
   'docker 目标。本轮只实现 remote-cli：compose 文件随 release 上传后在目标机上跑',
 )
 
+/**
+ * 多目标类型同时命中时怎么选。**全仓只有这一份**。
+ *
+ * `fail` 之外的唯一选项是 `auto`（取 confidence 最高，最高分并列照样报错）。
+ * 默认值定在这里，因为它是归一化层的职责：`dp deploy` 的零配置路径也引用它，
+ * 否则「有配置文件时用 auto、零配置时用 fail」就成了同一件事两套规则。
+ */
+export const DEFAULT_TARGET_PICK = 'auto'
+
 export const targetSchema = obj(
   {
     type: prefChain(TARGET_KINDS, ['static'] as const, '目标类型，也可以是偏好链'),
-    pick: withDefault(oneOf(['auto', 'fail'] as const), 'auto'),
+    pick: withDefault(oneOf(['auto', 'fail'] as const), DEFAULT_TARGET_PICK),
     confd: opt(str('conf.d 目录（nginx 目标）。不写则由实测能力推导')),
     service: opt(str('服务名（systemd / process 目标）')),
     nginx: opt(nginxSchema),
