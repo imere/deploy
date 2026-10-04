@@ -59,7 +59,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     ],
     related: ['facts', 'schema', 'apply'],
     commonErrors: [
-      ['CONFIG_INVALID', '配置文件不存在 / 有冲突 / 校验不过；报错里会给出具体路径'],
+      ['DP.CONFIG.INVALID', '配置文件不存在 / 有冲突 / 校验不过；报错里会给出具体路径'],
       ['DP.PATH.NOT_WRITABLE', '没有可写的发布根；用 release.root 显式指定，或让运维授权候选之一'],
       ['DP.SOURCE.EMPTY', 'source 枚举结果为空；先构建，或检查 include/exclude'],
     ],
@@ -144,9 +144,9 @@ export const COMMANDS: readonly CommandDoc[] = [
     ],
     related: ['apply', 'plan', 'facts'],
     commonErrors: [
-      ['CONFIG_INVALID', 'cwd 下没有 dist / build / out / public 任何一个目录（dp 不退到 "."，那会传上 node_modules）；先构建，或用 --config 显式写 source.root'],
-      ['CONFIG_INVALID', '探测到 nginx：零配置不造 server 块（那等于编造你的意图）；用 --config 写 target.nginx，或把 nginx.conf exclude 出源'],
-      ['CONFIG_INVALID', '配置里有多个环境却没给 --env；dp 不默认挑第一个 —— 那正是把预发发到生产的入口'],
+      ['DP.CONFIG.INVALID', 'cwd 下没有 dist / build / out / public 任何一个目录（dp 不退到 "."，那会传上 node_modules）；先构建，或用 --config 显式写 source.root'],
+      ['DP.CONFIG.INVALID', '探测到 nginx：零配置不造 server 块（那等于编造你的意图）；用 --config 写 target.nginx，或把 nginx.conf exclude 出源'],
+      ['DP.CONFIG.INVALID', '配置里有多个环境却没给 --env；dp 不默认挑第一个 —— 那正是把预发发到生产的入口'],
     ],
     implemented: true,
   },

@@ -220,6 +220,7 @@ export class NativeSshDriver implements SshDriver {
       userKnownHostsFile:
         opts.knownHosts === 'tofu' ? (opts.pinnedHostKeysPath ?? opts.userKnownHostsFile ?? defaultPinPath()) : opts.userKnownHostsFile,
       proxyJump: opts.proxyJump,
+      ...(opts.hops !== undefined && opts.hops.length > 0 ? { hops: opts.hops } : {}),
       extraOptions: opts.extraOptions,
       setEnv,
     }

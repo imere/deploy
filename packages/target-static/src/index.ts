@@ -64,7 +64,7 @@ function layout(root: string): Layout {
 
 function hasDpErrorRunner(runner: Runner): void {
   if (runner.facts.host === '') {
-    throw new DpError('CONFIG_INVALID', 'Runner 缺少 host', { path: 'hosts.*.host' })
+    throw new DpError('DP.CONFIG.INVALID', 'Runner 缺少 host', { path: 'hosts.*.host' })
   }
 }
 

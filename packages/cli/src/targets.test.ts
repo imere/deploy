@@ -63,7 +63,7 @@ describe('targets · 歧义靠拒绝（铁律 2）', () => {
 
   it('projects 为空 → 配置错（不是用法错）', () => {
     const err = caughtThrows(() => selectTargets({ config: { projects: {} } as Config, host: 'local' })) as DpError
-    assert.equal(err.code, 'CONFIG_INVALID')
+    assert.equal(err.code, 'DP.CONFIG.INVALID')
   })
 
   it('没有主机 → 配置错，并说明 hosts 该怎么写', () => {

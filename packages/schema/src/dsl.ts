@@ -75,7 +75,7 @@ export type InputShape<S extends Shape> = {
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 function fail(path: string, message: string, hint?: string): never {
-  throw new DpError('CONFIG_INVALID', message, hint === undefined ? { path } : { path, hint })
+  throw new DpError('DP.CONFIG.INVALID', message, hint === undefined ? { path } : { path, hint })
 }
 
 function typeName(v: unknown): string {

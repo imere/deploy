@@ -71,7 +71,7 @@ export function resolveConfigPath(input: ResolveConfigInput): ConfigLocation | u
 
   if (explicitAbs !== undefined) {
     if (discovered !== undefined && !samePath(discovered, explicitAbs)) {
-      throw new DpError('CONFIG_INVALID', `--config 指定的文件与自动发现到的文件不是同一个`, {
+      throw new DpError('DP.CONFIG.INVALID', `--config 指定的文件与自动发现到的文件不是同一个`, {
         path: '--config',
         hint: `你指定的是 ${explicitAbs}，但从当前目录向上还发现了 ${discovered}。两者都处理掉再跑：要么删掉发现的那个，要么把 --config 指向它`,
       })
@@ -127,7 +127,7 @@ function gitRoot(from: string): string | undefined {
 
 /** 找不到任何来源时的统一报错。三种来源都写清楚，用户才知道该做什么。 */
 function notFoundError(cwd: string): DpError {
-  return new DpError('CONFIG_INVALID', `找不到 deploy-kit 配置文件（从 ${cwd} 向上找到仓库根都没找到）`, {
+  return new DpError('DP.CONFIG.INVALID', `找不到 deploy-kit 配置文件（从 ${cwd} 向上找到仓库根都没找到）`, {
     path: '--config',
     hint: `按优先级检查这三处：① --config <path> ② 环境变量 DP_CONFIG ③ 在仓库里放一个 ${CONFIG_FILENAMES.join(' / ')}。也可以先跑 \`dp schema > deploy.schema.json\` 看配置长什么样`,
   })
@@ -150,7 +150,7 @@ export async function loadConfigFile(path: string): Promise<unknown> {
     try {
       text = await fs.readFile(path, 'utf8')
     } catch (err) {
-      throw new DpError('CONFIG_INVALID', `读配置失败：${path}`, {
+      throw new DpError('DP.CONFIG.INVALID', `读配置失败：${path}`, {
         path,
         hint: '检查文件是否存在、当前用户是否有读权限',
         cause: err,
@@ -159,7 +159,7 @@ export async function loadConfigFile(path: string): Promise<unknown> {
     try {
       return JSON.parse(text)
     } catch (err) {
-      throw new DpError('CONFIG_INVALID', `配置文件不是合法 JSON：${path}`, {
+      throw new DpError('DP.CONFIG.INVALID', `配置文件不是合法 JSON：${path}`, {
         path,
         hint: 'JSON 末尾不能有逗号；若是 .ts/.js 想写注释或表达式，改用 deploy.config.ts',
         cause: err,
@@ -173,7 +173,7 @@ export async function loadConfigFile(path: string): Promise<unknown> {
     const value = (mod as { default?: unknown }).default ?? mod
     return value
   } catch (err) {
-    throw new DpError('CONFIG_INVALID', `加载配置模块失败：${path}`, {
+    throw new DpError('DP.CONFIG.INVALID', `加载配置模块失败：${path}`, {
       path,
       hint: '确认文件能被 Node 24 直接加载（.ts 需无 Node 尚不支持的语法）、其中的 import 路径可解析、且没有顶层 await 之外的副作用。Node 说：' + messageOf(err),
       cause: err,
@@ -237,7 +237,7 @@ export async function loadConfig(options: LoadConfigOptions): Promise<LoadedConf
   if (explicit !== undefined) {
     explicitAbs = resolvePath(options.cwd, explicit)
     if (!existsSync(explicitAbs)) {
-      throw new DpError('CONFIG_INVALID', `--config 指定的文件不存在：${explicitAbs}`, {
+      throw new DpError('DP.CONFIG.INVALID', `--config 指定的文件不存在：${explicitAbs}`, {
         path: '--config',
         hint: `你给的是 ${explicit}（已按 cwd=${options.cwd} 解析为绝对路径）。确认路径拼写，或去掉 --config 让它自动发现`,
       })
@@ -249,7 +249,7 @@ export async function loadConfig(options: LoadConfigOptions): Promise<LoadedConf
   if (explicit === undefined && envValue !== undefined && envValue !== '') {
     envAbs = resolvePath(options.cwd, envValue)
     if (!existsSync(envAbs)) {
-      throw new DpError('CONFIG_INVALID', `环境变量 DP_CONFIG 指向的文件不存在：${envAbs}`, {
+      throw new DpError('DP.CONFIG.INVALID', `环境变量 DP_CONFIG 指向的文件不存在：${envAbs}`, {
         path: 'DP_CONFIG',
         hint: `DP_CONFIG=${envValue}，按 cwd=${options.cwd} 解析为绝对路径。修正环境变量，或 unset 它改用自动发现`,
       })

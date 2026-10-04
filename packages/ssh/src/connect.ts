@@ -8,7 +8,7 @@ import type { Facts, Runner } from '@dp/ports'
 import { DpError } from '@dp/ports'
 import { createLogger, type Logger } from '@dp/log'
 import type { SshConnectionOptions, SshDriver, SshDriverKind, Tunnel } from './driver.js'
-import { assertNoHops, resolveDriver } from './driver.js'
+import { resolveDriver, validateHops } from './driver.js'
 import { NativeSshDriver } from './native.js'
 import { Ssh2Driver } from './ssh2.js'
 import { createSshRunner } from './runner.js'
@@ -51,7 +51,7 @@ export async function connectSsh(
   options: SshConnectionOptions,
   connectOptions: ConnectOptions = {},
 ): Promise<ConnectedSsh> {
-  assertNoHops(options.hops)
+  validateHops(options.hops)
 
   const logger = connectOptions.logger ?? createLogger({ bind: { component: '@dp/ssh' } })
 

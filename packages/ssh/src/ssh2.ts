@@ -141,6 +141,7 @@ export class Ssh2Driver implements SshDriver {
   }
 
   async exec(req: ExecRequest): Promise<DriverExecResult> {
+    this.assertNoHops()
     const load = loadSsh2()
     if (!load.ok) {
       throw new DpError('DP.SSH.DRIVER_UNAVAILABLE', `ssh2 驱动不可用：${load.reason}`, { hint: load.hint })
@@ -225,6 +226,23 @@ export class Ssh2Driver implements SshDriver {
   }
 
   /**
+   * 本批 ssh2 **不支持多跳**。链式转发（forwardOut 逐跳串）留到下一批。
+   *
+   * 为什么必须报错而不是按单跳连：用户把跳板机配进来正是为了让流量**必须**经过它，
+   * 静默直连等于把这条安全边界拆了，而且连接会成功、看起来一切正常。
+   */
+  private assertNoHops(): void {
+    const hops = this.options.hops
+    if (hops === undefined || hops.length === 0) return
+    throw new DpError('DP.CONFIG.INVALID', `ssh2 驱动不支持多跳（收到 ${hops.length} 跳）`, {
+      path: 'hosts.*.ssh.hops',
+      hint:
+        '在配置里显式指定 ssh.driver: native-ssh（默认顺序已经是 native 优先，只有它不可用时才会落到 ssh2）。' +
+        '多跳的链式转发在 ssh2 侧还没实现，所以这里明确失败而不是悄悄按单跳连',
+    })
+  }
+
+  /**
    * ssh2 隧道。**本批未实现**，显式说明而不是留空 ——
    *已实测「rsync over 自建 ssh2 隧道完全可用」，方案是存在的
    * （起一个 loopback TCP + 一个 stdin/stdout 直通的 `dp-rsh.mjs` 助手），
@@ -232,6 +250,7 @@ export class Ssh2Driver implements SshDriver {
    * 不合。留到下一批。
    */
   async openTunnel(): Promise<Tunnel> {
+    this.assertNoHops()
     throw new DpError('DP.SSH.TUNNEL_FAILED', 'ssh2 隧道将在下一批实现', {
       hint: '本批请用 native-ssh 驱动 —— 它的 --rsh 前缀可以直接给 rsync（契约）。ssh2 侧的 rsync 隧道方案已实测可行，只差 IPC 助手',
     })

@@ -50,7 +50,7 @@ flowchart TB
 
 | 包 | 测什么 | 典型断言 |
 | --- | --- | --- |
-| `schema` | 归一化、profile 深合并、数组替换语义、变量插值、错误路径 | `mergeProfile(base, prod)` 得到预期对象；缺 `source` 时报 `CONFIG_INVALID` 且 path 是 `projects.web.source` |
+| `schema` | 归一化、profile 深合并、数组替换语义、变量插值、错误路径 | `mergeProfile(base, prod)` 得到预期对象；缺 `source` 时报 `DP.CONFIG.INVALID` 且 path 是 `projects.web.source` |
 | `core.plan` | **黄金快照**：`(config, facts) → steps` | 给定 facts，产出的 steps JSON 与 `__snapshots__/plan-nginx-ssh-sudo.json` 完全一致 |
 | `core` 编排 | releaseId 幂等、keep N、回滚指向、锁逻辑 | 同内容两次部署 releaseId 相同；`keep: 2` 时 pruned 列表正确且永不含 current/previous |
 | `template` | nginx conf 渲染、变量求值、危险字符 | 反代 location 自动带齐 `Host`/`X-Forwarded-*`；`su -c` 的引用转义正确 |

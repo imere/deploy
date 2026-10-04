@@ -11,8 +11,8 @@
  *  3. 无 user 前缀时 rsync 会省略 `-l <user>`，用它自己的本地用户名
  *  4. `RSYNC_RSH` 与 `-e` 等价
  */
-import { DpError } from '@dp/ports'
-import type { KnownHostsMode } from './driver.js'
+import { DpError, assertPortInRange, parseSshTarget } from '@dp/ports'
+import type { HopSpec, KnownHostsMode } from './driver.js'
 
 // ------------------------------------------------------------
 // POSIX 单引号转义
@@ -110,6 +110,8 @@ export interface SshArgvOptions {
   /** accept-new / tofu / off 时用于隔离的 known_hosts 路径；strict 时用系统默认 */
   readonly userKnownHostsFile?: string
   readonly proxyJump?: string
+  /** 多跳链。喂给 -o ProxyJump=，逐跳约束见 hopsProxyJump */
+  readonly hops?: readonly HopSpec[]
   /** 调用方追加的裸选项，如 `-o KexAlgorithms=...`（抗量子策略） */
   readonly extraOptions?: readonly string[]
   /** 远端环境变量。走 OpenSSH 的 SetEnv；服务端 AcceptEnv 没放行时 ssh 会静默忽略 */
@@ -187,7 +189,19 @@ export function buildSshArgv(options: SshArgvOptions): string[] {
 
   if (options.port !== undefined) argv.push('-p', String(options.port))
   if (options.identityFile !== undefined) argv.push('-i', options.identityFile)
-  if (options.proxyJump !== undefined) argv.push('-o', `ProxyJump=${options.proxyJump}`)
+  // hops 优先于 proxyJump：两处都给了就报错而不是二选一，那会让用户以为
+  // 走的是自己写的那条链
+  if (options.hops !== undefined && options.hops.length > 0) {
+    if (options.proxyJump !== undefined) {
+      throw new DpError('DP.CONFIG.INVALID', '同时给了 hops 与 proxyJump，多跳链有两条互相矛盾的来源', {
+        path: 'hosts.*.ssh.hops',
+        hint: '留一个。多跳用 hops；proxyJump 只留给"直接写一条跳板串"的场景（不经过配置校验）',
+      })
+    }
+    argv.push('-o', `ProxyJump=${hopsProxyJump(options.hops, { knownHosts: options.knownHostsMode })}`)
+  } else if (options.proxyJump !== undefined) {
+    argv.push('-o', `ProxyJump=${options.proxyJump}`)
+  }
 
   argv.push(...authOptions(options.authKind, options.identitiesOnly ?? true))
   argv.push(...knownHostsOptions(options.knownHostsMode, options.userKnownHostsFile))
@@ -209,6 +223,72 @@ export function buildSshArgv(options: SshArgvOptions): string[] {
 /** host 目标串。`user` 为空则不带前缀（rsync 与 ssh 都按本地用户名处理） */
 export function hostTarget(host: string, user?: string): string {
   return user === undefined || user === '' ? host : `${user}@${host}`
+}
+
+// ------------------------------------------------------------
+// 多跳 → ProxyJump
+// ------------------------------------------------------------
+
+/**
+ * 把跳板链变成 `-o ProxyJump=` 的值。
+ *
+ * 为什么逐跳 `auth` 只允许 key / agent：`-J` 让系统 ssh **自己**去连跳板机，
+ * 我们只有一条 SSH_ASKPASS 通道且它只服务最终目标 —— 逐跳密码既喂不进去，
+ * 也无法保证"不交互"（ssh 会去读 tty，在 CI 里就是一次永久挂起）。
+ * 与其让它跑出一个必然卡死的连接，不如现在报错并指出出路。
+ *
+ * 为什么逐跳 `knownHosts` 与整体冲突时报错：`-J` 只有一条命令行，
+ * 跳板机与目标机共用同一组 `StrictHostKeyChecking` / `UserKnownHostsFile`。
+ * 逐跳想用不同策略，唯一正路是 ssh_config 里的 `Host` 匹配块。
+ *
+ * 端口不写就不补 22，与 `parseSshTarget` 保持同一条约定：**不替用户猜端口**。
+ * 用户在 ssh_config 里给某个 Host 配过 `Port` 时，那正是他要的跳板机；
+ * 硬补一个 `:22` 会把它盖掉，连到另一台去。
+ */
+export function hopsProxyJump(
+  hops: readonly HopSpec[],
+  ctx: { readonly knownHosts?: KnownHostsMode; readonly path?: string },
+): string {
+  if (hops.length === 0) {
+    throw new DpError('DP.CONFIG.INVALID', 'hopsProxyJump 收到空跳板链', {
+      path: ctx.path ?? 'hosts.*.ssh.hops',
+      hint: '空链按单跳处理，不要调用这个函数',
+    })
+  }
+  const base = ctx.path ?? 'hosts.*.ssh.hops'
+  return hops
+    .map((hop, i) => {
+      const path = `${base}[${i}]`
+      const authType = hop.auth?.type
+      if (authType === 'password' || authType === 'keyboard-interactive') {
+        throw new DpError('DP.CONFIG.INVALID', `第 ${i} 跳要求 ${authType} 认证，多跳不支持`, {
+          path: `${path}.auth`,
+          hint:
+            '`-J` 无法逐跳喂密码：跳板连接由系统 ssh 自己发起，我们既没有它的凭据通道，也保证不了不交互（它会去读 tty，在 CI 里就是一次挂起）。' +
+            '出路：1) 这一跳改用密钥或 ssh-agent（auth.type: key / agent）；2) 把逐跳的端口与密钥写进 ~/.ssh/config 的 Host 块，OpenSSH 会自动应用',
+        })
+      }
+      if (hop.knownHosts !== undefined && ctx.knownHosts !== undefined && hop.knownHosts !== ctx.knownHosts) {
+        throw new DpError(
+          'DP.CONFIG.INVALID',
+          `第 ${i} 跳的主机密钥策略（${hop.knownHosts}）与整体设置（${ctx.knownHosts}）冲突`,
+          {
+            path: `${path}.knownHosts`,
+            hint:
+              '`-J` 只有一条命令行，跳板机与目标机共用同一组 StrictHostKeyChecking / UserKnownHostsFile，无法逐跳指定。' +
+              '出路：1) 把这一跳的策略改成与整体一致；2) 去掉逐跳的 knownHosts，改在 ~/.ssh/config 里给该 Host 单独配',
+          },
+        )
+      }
+      const target = parseSshTarget(hop.ssh, `${path}.ssh`)
+      if (hop.port !== undefined) assertPortInRange(hop.port, `${path}.port`)
+      // 串里的端口优先于 port 字段：validateHops 已保证两者不会同时出现且不同
+      const port = target.port ?? hop.port
+      const user = target.user
+      const base_ = user === undefined || user === '' ? target.host : `${user}@${target.host}`
+      return port === undefined ? base_ : `${base_}:${port}`
+    })
+    .join(',')
 }
 
 // ------------------------------------------------------------

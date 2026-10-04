@@ -20,7 +20,7 @@ import { DpError } from '@dp/ports'
  */
 export class CliUsageError extends DpError {
   constructor(message: string, options: { readonly path?: string; readonly hint?: string } = {}) {
-    super('CONFIG_INVALID', message, options)
+    super('DP.CONFIG.INVALID', message, options)
     this.name = 'CliUsageError'
   }
 }

@@ -5,7 +5,7 @@ import { buildSshArgv } from './argv.js'
 import { statScript } from './posix.js'
 import { FakeSshDriver } from './fake-driver.js'
 import {
-  assertNoHops,
+  validateHops,
   DEFAULT_PREFERENCE,
   resolveDriver,
   resolveTimeoutMs,
@@ -140,23 +140,45 @@ describe('resolveDriver —— 偏好链', () => {
   })
 })
 
-describe('多跳占位 —— 本批未实现，必须显式拒绝', () => {
-  it('空 hops / undefined 都放行', () => {
-    assert.doesNotThrow(() => assertNoHops(undefined))
-    assert.doesNotThrow(() => assertNoHops([]))
+describe('逐跳校验 —— 不合法就不许悄悄降级成单跳', () => {
+  it('空 hops / undefined 都放行（空数组按单跳处理，不报「收到 0 跳」）', () => {
+    assert.doesNotThrow(() => validateHops(undefined))
+    assert.doesNotThrow(() => validateHops([]))
   })
 
-  it('非空 hops → DP.CONFIG.INVALID，并指向 ProxyJump 与下一批', () => {
+  it('合法多跳放行', () => {
+    assert.doesNotThrow(() => validateHops([{ ssh: 'ops@jump.example.com' }, { ssh: 'deploy@10.0.0.7:2222' }]))
+  })
+
+  it('坏连接串 → DP.CONFIG.INVALID，path 指向具体那一跳', () => {
     assert.throws(
-      () => assertNoHops([{ ssh: 'ops@jump.example.com' }]),
+      () => validateHops([{ ssh: 'ops@jump.example.com' }, { ssh: 'deploy@' }]),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
         assert.equal(err.code, 'DP.CONFIG.INVALID' as DpErrorCode)
-        assert.match(err.hint ?? '', /ProxyJump/)
-        assert.match(err.hint ?? '', /下一批/)
+        assert.equal(err.path, 'hosts.*.ssh.hops[1].ssh')
         return true
       },
     )
+  })
+
+  it('端口越界 → 报错，path 指向该跳的 port', () => {
+    assert.throws(
+      () => validateHops([{ ssh: 'ops@jump.example.com', port: 70000 }]),
+      (err: unknown) => {
+        assert.ok(err instanceof DpError)
+        assert.equal(err.code, 'DP.CONFIG.INVALID' as DpErrorCode)
+        assert.equal(err.path, 'hosts.*.ssh.hops[0].port')
+        return true
+      },
+    )
+  })
+
+  it('串与 port 字段给了两个不同端口 → 报错而不是二选一', () => {
+    assert.throws(() => validateHops([{ ssh: 'ops@jump:2200', port: 2222 }]), {
+      code: 'DP.CONFIG.INVALID',
+      path: 'hosts.*.ssh.hops[0].port',
+    })
   })
 })
 

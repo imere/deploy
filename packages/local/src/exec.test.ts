@@ -36,7 +36,7 @@ describe('exec · 基本执行', () => {
   it('可执行文件不存在时报出可指导下一步的错误', async () => {
     await assert.rejects(run(['nope-not-real'], { timeoutMs: 5000 }), (err: unknown) => {
       assert.ok(err instanceof DpError)
-      assert.equal(err.code, 'CONFIG_INVALID')
+      assert.equal(err.code, 'DP.CONFIG.INVALID')
       assert.ok(err.hint !== undefined && err.hint.length > 0)
       return true
     })

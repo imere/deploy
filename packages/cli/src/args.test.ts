@@ -91,7 +91,7 @@ describe('args · 形状', () => {
 describe('args · 拒绝歧义（铁律 2）', () => {
   it('未知长选项报错，且 hint 指向 --help', () => {
     const err = caughtThrows(() => parseArgs(['--nope'])) as DpError
-    assert.equal(err.code, 'CONFIG_INVALID')
+    assert.equal(err.code, 'DP.CONFIG.INVALID')
     assert.equal(err.path, '--nope')
     assert.match(err.hint ?? '', /--help/)
     assert.ok(isUsageError(err), '必须是 CliUsageError，退出码才映射到 2')

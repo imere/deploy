@@ -4,7 +4,7 @@
  * 第 4 条要求：每个配置段都提供独立的 define*，便于同文件/多文件内提示与复用。
  * define* 的参数类型是**用户可写**的形态（InputOf），返回归一化后的类型（Infer）。
  */
-import { DpError } from '@dp/ports'
+import { DpError, KNOWN_HOSTS_MODES, assertPortInRange, parseSshTarget } from '@dp/ports'
 import {
   arr,
   bool,
@@ -51,7 +51,7 @@ function unionOf<AOut, AIn, BOut, BIn>(
     parse(input, path) {
       if (a.matches(input)) return a.schema.parse(input, path)
       if (b.matches(input)) return b.schema.parse(input, path)
-      throw new DpError('CONFIG_INVALID', `期望 ${a.shape} 或 ${b.shape}，实际是 ${describe(input)}`, {
+      throw new DpError('DP.CONFIG.INVALID', `期望 ${a.shape} 或 ${b.shape}，实际是 ${describe(input)}`, {
         path,
         hint: `两种写法都可以：${a.shape}；${b.shape}`,
       })
@@ -87,7 +87,7 @@ const sourceRoot = constrained(
   (value, path) => {
     if (/[\\/]$/.test(value)) {
       throw new DpError(
-        'CONFIG_INVALID',
+        'DP.CONFIG.INVALID',
         `源路径以分隔符结尾，语义有歧义：${value}`,
         {
           path,
@@ -134,18 +134,75 @@ export const transportSchema = obj(
   '传输偏好链：按顺序尝试，都不支持则报 DP.PREF.UNSUPPORTED',
 )
 
-export const hostSchema = obj(
+/** 逐跳的认证方式。只认非交互来源 —— 交互式认证在任何一层都拿不到输入 */
+const hopAuthSchema = obj(
   {
-    ssh: opt(str('user@host[:port]')),
-    local: opt(bool('本机目标')),
-    become: opt(becomeSchema),
-    layout: withDefault(
-      oneOf(['auto', 'system', 'user'] as const),
-      'auto',
-    ),
-    transport: opt(transportSchema),
+    type: withDefault(oneOf(['key', 'agent'] as const), 'agent'),
+    identityFile: opt(str('私钥路径')),
   },
-  '一台目标主机。路径不写在这里 —— 由能力推导',
+  '逐跳认证。多跳只支持 key / agent：`-J` 无法逐跳喂密码',
+)
+
+/**
+ * 一跳。`ssh` 用 `user@host[:port]` 串，`port` 字段是它的显式覆盖。
+ *
+ * 端口**同时**接受两种写法是有代价的，所以这里只允许一种：串里写了端口就以串为准，
+ * 串与 `port` 字段同时给出且不一致时报错而不是二选一 —— 静默取一个会让用户
+ * 以为连的是自己写的那台。
+ */
+export const hopSchema = constrained(
+  obj(
+    {
+      ssh: str('user@host[:port]'),
+      auth: opt(hopAuthSchema),
+      knownHosts: opt(oneOf(KNOWN_HOSTS_MODES, '这一跳的主机密钥策略')),
+      port: opt(num('端口，1–65535')),
+    },
+    '多跳链上的一跳',
+  ),
+  (value, path) => {
+    const target = parseSshTarget(value.ssh, `${path}.ssh`)
+    if (value.port === undefined) return
+    assertPortInRange(value.port, `${path}.port`)
+    if (target.port !== undefined && target.port !== value.port) {
+      throw new DpError(
+        'DP.CONFIG.INVALID',
+        `这一跳给了两个互相矛盾的端口：ssh 串里是 ${target.port}，port 字段是 ${value.port}`,
+        {
+          path: `${path}.port`,
+          hint: '留一个就行。写 ssh: user@host:2222 就不要再写 port；port 字段是给「串里不带端口」的场景用的',
+        },
+      )
+    }
+  },
+)
+
+export const hostSchema = constrained(
+  obj(
+    {
+      ssh: opt(str('user@host[:port]')),
+      hops: opt(arr(hopSchema, '多跳跳板链，从第一跳到最终目标依次排列')),
+      local: opt(bool('本机目标')),
+      become: opt(becomeSchema),
+      layout: withDefault(
+        oneOf(['auto', 'system', 'user'] as const),
+        'auto',
+      ),
+      transport: opt(transportSchema),
+    },
+    '一台目标主机。路径不写在这里 —— 由能力推导',
+  ),
+  (value, path) => {
+    // 空数组按「没给」处理：hops: [] 与不写 hops 是同一件事，报「0 跳」只会让人
+    // 去查一个根本不存在的问题
+    const hopsGiven = value.hops !== undefined && value.hops.length > 0
+    if (value.ssh !== undefined && hopsGiven) {
+      throw new DpError('DP.CONFIG.INVALID', 'ssh 与 hops 同时给了，二者只能选一个', {
+        path: `${path}.ssh`,
+        hint: '二选一：单跳写 ssh: user@host[:port]；多跳把整条链写进 hops（最后一跳就是目标机）。想同时表达会得到两条互相矛盾的连接路径',
+      })
+    }
+  },
 )
 
 // ============================================================
@@ -215,7 +272,7 @@ const reloadSchema = unionOf<readonly string[], readonly string[], false, false>
     schema: constrained(arr(str('reload 命令的 argv')), (value, path) => {
       for (let i = 0; i < value.length; i += 1) {
         if (value[i] === '') {
-          throw new DpError('CONFIG_INVALID', 'reload 的参数里有空串', {
+          throw new DpError('DP.CONFIG.INVALID', 'reload 的参数里有空串', {
             path: `${path}[${i}]`,
             hint: '删掉空串。空参数会让目标机的 execve 直接失败，报错还与真正的问题无关',
           })
@@ -260,7 +317,7 @@ const composeFilesSchema = constrained(
   (value, path) => {
     for (let i = 0; i < value.length; i += 1) {
       if (value[i] === '') {
-        throw new DpError('CONFIG_INVALID', 'compose.files 的元素里有空串', {
+        throw new DpError('DP.CONFIG.INVALID', 'compose.files 的元素里有空串', {
           path: `${path}[${i}]`,
           hint:
             '删掉这个空串。空路径拼进 `-f` 后面，目标机报的是 `no such file or directory`，' +

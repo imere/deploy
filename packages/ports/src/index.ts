@@ -95,11 +95,67 @@ export const POSIX_WRITE_CANDIDATES: readonly string[] = [
 ]
 
 // ============================================================
+// SSH 连接串
+// ============================================================
+
+/** 主机密钥策略。放这里是因为 schema（校验枚举）与 ssh（消费它）都要用，两处各写一份字面量必然漂移 */
+export const KNOWN_HOSTS_MODES = ['strict', 'accept-new', 'tofu', 'off'] as const
+export type KnownHostsMode = (typeof KNOWN_HOSTS_MODES)[number]
+
+export interface SshTarget {
+  readonly host: string
+  readonly user?: string
+  readonly port?: number
+}
+
+/**
+ * `user@host[:port]` —— 纯解析，不猜端口（未写端口时由 ssh 自己按 ssh_config 决定）。
+ *
+ * 为什么住在契约层：`hosts.*.ssh` 与每一跳的 `ssh` 字段是**同一种写法**，
+ * 解析它的三处（配置校验、连接装配、argv 拼装）必须共享一份实现 ——
+ * 各写一份就会出现「配置层认为合法、连接时才炸」的错位错误。
+ */
+export function parseSshTarget(value: string, path: string): SshTarget {
+  const at = value.lastIndexOf('@')
+  const userPart = at >= 0 ? value.slice(0, at) : undefined
+  const hostPart = at >= 0 ? value.slice(at + 1) : value
+  if (hostPart === '') {
+    throw new DpError('DP.CONFIG.INVALID', `ssh 目标为空：${JSON.stringify(value)}`, {
+      path,
+      hint: '写成 user@host 或 user@host:port，例如 deploy@10.0.0.5:2222',
+    })
+  }
+  const colon = hostPart.lastIndexOf(':')
+  if (colon > 0) {
+    const portText = hostPart.slice(colon + 1)
+    const port = Number(portText)
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+      throw new DpError('DP.CONFIG.INVALID', `端口不合法：${portText}`, {
+        path,
+        hint: '端口必须是 1–65535 的整数。不写端口就用 SSH 的默认值（22）',
+      })
+    }
+    return { user: userPart, host: hostPart.slice(0, colon), port }
+  }
+  return { user: userPart, host: hostPart }
+}
+
+/** 端口是否在 TCP 有效区间内。单独给是因为逐跳的 `port` 字段不走连接串解析 */
+export function assertPortInRange(port: number, path: string): void {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new DpError('DP.CONFIG.INVALID', `端口不合法：${port}`, {
+      path,
+      hint: '端口必须是 1–65535 的整数',
+    })
+  }
+}
+
+// ============================================================
 // 错误
 // ============================================================
 
 export const DP_ERROR_CODES = [
-  'CONFIG_INVALID',
+  'DP.CONFIG.INVALID',
   'DP.PATH.CASE_COLLISION',
   'DP.PATH.RESERVED_NAME',
   'DP.PATH.TOO_LONG',
@@ -115,9 +171,7 @@ export const DP_ERROR_CODES = [
   'DP.SOURCE.EMPTY',
   'DP.INTERACTIVE_PROMPT_DETECTED',
   'DP.TIMEOUT.EXEC',
-  // ↓ SSH 远端 Runner（@dp/ssh）追加。注意 `CONFIG_INVALID` 是命名空间化之前
-  // 留下的历史名，它没有点分前缀；新代码一律用 `DP.CONFIG.INVALID`。
-  'DP.CONFIG.INVALID',
+  // ↓ SSH 远端 Runner（@dp/ssh）追加。
   'DP.SSH.CONNECT_FAILED',
   'DP.SSH.AUTH_FAILED',
   'DP.SSH.HOST_KEY_UNKNOWN',

@@ -42,7 +42,7 @@ class FakeRunner implements Runner {
   }
 
   async exec(): Promise<ExecResult> {
-    throw new DpError('CONFIG_INVALID', '假 Runner 不执行命令')
+    throw new DpError('DP.CONFIG.INVALID', '假 Runner 不执行命令')
   }
 
   async stat(path: string): Promise<FileStat | null> {

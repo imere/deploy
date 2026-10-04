@@ -56,7 +56,7 @@ describe('facts-source · 纯解析', () => {
 
   it('parseSshTarget：端口越界 / 非数字 → 明确报错', () => {
     for (const bad of ['h:0', 'h:70000', 'h:abc']) {
-      assert.throws(() => parseSshTarget(bad, 'p'), { code: 'CONFIG_INVALID' }, `应该拒绝 ${bad}`)
+      assert.throws(() => parseSshTarget(bad, 'p'), { code: 'DP.CONFIG.INVALID' }, `应该拒绝 ${bad}`)
     }
   })
 

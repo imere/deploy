@@ -25,7 +25,7 @@ export type {
   Tunnel,
 } from './driver.js'
 export {
-  assertNoHops,
+  validateHops,
   DEFAULT_PREFERENCE,
   DEFAULT_MAX_OUTPUT_BYTES,
   DEFAULT_SSH_TIMEOUT_MS,

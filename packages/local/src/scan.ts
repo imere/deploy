@@ -26,10 +26,10 @@ export interface SourceSpec {
 export function normalizeSourceSpec(pattern: string, cwd: string): SourceSpec {
   const trimmed = pattern.trim()
   if (trimmed === '') {
-    throw new DpError('CONFIG_INVALID', 'source 不能为空', { path: 'projects.*.source' })
+    throw new DpError('DP.CONFIG.INVALID', 'source 不能为空', { path: 'projects.*.source' })
   }
   if (/[\\/]$/.test(trimmed)) {
-    throw new DpError('CONFIG_INVALID', `source 不能以路径分隔符结尾：${pattern}`, {
+    throw new DpError('DP.CONFIG.INVALID', `source 不能以路径分隔符结尾：${pattern}`, {
       path: 'projects.*.source',
       hint: '写 "./dist" 表示目录本身，写 "./dist/**" 表示目录内容。尾斜杠两种解释都成立，我们不猜',
     })
@@ -46,7 +46,7 @@ export async function listSourceEntries(spec: SourceSpec): Promise<readonly Sour
   try {
     stat = await fs.stat(spec.root)
   } catch (err) {
-    throw new DpError('CONFIG_INVALID', `source 不存在：${spec.root}`, {
+    throw new DpError('DP.CONFIG.INVALID', `source 不存在：${spec.root}`, {
       cause: err,
       path: 'projects.*.source',
       hint: '先跑构建，或检查 cwd',

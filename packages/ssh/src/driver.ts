@@ -11,7 +11,7 @@
  * 所以 native 排第一，ssh2 是降级。链上全失败时必须把**每一项的失败原因**都
  * 报出来（没有 hint 的错误等于没报错）。
  */
-import { DpError } from '@dp/ports'
+import { DpError, assertPortInRange, parseSshTarget, type KnownHostsMode as PortsKnownHostsMode } from '@dp/ports'
 import type { SshArgvOptions } from './argv.js'
 
 export type SshDriverKind = 'native-ssh' | 'ssh2'
@@ -57,7 +57,7 @@ export interface DriverExecResult {
 // 连接配置
 // ------------------------------------------------------------
 
-export type KnownHostsMode = 'strict' | 'accept-new' | 'tofu' | 'off'
+export type KnownHostsMode = PortsKnownHostsMode
 
 /**
  * 凭据只以 **ref** 的形式出现在配置里（`env:X` / `file:/p` / `cmd:...`）。
@@ -118,14 +118,32 @@ export const DEFAULT_SSH_TIMEOUT_MS = 30_000
 /** 远端输出上限，防止一条 `cat /dev/zero` 打爆本机内存 */
 export const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024
 
-/** 显式指定了未实现的非空 hops → 立刻拒，别让它悄悄按单跳跑 */
-export function assertNoHops(hops: readonly HopSpec[] | undefined): void {
-  if (hops !== undefined && hops.length > 0) {
-    throw new DpError('DP.CONFIG.INVALID', `多跳尚未支持：收到 ${hops.length} 跳配置`, {
-      path: 'hosts.*.ssh.hops',
-      hint: '本批只做单跳。带跳板机请改用 native-ssh + ssh.proxyJump（单跳由系统 ssh 的 ProxyJump 处理）；多跳降级链（direct-tcpip → nc → ssh-relay）下一批实现',
-    })
-  }
+/**
+ * 逐跳校验。**不合法就报错，绝不悄悄降级成单跳** —— 静默忽略 hops 会让人以为
+ * 流量走了跳板机，实际却直连了目标机（这正是跳板机被放在那里的原因）。
+ *
+ * 校验内容与配置层一致（连接串、端口区间、knownHosts 枚举），因为 `SshConnectionOptions`
+ * 可以绕过 `@dp/schema` 直接构造：探针、测试、多目标扇出都走这条路。
+ */
+export function validateHops(hops: readonly HopSpec[] | undefined): void {
+  if (hops === undefined || hops.length === 0) return
+  hops.forEach((hop, i) => {
+    const path = `hosts.*.ssh.hops[${i}]`
+    const target = parseSshTarget(hop.ssh, `${path}.ssh`)
+    if (hop.port !== undefined) {
+      assertPortInRange(hop.port, `${path}.port`)
+      if (target.port !== undefined && target.port !== hop.port) {
+        throw new DpError(
+          'DP.CONFIG.INVALID',
+          `第 ${i} 跳给了两个互相矛盾的端口：ssh 串里是 ${target.port}，port 字段是 ${hop.port}`,
+          {
+            path: `${path}.port`,
+            hint: '留一个就行。写 ssh: user@host:2222 就不要再写 port —— 静默取其中一个会让你连错机器',
+          },
+        )
+      }
+    }
+  })
 }
 
 export function resolveTimeoutMs(explicit: number | undefined): number {

@@ -372,8 +372,8 @@ type Target = {
 
 ```ts
 type DeployError = {
-  code: 'AUTH_FAILED' | 'TOOL_MISSING' | 'HOST_KEY_MISMATCH' | 'ELEVATION_FAILED'
-      | 'VERIFY_FAILED' | 'LOCKED' | 'UNMANAGED_FILE' | 'CONFIG_INVALID'
+  code: 'DP.CONFIG.INVALID' | 'DP.SSH.AUTH_FAILED' | 'DP.SSH.TOOL_MISSING'
+      | 'DP.SSH.HOST_KEY_MISMATCH' | 'DP.VERIFY.FAILED' | 'DP.PATH.NOT_WRITABLE'
   hint: string            // "远端缺少 rsync，可在 transport.strategy 指定 tar-ssh"
   stepId?: string
   releaseId?: string

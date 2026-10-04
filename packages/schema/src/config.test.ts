@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DpError } from '@dp/ports'
-import { DEFAULT_KEEP, defineDocker, defineNginx, defineTarget, dockerSchema, nginxSchema, releaseSchema, type DockerInput, type NginxInput } from './config.js'
+import { DEFAULT_KEEP, defineDocker, defineHost, defineNginx, defineTarget, dockerSchema, nginxSchema, releaseSchema, type DockerInput, type NginxInput } from './config.js'
 
 function codeOf(fn: () => unknown): { code: string; path?: string; hint?: string } {
   try {
@@ -91,7 +91,7 @@ describe('nginx · server 的联合形态', () => {
 
   it('数字（既不是对象也不是数组）→ 说清两种期望形态', () => {
     const r = codeOf(() => parseRaw({ ...BASE, server: 8080 }))
-    assert.equal(r.code, 'CONFIG_INVALID')
+    assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.match(String(r.hint), /单个 server 块对象/)
     assert.match(String(r.hint), /server 块数组/)
   })
@@ -105,18 +105,18 @@ describe('nginx · reload', () => {
 
   it('argv 里的空串被拒 —— 类型层看不出来，但空参数会让远端 execve 直接失败', () => {
     const r = codeOf(() => defineNginx({ ...BASE, reload: ['nginx', '', 'reload'] }))
-    assert.equal(r.code, 'CONFIG_INVALID')
+    assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'nginx.reload[1]')
     assert.match(String(r.hint), /execve/)
   })
 
   it('首元素空串同样被拒', () => {
-    assert.equal(codeOf(() => defineNginx({ ...BASE, reload: [''] })).code, 'CONFIG_INVALID')
+    assert.equal(codeOf(() => defineNginx({ ...BASE, reload: [''] })).code, 'DP.CONFIG.INVALID')
   })
 
   it('既不是数组也不是 false → 说清两种写法', () => {
     const r = codeOf(() => parseRaw({ ...BASE, reload: 'nginx -s reload' }))
-    assert.equal(r.code, 'CONFIG_INVALID')
+    assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.match(String(r.hint), /argv 数组/)
     assert.match(String(r.hint), /false/)
   })
@@ -125,14 +125,14 @@ describe('nginx · reload', () => {
 describe('nginx · 未知字段被拒', () => {
   it('server 里的未知键报出可用字段', () => {
     const r = codeOf(() => parseRaw({ server: { root: '/srv', upstream: 'http://x' } }))
-    assert.equal(r.code, 'CONFIG_INVALID')
+    assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'nginx.server.upstream')
     assert.match(String(r.hint), /serverName/)
   })
 
   it('顶层未知键同样被拒（confd 不在这里，写了就是错配置）', () => {
     const r = codeOf(() => parseRaw({ ...BASE, confd: '/etc/nginx/conf.d' }))
-    assert.equal(r.code, 'CONFIG_INVALID')
+    assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'nginx.confd')
   })
 
@@ -201,7 +201,7 @@ describe('docker · 默认值', () => {
 describe('docker · compose.files', () => {
   it('必填：缺了报「缺少必填字段」并指到具体那一层', () => {
     const r = codeOf(() => dockerSchema.parse({ compose: { projectName: 'api' } }, 'docker'))
-    assert.equal(r.code, 'CONFIG_INVALID')
+    assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'docker.compose.files')
   })
 
@@ -212,13 +212,13 @@ describe('docker · compose.files', () => {
 
   it('空串被拒，path 指到具体下标 —— 空路径拼进 -f 后面，报错与部署毫无关系', () => {
     const r = codeOf(() => defineDocker({ compose: { files: ['ok.yml', ''], projectName: 'api' } }))
-    assert.equal(r.code, 'CONFIG_INVALID')
+    assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'docker.compose.files[1]')
     assert.match(String(r.hint), /no such file or directory/)
   })
 
   it('首元素空串同样被拒', () => {
-    assert.equal(codeOf(() => defineDocker({ compose: { files: [''], projectName: 'api' } })).code, 'CONFIG_INVALID')
+    assert.equal(codeOf(() => defineDocker({ compose: { files: [''], projectName: 'api' } })).code, 'DP.CONFIG.INVALID')
   })
 
   it('**空数组不在这里拒** —— 那是 DP.DOCKER.COMPOSE_FILES_EMPTY，hint 里有「不带 -f 会去找当前工作目录」的解释', () => {
@@ -241,7 +241,7 @@ describe('docker · 语义判定不在这层', () => {
 
   it('files 里出现非字符串元素在加载期就报（类型对不上不许留到部署时）', () => {
     const r = codeOf(() => dockerSchema.parse({ compose: { files: ['ok.yml', 42], projectName: 'api' } }, 'docker'))
-    assert.equal(r.code, 'CONFIG_INVALID')
+    assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'docker.compose.files[1]')
   })
 })
@@ -249,7 +249,7 @@ describe('docker · 语义判定不在这层', () => {
 describe('docker · 未知字段被拒', () => {
   it('顶层未知键报出可用字段（发布根不是这里的字段）', () => {
     const r = codeOf(() => dockerSchema.parse({ ...DOCKER_BASE, root: '/srv/api' }, 'docker'))
-    assert.equal(r.code, 'CONFIG_INVALID')
+    assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'docker.root')
     // 报的是**顶层**可用字段。projectName 嵌在 compose 里，不出现在这一层
     assert.match(String(r.hint), /compose/)
@@ -286,5 +286,57 @@ describe('DEFAULT_KEEP', () => {
 
   it('release 段整个省略时，归一化结果就是它（其余各处从这里取，不再各写一份 5）', () => {
     assert.equal(releaseSchema.parse({}, 'release').keep, DEFAULT_KEEP)
+  })
+})
+
+describe('hops：多跳配置入口', () => {
+  it('合法多跳通过', () => {
+    const host = defineHost({ hops: [{ ssh: 'ops@jump.example.com' }, { ssh: 'deploy@10.0.0.7:2222' }] })
+    assert.equal(host.hops?.length, 2)
+  })
+
+  it('hops 与 ssh 互斥：同时给要报错，path 指到 hosts.*.ssh', () => {
+    assert.throws(
+      () => defineHost({ ssh: 'deploy@10.0.0.7', hops: [{ ssh: 'ops@jump.example.com' }] }),
+      (err: unknown) => {
+        assert.ok(err instanceof DpError)
+        assert.equal(err.code, 'DP.CONFIG.INVALID')
+        assert.equal(err.path, 'host.ssh')
+        assert.match(err.hint ?? '', /二选一|只能选一个/)
+        return true
+      },
+    )
+  })
+
+  it('坏连接串报错，path 指向具体那一跳', () => {
+    assert.throws(
+      () => defineHost({ hops: [{ ssh: 'ops@jump.example.com' }, { ssh: 'deploy@' }] }),
+      (err: unknown) => {
+        assert.ok(err instanceof DpError)
+        assert.equal(err.path, 'host.hops[1].ssh')
+        return true
+      },
+    )
+  })
+
+  it('端口越界报错', () => {
+    assert.throws(() => defineHost({ hops: [{ ssh: 'ops@jump.example.com', port: 70000 }] }), {
+      path: 'host.hops[0].port',
+    })
+  })
+
+  it('knownHosts 必须是合法枚举值', () => {
+    assert.throws(() => defineHost({ hops: [{ ssh: 'ops@jump.example.com', knownHosts: 'nope' as never }] }), {
+      path: 'host.hops[0].knownHosts',
+    })
+  })
+
+  it('空数组 hops 按「没给」处理：与 ssh 共存不报错', () => {
+    const host = defineHost({ ssh: 'deploy@10.0.0.7', hops: [] })
+    assert.equal(host.ssh, 'deploy@10.0.0.7')
+  })
+
+  it('只给 ssh（单跳）行为不变', () => {
+    assert.equal(defineHost({ ssh: 'deploy@10.0.0.7:2222' }).ssh, 'deploy@10.0.0.7:2222')
   })
 })

@@ -129,8 +129,8 @@ scheme 有 `env:` / `file:` / `prompt:` / `cmd:`，注册表化，未来可加 `
 ## 4. 主机与多跳、提权、传输
 
 > **这一节混了「已落地」与「设计形态」，逐项标注如下，别照抄。**
-> 已落地的字段：`ssh`（**单跳**连接串）、`local`、`become`、`layout`、`transport`。
-> **未落地**：`hops`（多跳）、`crypto` / `knownHosts` / `timeouts` —— 这三个 schema 里没有，
+> 已落地的字段：`ssh`（单跳连接串）、`hops`（多跳，仅 native-ssh）、`local`、`become`、`layout`、`transport`。
+> **未落地**：`crypto` / `knownHosts` / `timeouts` —— 这三个 schema 里没有，
 > 抗量子目前由驱动偏好链决定（只能走 `native-ssh`，`ssh2` 不支持 PQC），不是配置项。
 
 已落地的写法：
@@ -138,7 +138,7 @@ scheme 有 `env:` / `file:` / `prompt:` / `cmd:`，注册表化，未来可加 `
 ```yaml
 hosts:
   prod:
-    ssh: 'deploy@10.0.0.7'          # user@host[:port]。当前**只支持单跳**
+    ssh: 'deploy@10.0.0.7'          # user@host[:port]。与 hops 二选一
     become:                          # 可选。不写 = 纯普通用户，同样受支持
       type: sudo                     # none | sudo | su | doas | custom
       user: root
@@ -153,15 +153,25 @@ hosts:
   local-box: { local: true }         # 本机目标
 ```
 
-多跳是**设计形态，尚未开放** —— schema 里没有 `hops` 字段，`@dp/ssh` 的 `connect()`
-对非空 `hops` 会显式报错；argv 层虽能构造 `-J` 与 `ProxyCommand`，但用户侧没有入口：
+多跳：把整条链写进 `hops`，**最后一跳就是目标机**：
 
 ```yaml
-    ssh:
-      hops:
-        - { ssh: 'ops@jump.example.com', auth: { type: agent } }
-        - { ssh: 'deploy@10.0.0.7',     auth: { type: password, passwordRef: env:DEPLOY_PASSWORD } }
+    hops:
+      - { ssh: 'ops@jump.example.com', auth: { type: agent } }
+      - { ssh: 'deploy@10.0.0.7',     auth: { type: key, identityFile: '~/.ssh/id_ed25519' } }
 ```
+
+三条限制都会在配置加载或拼 argv 时**显式报错**，不会静默降级：
+
+- **逐跳只能 key / agent**。`-J` 由系统 ssh 自己发起跳板连接，我们既没有它的凭据通道，
+  也保证不了不交互（它会去读 tty，在 CI 里就是一次永久挂起）。改用密钥/agent，
+  或把逐跳的端口与密钥写进 ssh_config 的 `Host` 块。
+- **逐跳不能单独设 knownHosts**。`-J` 只有一条命令行，跳板机与目标机共用同一组
+  `StrictHostKeyChecking` / `UserKnownHostsFile`；逐跳要不同策略只能走 ssh_config。
+- **`ssh2` 驱动不支持多跳**。链式转发在它那侧还没实现，显式指定
+  `ssh.driver: native-ssh`（默认顺序已经是 native 优先）。
+
+`hops: []` 按「没给」处理（等同单跳）。
 
 > **不假设 root。** `sshUser` 一律是普通账号，`become` 只是可选项而非必经步骤（`type: none` 是一等公民）。
 > 目标机上的路径 —— 状态目录、systemd unit 位置、confd —— **都不是配置项**：由实测能力推导出

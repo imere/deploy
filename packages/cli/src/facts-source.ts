@@ -11,7 +11,7 @@
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { existsSync, promises as fs } from 'node:fs'
-import { DpError, type Facts, type Platform, type Runner } from '@dp/ports'
+import { DpError, type Facts, type Platform, type Runner, parseSshTarget } from '@dp/ports'
 import type { HostConfig } from '@dp/schema'
 import type { Logger } from '@dp/log'
 import { probeLocalFacts, probeWritable } from '@dp/local'
@@ -79,31 +79,9 @@ export interface FactsResult {
   readonly runner?: Runner
 }
 
-/** `user@host[:port]` —— 纯解析，不猜端口（SSH 的默认端口由驱动自己决定） */
-export function parseSshTarget(value: string, path: string): { host: string; user?: string; port?: number } {
-  const at = value.lastIndexOf('@')
-  const userPart = at >= 0 ? value.slice(0, at) : undefined
-  const hostPart = at >= 0 ? value.slice(at + 1) : value
-  if (hostPart === '') {
-    throw new DpError('CONFIG_INVALID', `ssh 目标为空：${JSON.stringify(value)}`, {
-      path,
-      hint: '写成 user@host 或 user@host:port，例如 deploy@10.0.0.5:2222',
-    })
-  }
-  const colon = hostPart.lastIndexOf(':')
-  if (colon > 0) {
-    const portText = hostPart.slice(colon + 1)
-    const port = Number(portText)
-    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-      throw new DpError('CONFIG_INVALID', `端口不合法：${portText}`, {
-        path,
-        hint: '端口必须是 1–65535 的整数。不写端口就用 SSH 的默认值（22）',
-      })
-    }
-    return { user: userPart, host: hostPart.slice(0, colon), port }
-  }
-  return { user: userPart, host: hostPart }
-}
+/** `user@host[:port]` 的解析实现在 @dp/ports（配置层与 ssh 层共用同一份），这里转出去保持既有调用点不变 */
+export { parseSshTarget }
+
 
 /**
  * 认证方式。**只认非交互来源**：
@@ -218,7 +196,7 @@ export async function acquireFacts(request: FactsRequest): Promise<FactsResult> 
   }
 
   if (host.ssh === undefined) {
-    throw new DpError('CONFIG_INVALID', `主机 ${request.hostId} 既没有 local: true 也没有 ssh`, {
+    throw new DpError('DP.CONFIG.INVALID', `主机 ${request.hostId} 既没有 local: true 也没有 ssh`, {
       path: `hosts.${request.hostId}`,
       hint: '写 { "local": true } 指向本机，或写 { "ssh": "user@host:port" } 指向远端。两者都没有就无法确定目标',
     })
@@ -258,7 +236,7 @@ export async function readFactsFile(path: string): Promise<Facts> {
   try {
     text = await fs.readFile(path, 'utf8')
   } catch (err) {
-    throw new DpError('CONFIG_INVALID', `读 facts 文件失败：${path}`, {
+    throw new DpError('DP.CONFIG.INVALID', `读 facts 文件失败：${path}`, {
       path: '--facts',
       hint: '先跑 `dp facts --json > facts.json` 生成它；注意主机名要与你现在选的 --host 一致',
       cause: err,
@@ -268,7 +246,7 @@ export async function readFactsFile(path: string): Promise<Facts> {
   try {
     raw = JSON.parse(text)
   } catch (err) {
-    throw new DpError('CONFIG_INVALID', `facts 文件不是合法 JSON：${path}`, {
+    throw new DpError('DP.CONFIG.INVALID', `facts 文件不是合法 JSON：${path}`, {
       path: '--facts',
       hint: '必须是 `dp facts --json` 的原样输出',
       cause: err,
@@ -281,19 +259,19 @@ export async function readFactsFile(path: string): Promise<Facts> {
 /** 只校验 makePlan 真正读到的字段。整份 Facts 逐字段校验是过度工程，且会让夹具难写。 */
 function assertFacts(value: unknown, path: string): Facts {
   if (value === null || typeof value !== 'object') {
-    throw new DpError('CONFIG_INVALID', `facts 文件内容不是对象：${path}`, { path: '--facts' })
+    throw new DpError('DP.CONFIG.INVALID', `facts 文件内容不是对象：${path}`, { path: '--facts' })
   }
   const v = value as Record<string, unknown>
   const missing = ['host', 'platform', 'arch', 'init', 'homedir', 'tmpdir'].filter((k) => v[k] === undefined)
   if (missing.length > 0) {
-    throw new DpError('CONFIG_INVALID', `facts 文件缺少必填字段：${missing.join(' | ')}`, {
+    throw new DpError('DP.CONFIG.INVALID', `facts 文件缺少必填字段：${missing.join(' | ')}`, {
       path: '--facts',
       hint: '重新用 `dp facts --json > facts.json` 生成',
     })
   }
   const caps = (v['capabilities'] ?? {}) as Record<string, unknown>
   if (typeof caps['canWrite'] !== 'object' || caps['canWrite'] === null) {
-    throw new DpError('CONFIG_INVALID', 'facts 文件缺少 capabilities.canWrite', {
+    throw new DpError('DP.CONFIG.INVALID', 'facts 文件缺少 capabilities.canWrite', {
       path: '--facts',
       hint: '发布根候选的可写性全靠它推导，缺了 plan 就无法确定发布目录',
     })

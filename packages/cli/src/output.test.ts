@@ -45,11 +45,11 @@ describe('output · 退出码映射（纯函数）', () => {
     assert.equal(exitCodeFor(new CliUsageError('未知选项', { hint: 'x' })), EXIT_USAGE)
     // 用法错用的是 CONFIG_INVALID 这个码，靠类型而不是码来区分 —— 这正是
     // 需要 CliUsageError 的原因：同一个码对应两种完全不同的失败
-    assert.equal(new CliUsageError('x').code, 'CONFIG_INVALID')
+    assert.equal(new CliUsageError('x').code, 'DP.CONFIG.INVALID')
   })
 
   it('3 = 配置错', () => {
-    for (const code of ['CONFIG_INVALID', 'DP.SOURCE.EMPTY', 'DP.PATH.RESERVED_NAME', 'DP.LAYOUT.UNSUPPORTED'] as const) {
+    for (const code of ['DP.CONFIG.INVALID', 'DP.SOURCE.EMPTY', 'DP.PATH.RESERVED_NAME', 'DP.LAYOUT.UNSUPPORTED'] as const) {
       assert.equal(exitCodeFor(new DpError(code, 'x')), EXIT_CONFIG, code)
     }
   })
@@ -121,12 +121,12 @@ describe('output · 错误渲染', () => {
   })
 
   it('json 形状固定：ok=false + error + exitCode', () => {
-    const err = new DpError('CONFIG_INVALID', '找不到配置', { hint: '放一个 deploy.config.json' })
+    const err = new DpError('DP.CONFIG.INVALID', '找不到配置', { hint: '放一个 deploy.config.json' })
     const parsed = JSON.parse(renderErrorJson(err, false)) as Record<string, unknown>
     assert.equal(parsed['ok'], false)
     assert.equal(parsed['exitCode'], EXIT_CONFIG)
     const e = parsed['error'] as Record<string, unknown>
-    assert.equal(e['code'], 'CONFIG_INVALID')
+    assert.equal(e['code'], 'DP.CONFIG.INVALID')
     assert.equal(e['message'], '找不到配置')
     assert.equal(e['hint'], '放一个 deploy.config.json')
   })
