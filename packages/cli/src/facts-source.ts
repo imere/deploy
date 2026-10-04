@@ -152,17 +152,33 @@ export async function probeCreatable(
   paths: readonly string[],
   /** 已经测过的目录 → 结论。重复建文件去测同一个目录纯属浪费（每次都是真实 IO） */
   known: Readonly<Record<string, boolean>> = {},
-): Promise<Record<string, boolean>> {
+  /** 替换探测文件的删除动作，供测试注入「删不掉」 */
+  remove?: (path: string) => Promise<unknown>,
+): Promise<{ canWrite: Record<string, boolean>; leftovers: readonly string[] }> {
   const probes = paths.map((p) => nearestExistingDir(p))
   const pending = [...new Set(probes)].filter((p) => known[p] === undefined)
-  const measured = await probeWritable(pending)
-  const resolved: Record<string, boolean> = { ...known, ...measured }
+  const measured = await probeWritable(pending, remove === undefined ? {} : { remove })
+  const resolved: Record<string, boolean> = { ...known, ...measured.canWrite }
   const out: Record<string, boolean> = {}
   for (let i = 0; i < paths.length; i += 1) {
     // 祖先可写即意味着这条路径可被创建 —— 实测的语义是「在 probe 目录里建文件成功」
     out[paths[i] as string] = resolved[probes[i] as string] === true
   }
-  return out
+  return { canWrite: out, leftovers: measured.leftovers }
+}
+
+/**
+ * 未回收的探测文件必须变成**用户看得见**的一行字。
+ *
+ * 静默过一次的后果是实测过的：残留悄悄攒了上千个，这台机器上所有候选目录随后被判
+ * 不可写，部署跑不动，而日志里没有任何东西指得到真正的原因。
+ */
+function leftoverNotes(leftovers: readonly string[]): string[] {
+  if (leftovers.length === 0) return []
+  return [
+    `写权限探测留下 ${leftovers.length} 个临时文件（建文件成功但删不掉）：${leftovers.join('、')}` +
+      '。它们是 dp 的探测垃圾，可直接删掉；常见原因是目录被占用、ACL 或杀毒软件锁住',
+  ]
 }
 
 export async function acquireFacts(request: FactsRequest): Promise<FactsResult> {
@@ -173,8 +189,9 @@ export async function acquireFacts(request: FactsRequest): Promise<FactsResult> 
   if (host.local === true) {
     const base = await probeLocalFacts()
     const facts: Facts = { ...base, host: request.hostId }
+    const baseLeftovers = base.capabilities.probeLeftovers ?? []
     if (request.projectName === undefined) {
-      return { facts, probeNotes: [], close: undefined }
+      return { facts, probeNotes: leftoverNotes(baseLeftovers), close: undefined }
     }
     // 补测发布根：只加 key，不覆盖 probeLocalFacts 已给出的结论。
     // 写了显式 release.root 时**只测它一个** —— pickReleaseRoot 见到 explicitRoot 就短路，
@@ -184,15 +201,18 @@ export async function acquireFacts(request: FactsRequest): Promise<FactsResult> 
         ? releaseRootCandidates(request.projectName, base.homedir, base.env, base.platform)
         : [request.releaseRoot]
     const extra = await probeCreatable(targets, base.capabilities.canWrite)
+    // 两段探测的残留合到一起：漏掉任何一段，报告就会说「清理干净」而实际没有
+    const leftovers = [...baseLeftovers, ...extra.leftovers]
     return {
       facts: {
         ...facts,
         capabilities: {
           ...base.capabilities,
-          canWrite: { ...base.capabilities.canWrite, ...extra },
+          canWrite: { ...base.capabilities.canWrite, ...extra.canWrite },
+          ...(leftovers.length > 0 ? { probeLeftovers: leftovers } : {}),
         },
       },
-      probeNotes: [],
+      probeNotes: leftoverNotes(leftovers),
       close: undefined,
     }
   }

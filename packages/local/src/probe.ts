@@ -60,27 +60,65 @@ export function snapshotEnv(): Readonly<Record<string, string | undefined>> {
   return out
 }
 
+/** 探测文件的删除动作。抽成参数是为了让「删不掉」这条路径可测 —— 真机器上要靠权限异常才碰得到。 */
+export type ProbeRemove = (path: string) => Promise<unknown>
+
+export interface WritableProbe {
+  readonly canWrite: Readonly<Record<string, boolean>>
+  /** 建成功、两次删除都没成功回收的探测文件。非空即表示目标目录里有 dp 留下的垃圾 */
+  readonly leftovers: readonly string[]
+}
+
+const LEFTOVER_RETRY_DELAY_MS = 50
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/** 删一次就够的机会不多：占用多半是瞬时的（杀毒软件正在扫刚建的文件）。再失败就是真删不掉，不无限重试。 */
+async function removeOnceWithRetry(path: string, remove: ProbeRemove): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await remove(path)
+      return true
+    } catch {
+      if (attempt === 0) await sleep(LEFTOVER_RETRY_DELAY_MS)
+    }
+  }
+  return false
+}
+
 /**
- * 真实写权限实测：建一个随机名临时文件，成功即算可写，随即删除。
+ * 真实写权限实测：建一个随机名临时文件，**建成功即算可写**，随即删除。
  * 只看 `access(W_OK)` 是不够的 —— 只读挂载、SELinux 标签、WSL `/mnt` 挂载点
  * 都可能让 W_OK 通过而实际写失败。
+ *
+ * 判定与清理是**两件事**，不放在同一个 try 里：文件真的建出来了，这就是可写的实证，
+ * 后面删不掉只说明清理失败（占用 / ACL / 锁），拿它改写判定会把明明可写的目录报成
+ * 不可写。清理失败也不吞掉 —— 路径进 `leftovers` 交出去，否则残留会悄悄攒成
+ * 一堆、然后把所有候选目录拖成不可写，而没有任何线索指得到它。
  */
-export async function probeWritable(paths: readonly string[]): Promise<Record<string, boolean>> {
-  const result: Record<string, boolean> = {}
+export async function probeWritable(
+  paths: readonly string[],
+  options: { readonly remove?: ProbeRemove } = {},
+): Promise<WritableProbe> {
+  const remove = options.remove ?? ((p: string) => fs.rm(p, { force: true }))
+  const canWrite: Record<string, boolean> = {}
+  const leftovers: string[] = []
   await Promise.all(
     paths.map(async (dir) => {
       const probe = join(dir, `.dp-w-${randomBytes(6).toString('hex')}`)
+      let created = false
       try {
         const handle = await fs.open(probe, 'wx')
+        created = true
         await handle.close()
-        await fs.rm(probe, { force: true })
-        result[dir] = true
       } catch {
-        result[dir] = false
+        // 建不出来才是不可写。close 失败是 fd 的问题，不推翻「文件已经建出来」这个事实
       }
+      canWrite[dir] = created
+      if (created && !(await removeOnceWithRetry(probe, remove))) leftovers.push(probe)
     }),
   )
-  return result
+  return { canWrite, leftovers }
 }
 
 async function probeSymlink(): Promise<boolean> {
@@ -177,6 +215,8 @@ export interface ProbeOptions {
   /** 需要实测写权限的路径（通常是发布目录候选展开后的结果） */
   readonly writeProbePaths?: readonly string[]
   readonly tools?: readonly string[]
+  /** 替换探测文件的删除动作。默认 fs.rm；注入必定失败的版本即可断言「删不掉不改判定、但必须留痕」 */
+  readonly removeProbeFile?: ProbeRemove
 }
 
 const TOOLS_TO_PROBE = [
@@ -223,11 +263,12 @@ export async function probeLocalFacts(options: ProbeOptions = {}): Promise<Facts
       localAppData,
     ].filter(Boolean)
 
-  const [canWrite, canSymlink, init] = await Promise.all([
-    probeWritable(candidates),
+  const [write, canSymlink, init] = await Promise.all([
+    probeWritable(candidates, { remove: options.removeProbeFile }),
     probeSymlink(),
     detectInit(tools),
   ])
+  const canWrite = write.canWrite
 
   const capabilities: Capabilities = {
     canWrite,
@@ -237,6 +278,8 @@ export async function probeLocalFacts(options: ProbeOptions = {}): Promise<Facts
     lingerEnabled: await detectLinger(tools),
     canBindPrivilegedPort: await probePrivilegedPort(),
     sudoAllowlist: await probeSudoAllowlist(),
+    // 没残留时**不放这个键**：调用方用「键不存在」区分「全回收干净」与「压根没探过」
+    ...(write.leftovers.length > 0 ? { probeLeftovers: [...write.leftovers] } : {}),
   }
 
   return {

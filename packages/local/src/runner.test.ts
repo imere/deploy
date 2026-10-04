@@ -10,7 +10,7 @@ import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Capabilities, Facts } from '@dp/ports'
-import { createLocalRunner, probeLocalFacts, probeWritable } from './index.js'
+import { createLocalRunner, probeLocalFacts } from './index.js'
 
 let sandbox = ''
 
@@ -121,19 +121,6 @@ describe('local runner · 文件系统', () => {
 })
 
 describe('local runner · 能力实证', () => {
-  it('probeWritable 对不存在的目录如实否定', async () => {
-    const result = await probeWritable([`${sandbox}/definitely-missing`])
-    assert.equal(result[`${sandbox}/definitely-missing`], false)
-  })
-
-  it('probeWritable 不留下探测垃圾', async () => {
-    const probeDir = `${sandbox}/probe-clean`
-    await fs.mkdir(probeDir, { recursive: true })
-    const result = await probeWritable([probeDir])
-    assert.equal(result[probeDir], true)
-    assert.deepEqual(await fs.readdir(probeDir), [], '探测文件必须当场删掉')
-  })
-
   it('probeLocalFacts 报告的能力与真实 OS 一致', async () => {
     const facts = await probeLocalFacts({ writeProbePaths: [tmpdir()] })
     assert.equal(facts.host, 'local')

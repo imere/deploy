@@ -20,6 +20,8 @@ export {
   probeWritable,
   snapshotEnv,
   type ProbeOptions,
+  type ProbeRemove,
+  type WritableProbe,
 } from './probe.js'
 
 export {

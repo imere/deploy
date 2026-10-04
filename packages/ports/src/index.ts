@@ -27,6 +27,19 @@ export interface Capabilities {
   readonly canBindPrivilegedPort: boolean
   /** 能 sudo 的具体命令，不是"能不能 sudo" */
   readonly sudoAllowlist: readonly string[]
+  /**
+   * 「能不能写」的探测建出来、却没能删掉的临时文件。
+   *
+   * 为什么这个字段必须存在：写权限的判定**只看建文件有没有成功** —— 文件建出来了
+   * 就是实证。清理失败（占用、ACL、杀毒软件锁）发生在判定之后，拿它推翻判定等于
+   * 把一台明明可写的机器报成不可写，症状是所有候选目录同时被判死、部署跑不动。
+   * 但清理失败同样不能静默：静默过一次的后果是残留攒了一堆而日志里没有任何线索。
+   * 所以它必须从探测里出来，交给调用方打日志或写进报告。
+   *
+   * 可选而非必填：没有残留时不出现这个键，且产出 facts 的 ssh 侧不产生它 ——
+   * 让它必填会把所有构造 Capabilities 的地方都拖成必改项。
+   */
+  readonly probeLeftovers?: readonly string[]
 }
 
 /** 目标机的全部事实。plan() 的唯一外部输入。 */
