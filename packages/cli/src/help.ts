@@ -129,6 +129,28 @@ export const COMMANDS: readonly CommandDoc[] = [
     implemented: true,
   },
   {
+    name: 'deploy',
+    summary:
+      '零配置一键部署：没有配置文件时按 dist/build/out/public + 源清单探测出配置。**默认干跑**，加 --yes 才落盘',
+    usage: 'dp deploy [--config <path>] [--env <name>] [--json] [--yes]',
+    flags: [
+      ['--yes', '接受探测出的配置并真的落盘；不给则只预览（零配置下配置是猜出来的，不该不看就动生产目录）'],
+      ['--json', '输出 apply 结果 JSON；自动决定的说明走日志（stderr），不混进 stdout'],
+    ],
+    examples: [
+      'dp deploy                      # 零配置预览：自动决定了什么 + 将要做哪些步骤，一个字节都不写',
+      'dp deploy --yes                # 接受上面那份自动决定，真的部署',
+      'dp deploy --json --yes > .tmp/deploy.json',
+    ],
+    related: ['apply', 'plan', 'facts'],
+    commonErrors: [
+      ['CONFIG_INVALID', 'cwd 下没有 dist / build / out / public 任何一个目录（dp 不退到 "."，那会传上 node_modules）；先构建，或用 --config 显式写 source.root'],
+      ['CONFIG_INVALID', '探测到 nginx：零配置不造 server 块（那等于编造你的意图）；用 --config 写 target.nginx，或把 nginx.conf exclude 出源'],
+      ['CONFIG_INVALID', '配置里有多个环境却没给 --env；dp 不默认挑第一个 —— 那正是把预发发到生产的入口'],
+    ],
+    implemented: true,
+  },
+  {
     name: 'rollback',
     summary: '把 current 切回上一版。回滚后再验一次健康，坏版本留着不清',
     usage: 'dp rollback [--config <path>] [--env <name>] [--project <name>] [--host <id>] [--all] [--json]',

@@ -46,6 +46,9 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   'json',
   'all',
   'dry-run',
+  // 只对 `dp deploy` 有意义：零配置下的配置是探测出来的，`--yes` 表达的是
+  // 「接受上面这份自动决定」。apply 刻意不给它 —— 那里有用户写好的配置。
+  'yes',
 ])
 
 export const VALUE_FLAGS: ReadonlySet<string> = new Set([

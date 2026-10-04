@@ -31,6 +31,7 @@ import { createContext, parseLogFormat, parseLogLevel, type ResolvedFlags, type 
 import type { ApplyDeps } from './deps.js'
 import { runPlan } from './commands/plan.js'
 import { runApply } from './commands/apply.js'
+import { runDeploy } from './commands/deploy.js'
 import { runFacts } from './commands/facts.js'
 import { runStatus } from './commands/status.js'
 import { runVerify } from './commands/verify.js'
@@ -94,6 +95,11 @@ const PLAN_FLAGS = ['config', 'env', 'host', 'project', 'all', 'facts', 'json', 
  * 想要不落盘的预览，`--dry-run` 已经足够。
  */
 const APPLY_FLAGS = ['config', 'env', 'host', 'project', 'all', 'facts', 'json', 'dry-run', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
+/**
+ * deploy 的开关集合 = apply 的全部 + `yes`。它多出来的那个只对零配置有意义：
+ * apply 前面有一份用户写好的配置，而 deploy 的配置是探测出来的。
+ */
+const DEPLOY_FLAGS = ['config', 'env', 'host', 'project', 'all', 'facts', 'json', 'dry-run', 'yes', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
 const FACTS_FLAGS = ['config', 'env', 'host', 'project', 'all', 'json', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
 const SCHEMA_FLAGS = ['out', 'json', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
 
@@ -119,6 +125,8 @@ function allowedFor(command: string): readonly string[] {
       return PLAN_FLAGS
     case 'apply':
       return APPLY_FLAGS
+    case 'deploy':
+      return DEPLOY_FLAGS
     case 'facts':
       return FACTS_FLAGS
     case 'status':
@@ -211,6 +219,8 @@ export async function main(argv: readonly string[], options: MainOptions = {}): 
         return await runPlan(context, flags)
       case 'apply':
         return await runApply(context, flags)
+      case 'deploy':
+        return await runDeploy(context, { ...flags, ...(hasFlag(parsed.flags, 'yes') ? { yes: true } : {}) })
       case 'facts':
         return await runFacts(context, flags)
       case 'status':
@@ -272,4 +282,5 @@ export * from './output.js'
 export * from './config-file.js'
 export * from './targets.js'
 export * from './zero-config.js'
+export * from './project-facts.js'
 export * from './run.js'

@@ -20,7 +20,7 @@ import { activateNginx, installNginx, type NginxExecResult, type NginxTargetConf
 import { deploy, rollback } from '@dp/target-static'
 import { chooseTransport, type TransferRequest, type TransportKind, type TransportPreference } from '@dp/transport'
 import { DpError, type BecomeConfig, type SourceEntry, type TargetContext } from '@dp/ports'
-import type { HostConfig, ProjectConfig } from '@dp/schema'
+import type { Config, HostConfig, ProjectConfig } from '@dp/schema'
 import type { LoadedConfig } from '../config-file.js'
 import { defaultApplyDeps, type ApplyDeps } from '../deps.js'
 import { acquireFacts as acquireFactsDefault, parseSshTarget, readFactsFile, resolveAuth } from '../facts-source.js'
@@ -49,14 +49,19 @@ import type { ResolvedFlags, RunContext } from '../run.js'
  * deploy() 逐条写文件时，`releases/<id>.incoming/dist` 这个父目录压根没被建过，
  * writeFile 直接 ENOENT。
  *
- * 换成 `"./dist/**"`（mode `contents`）不会踩到 —— 因为那时顶层目录不进路径。
+ * deploy() 逐条 mkdir/writeFile，不保证目录先于文件出现，所以清单里必须自带目录。
+ *
+ * 补的还不只是中间层：**版本目录本身**也得有人建。contents 形态（`"./dist/**"`）
+ * 下顶层目录不进路径，条目全是 `index.html` 这种单段路径时中间层一个都没有 ——
+ * 而 deploy() 不会自己 mkdir 版本目录，于是第一次 writeFile 必然 ENOENT。
  * 也就是说**最顺手的那个写法反而是坏的**，所以必须在 CLI 这层补齐：
  * 目标机实现不该为了调用方的枚举习惯兜底，而 CLI 才是同时知道 source spec
  * 和 deploy 契约的那一层。
  */
 function withParentDirs(entries: readonly SourceEntry[]): readonly SourceEntry[] {
   const present = new Set(entries.map((e) => e.relativePath))
-  const parents = new Set<string>()
+  // 空 relativePath 展开回版本目录本身（joinPath 丢掉空段），不是「相对当前目录」
+  const parents = new Set<string>([''])
   for (const entry of entries) {
     const parts = entry.relativePath.split('/')
     for (let i = 1; i < parts.length; i += 1) {
@@ -190,9 +195,44 @@ function healingWarning(root: string, rbErr: unknown): string {
   ].join('\n')
 }
 
-export async function runApply(context: RunContext, flags: ResolvedFlags): Promise<number> {
+/**
+ * `runApply` 的配置来源与自动决定说明。
+ *
+ * 做成入参而不是新建一个命令，是因为零配置与配置文件**必须共用同一条执行链**：
+ * 在 deploy 里另写一套编排，两条链迟早各自演化，而「同一份 target 在两条链上
+ * 行为不同」是最难发现的一类 bug。
+ */
+export interface ApplyOptions {
+  /**
+   * 内存里装配好的配置。给了它就**不**再调 `loadConfig`。
+   * 零配置没有配置文件，配置只在内存中：落一份用户没要过的配置文件等于替他决定
+   * 「以后这个项目按这份配置部署」。
+   */
+  readonly config?: Config
+  /** 自动决定的说明，逐条带进预览输出。`--json` 时走日志，不混进 stdout */
+  readonly notes?: readonly string[]
+}
+
+export async function runApply(
+  context: RunContext,
+  flags: ResolvedFlags,
+  options: ApplyOptions = {},
+): Promise<number> {
   const started = new Date()
-  const loaded: LoadedConfig = await context.loadConfig(flags)
+  const loaded: LoadedConfig = options.config !== undefined
+    ? { config: options.config, path: '(零配置)', source: 'explicit' }
+    : await context.loadConfig(flags)
+
+  // 「自动不等于静默」：自动决定的事实在执行**之前**就要摆出来。
+  // --json 时 stdout 只能有结果 JSON，所以走日志（它会自动落到 stderr）
+  if (options.notes !== undefined && options.notes.length > 0) {
+    if (flags.json) {
+      context.logger.info('apply.notes', { notes: options.notes })
+    } else {
+      context.out(['自动决定：', ...options.notes.map((n) => `  · ${n}`)].join('\n'))
+    }
+  }
+
   const targets = selectTargets({
     config: loaded.config,
     project: flags.project,
