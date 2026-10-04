@@ -106,12 +106,14 @@ export interface SshConnectionOptions {
   readonly extraOptions?: readonly string[]
   readonly timeoutMs?: number
   readonly maxOutputBytes?: number
-  /**
-   * 多跳。本批**未实现**（加固跳板机普遍禁 TCP 转发，
-   * 降级链 direct-tcpip → nc → ssh-relay 留到下一批）。
-   * 给了非空值就报错，而不是悄悄按单跳处理。
-   */
   readonly hops?: readonly HopSpec[]
+  /**
+   * 跳板的 direct-tcpip 被拒时，是否允许在跳板上 exec `nc` 兜底。
+   *
+   * 默认 false。nc 是在**跳板机上起进程**，而链式转发只需要一条字节流 ——
+   * 开这个开关等于把「目标能不能到」的决定权交给跳板上装了什么。
+   */
+  readonly allowNcHopFallback?: boolean
 }
 
 export const DEFAULT_SSH_TIMEOUT_MS = 30_000

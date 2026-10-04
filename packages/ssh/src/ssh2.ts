@@ -32,6 +32,7 @@ import type {
 } from './driver.js'
 import { resolveTimeoutMs } from './driver.js'
 import { buildRemoteCommand } from './argv.js'
+import { openHopChain, type HopChainDeps } from './ssh2-hops.js'
 import { detectPrompt, promptHint } from './prompt.js'
 import { truncateOutput } from './parse.js'
 
@@ -133,7 +134,11 @@ export class Ssh2Driver implements SshDriver {
   readonly kind: SshDriverKind = 'ssh2'
   private client: Ssh2ClientLike | undefined
 
-  constructor(private readonly options: SshConnectionOptions) {}
+  /** 测试注入点（假 ssh2 模块、逐跳超时、逐跳凭据）。生产不传 */
+  constructor(
+    private readonly options: SshConnectionOptions,
+    private readonly chainDeps: HopChainDeps = {},
+  ) {}
 
   async available(): Promise<DriverAvailability> {
     const load = loadSsh2()
@@ -141,18 +146,40 @@ export class Ssh2Driver implements SshDriver {
   }
 
   async exec(req: ExecRequest): Promise<DriverExecResult> {
-    this.assertNoHops()
-    const load = loadSsh2()
-    if (!load.ok) {
-      throw new DpError('DP.SSH.DRIVER_UNAVAILABLE', `ssh2 驱动不可用：${load.reason}`, { hint: load.hint })
-    }
     const timeoutMs = resolveTimeoutMs(req.timeoutMs ?? this.options.timeoutMs)
-    const client = await this.connect()
     // ssh2 的 exec() **只接受一个字符串** —— 所以这里没有任何 ssh 帮我们转义，
     // buildRemoteCommand 的逐参数转义是这条路径上唯一的防线。
     // （native 路径不需要它：argv 独立传给 ssh，由 ssh 自己转义。）
     const command = buildRemoteCommand(req.argv)
 
+    const hops = this.options.hops
+    if (hops !== undefined && hops.length > 0) {
+      // 一次性连接模型：每次 exec 重建整条链。留着它不关等于在跳板机上攒会话 ——
+      // 用户结束 dp 之后那些会话还能继续跑命令
+      const chain = await openHopChain(hops, this.options, {
+        ...this.chainDeps,
+        allowNc: this.options.allowNcHopFallback === true,
+      })
+      try {
+        return await this.runExec(chain.leaf, command, req, timeoutMs)
+      } finally {
+        await chain.close()
+      }
+    }
+
+    const load = loadSsh2()
+    if (!load.ok) {
+      throw new DpError('DP.SSH.DRIVER_UNAVAILABLE', `ssh2 驱动不可用：${load.reason}`, { hint: load.hint })
+    }
+    return this.runExec(await this.connect(), command, req, timeoutMs)
+  }
+
+  private runExec(
+    client: Ssh2ClientLike,
+    command: string,
+    req: ExecRequest,
+    timeoutMs: number,
+  ): Promise<DriverExecResult> {
     return new Promise<DriverExecResult>((resolve, reject) => {
       let settled = false
       const out: Buffer[] = []
@@ -226,33 +253,22 @@ export class Ssh2Driver implements SshDriver {
   }
 
   /**
-   * 本批 ssh2 **不支持多跳**。链式转发（forwardOut 逐跳串）留到下一批。
-   *
-   * 为什么必须报错而不是按单跳连：用户把跳板机配进来正是为了让流量**必须**经过它，
-   * 静默直连等于把这条安全边界拆了，而且连接会成功、看起来一切正常。
-   */
-  private assertNoHops(): void {
-    const hops = this.options.hops
-    if (hops === undefined || hops.length === 0) return
-    throw new DpError('DP.CONFIG.INVALID', `ssh2 驱动不支持多跳（收到 ${hops.length} 跳）`, {
-      path: 'hosts.*.ssh.hops',
-      hint:
-        '在配置里显式指定 ssh.driver: native-ssh（默认顺序已经是 native 优先，只有它不可用时才会落到 ssh2）。' +
-        '多跳的链式转发在 ssh2 侧还没实现，所以这里明确失败而不是悄悄按单跳连',
-    })
-  }
-
-  /**
-   * ssh2 隧道。**本批未实现**，显式说明而不是留空 ——
-   *已实测「rsync over 自建 ssh2 隧道完全可用」，方案是存在的
-   * （起一个 loopback TCP + 一个 stdin/stdout 直通的 `dp-rsh.mjs` 助手），
-   * 但它需要一个常驻的父子 IPC 端点，与本批的"每次 exec 一次性连接"模型
-   * 不合。留到下一批。
+   * ssh2 隧道。多跳与单跳**都未实现**，两者的差别只在用户要做什么，所以分开说：
+   * 多跳报错指向"换 native-ssh"（它的 ProxyJump 已逐跳建好通道），单跳报错
+   * 指向"换传输形态"。
    */
   async openTunnel(): Promise<Tunnel> {
-    this.assertNoHops()
-    throw new DpError('DP.SSH.TUNNEL_FAILED', 'ssh2 隧道将在下一批实现', {
-      hint: '本批请用 native-ssh 驱动 —— 它的 --rsh 前缀可以直接给 rsync（契约）。ssh2 侧的 rsync 隧道方案已实测可行，只差 IPC 助手',
+    const hops = this.options.hops
+    if (hops !== undefined && hops.length > 0) {
+      throw new DpError('DP.SSH.TUNNEL_FAILED', `多跳隧道未实现（收到 ${hops.length} 跳）`, {
+        path: 'hosts.*.ssh.hops',
+        hint:
+          '多跳 + rsync 请用 native-ssh 驱动：它的 -o ProxyJump= 已经逐跳建好通道，--rsh 直接可用。' +
+          'ssh2 侧的 exec 多跳已支持，但 rsync 隧道要一条常驻的父子 IPC 端点，与"每次 exec 一次性连接"不合 —— 所以这里明确失败而不是给一条走不通的通道',
+      })
+    }
+    throw new DpError('DP.SSH.TUNNEL_FAILED', 'ssh2 隧道未实现', {
+      hint: '请用 native-ssh 驱动 —— 它的 --rsh 前缀可以直接给 rsync（契约）。ssh2 侧的 rsync 隧道方案已实测可行，只差 IPC 助手',
     })
   }
 

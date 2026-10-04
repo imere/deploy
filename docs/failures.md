@@ -170,6 +170,7 @@ service: defineService({
 | `DP.SSH.TOOL_MISSING` | 能力探测 | ❌ | abort（远端缺 rsync / tar 等，靠实测而非版本号猜） | `@dp/ssh` |
 | `DP.SSH.DRIVER_UNAVAILABLE` | 驱动选择 | ❌ | abort（native-ssh 与 ssh2 都不可用；不退化成「假装连上」） | `@dp/ssh` |
 | `DP.SSH.TUNNEL_FAILED` | 多跳 | ❌ | abort（`ProxyJump` / `ProxyCommand` 都建不起来） | `@dp/ssh` |
+| `DP.SSH.HOP_FAILED` | 多跳 | ❌ | abort（链上第 N 跳没通；`path` 给出第几跳，已建好的跳会逆序关掉，**不留孤儿会话**；`direct-tcpip` 与 `nc` 都试过时 message 逐项列出各自原因） | `@dp/ssh` |
 | `DP.TRANSFER.INTERRUPTED` | 传输 | ❌ | 幂等重试 → abort | `@dp/transfer` |
 | `DP.TRANSFER.CHECKSUM_MISMATCH` | 传输 | ❌ | abort（staging 作废） | `@dp/transfer` |
 | `DP.ACTIVATE.START_FAILED` | 激活 | ❌ | 回滚到上一版 | `@dp/target-service` |

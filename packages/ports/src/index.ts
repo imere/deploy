@@ -228,6 +228,11 @@ export const DP_ERROR_CODES = [
   // DP.VERIFY.FAILED：处置方向相反 —— 验收没过是「已经起来了但状态不对」，
   // 激活失败是「根本没起来」，上层 `dp apply` 据此决定回滚与否。
   'DP.ACTIVATE.START_FAILED',
+  // ↓ 多跳链式转发（@dp/ssh）追加。单列而不是复用 DP.SSH.CONNECT_FAILED：
+  // 那条说的是"目标机连不上"，处置是查目标机；这条说的是"链上第 N 跳没通"，
+  // 处置是查那一跳的前一跳（转发被禁？路由不通？跳板上没有 nc？）——
+  // 同一个网络故障，链式与非链式要看的机器根本不是同一台。
+  'DP.SSH.HOP_FAILED',
 ] as const
 
 /** 从数组派生：加码只改上面那一个地方，类型自动跟上 */
