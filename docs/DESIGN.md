@@ -400,34 +400,43 @@ type DeployError = {
 
 ## 12. 工程化约定
 
-继承参考仓库（pnpm 单仓）已被验证的部分，并根据本项目性质调整：
+**这张表写的是仓库当前的实际状态**，不是规划。没落地的项单独列在下面 ——
+混在一张表里最容易的结果是「文档说有、仓库里没有」。
 
-| 项 | 决定 | 与参考仓库的差异 |
-| --- | --- | --- |
-| 包管理器 | pnpm workspace，`workspace:*` 互引 | 同 |
-| Node | 22（`.nvmrc`） | 同 |
-| TypeScript | 锁 ~6.0.x | 同；TS 7 是 Go 原生版，typescript-eslint 8.70 起不来，升级前置条件是上游支持 |
-| 构建 | 根 `rollup.config.js` + `@rollup/plugin-swc`，每包产 ESM + UMD，`.d.ts` 由 `tsc` 出 | 目标 Node 22，**不需要 ES5 降级**，SWC target 调到 node22；保留统一 `build/` 目录约定 |
-| 测试 | vitest，别名直接指向 `src` | 同；分层阈值见 [`testing.md`](./testing.md) |
-| 覆盖报告 | 输出到根 `build/coverage`，`.gitignore` 一条 `build/` | 同；**clean 脚本不许 `rm -rf`**（本机有批量删除保护钩子，参考仓库已踩过，用改名/回收站） |
-| Lint | eslint 平铺配置 + prettier | 增加针对四条边界规则的 import 限制 |
-| JSDoc | 抄 `scripts/check-jsdoc.mjs`：每个函数中文描述 + 逐个 `@param` + `@returns`，描述写「为什么」不写「干了什么」 | 同 |
-| 提交 | Conventional Commits + changesets 发版 | 同 |
-| CI | `pnpm verify` = typecheck → lint → test → build | 增加远端-only 的 job：真机/容器集成默认跳过 |
+| 项 | 当前实际 |
+| --- | --- |
+| 包管理器 | pnpm workspace，`workspace:*` 互引 |
+| Node | ≥ 24（`.nvmrc` 钉 24.21.0，`engines` 同为 `>=24`） |
+| TypeScript | `^5.9.0`，`NodeNext` + composite |
+| 构建 | 根 **`tsc -b`**，不用打包器；产物落在 `packages/<pkg>/build/` |
+| 测试 | **`node --test`**（Node 24 内置运行器），不用 vitest —— 后者的 esbuild 平台二进制在部分环境装不上，而内置运行器零依赖且够用。测试与源码同目录（`src/*.test.ts`），编译后由 `node --test` 跑 |
+| 覆盖报告 | `node --test --experimental-test-coverage`，产物在根 `build/coverage/lcov.info` |
+| 命令 | `pnpm build` / `pnpm test` / `pnpm verify`（= build + test）/ `pnpm clean`（= `tsc -b --clean`，不删源码） |
+
+**尚未落地**（表里没有，别当它存在）：
+
+| 项 | 状态 |
+| --- | --- |
+| Lint（eslint / prettier） | 未配置：仓库里没有配置文件，也没有相应依赖 |
+| JSDoc 检查脚本 | 没有。注释纪律靠人工评审（见 `AGENTS.md` 的写作纪律） |
+| changesets 发版 | 未接入。提交用 Conventional Commits |
+| CI | 没有 `.github/`，没有任何工作流 |
 
 ---
 
 ## 13. 里程碑
 
-| 阶段 | 交付 | 完成判据 |
-| --- | --- | --- |
-| **P0 骨架** | `schema` / `ports` / `core` / `template` / `local` / `target-static` | `plan()` 纯函数可用；本地目标端到端部署成功；CLI 能 `--dry-run` |
-| **P1 SSH 基础** | `ssh` 单跳：key/agent/password 认证、exec、Facts 探测、sftp 传输 | 真机单跳部署通；假 SSH 服务器测试全绿 |
-| **P2 多跳与提权** | hop chain、known_hosts、sudo/su/doas、pty/stdin 响应器 | 两跳 + sudo 场景在假服务器全套验证 |
-| **P3 传输协商** | `rsync`（走 dp-rsh 隧道）+ `tar-ssh` 降级 | 本机无 rsync 时自动降级并被测试覆盖 |
-| **P4 nginx** | conf 渲染（含反代）、影子校验、原子替换、两步 `-t`、reload | `nginx -t` 在容器里真验过；conf golden 快照 |
-| **P5 docker** | `remote-cli` 三模式、健康检查、compose 上传 | 三种模式各一条集成测试（无 docker 时 skip 并说明） |
-| **P6 扩展性收口** | 插件发现、注册表、文档站、`--facts` CI 用法 | 新增一个第三方 target 包无需改 cli 源码 |
+「状态」列按仓库现状填：✅ 已落地 / ⚠️ 部分 / ❌ 未落地。判据未达成的即使代码写完也标 ⚠️。
+
+| 阶段 | 状态 | 交付 | 完成判据 | 现状说明 |
+| --- | --- | --- | --- | --- |
+| **P0 骨架** | ✅ | `schema` / `ports` / `core` / `template` / `local` / `target-static` | `plan()` 纯函数可用；本地目标端到端部署成功；CLI 能 `--dry-run` | 达成 |
+| **P1 SSH 基础** | ⚠️ | `ssh` 单跳：key/agent/password 认证、exec、Facts 探测、sftp 传输 | 真机单跳部署通；假 SSH 服务器测试全绿 | 驱动偏好链（`native-ssh` → `ssh2`）、主机密钥四态、`SSH_ASKPASS`、Facts 实证都已落地并由假服务器覆盖；**真机判据未跑**（`e2e` 用例默认跳过，需 `DP_SSH_E2E=1`） |
+| **P2 多跳与提权** | ⚠️ | hop chain、known_hosts、sudo/su/doas、pty/stdin 响应器 | 两跳 + sudo 场景在假服务器全套验证 | 提权（`become`）已落地；**多跳只对内具备**：argv 层能构造 `-J` 与 `ProxyCommand`，但配置层没有 `hops` 字段，`@dp/ssh` 的 `connect()` 对非空 `hops` 显式报错 —— 对用户不可用 |
+| **P3 传输协商** | ✅ | `rsync`（走 dp-rsh 隧道）+ `tar-ssh` 降级 | 没有 rsync 时自动降级并被测试覆盖 | 达成；另有 `sftp` / `scp` / `local-copy` |
+| **P4 nginx** | ⚠️ | conf 渲染（含反代）、影子校验、原子替换、两步 `-t`、reload | `nginx -t` 在容器里真验过；conf golden 快照 | 渲染 / 影子校验 / 原子替换 / 两步 `-t` 都已落地并被单测覆盖；**容器内真验未跑** |
+| **P5 docker** | ⚠️ | `remote-cli` 三模式、健康检查、compose 上传 | 三种模式各一条集成测试（无 docker 时 skip 并说明） | 只实现了 `remote-cli`（schema 的 `mode` 目前只有这一个取值）；`local-build-remote-load` 与 `registry` 未实现 |
+| **P6 扩展性收口** | ❌ | 插件发现、注册表、文档站、`--facts` CI 用法 | 新增一个第三方 target 包无需改 cli 源码 | 未落地 |
 
 ---
 

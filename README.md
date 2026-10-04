@@ -2,7 +2,8 @@
 
 > 一个用 pnpm 单仓多包写的部署工具：**把目录或文件，通过 rsync / scp / ssh / 未来的任何手段，部署到 nginx / docker / 未来的任何目标；目标可以在远端，也可以在本机。**
 >
-> 设计完成，**骨架与首条纵向链路已落地并跑通本机端到端**。README 描述目标形态，当前实现见下文「当前进度」。
+> 设计完成，**骨架与首条纵向链路已落地，端到端已跑通**（本机路径为真跑；远端真机用例默认跳过，需 `DP_SSH_E2E=1`）。
+> README 描述目标形态，当前实现见下文「当前进度」，里程碑的逐项状态见 `docs/DESIGN.md`。
 
 真正的一键式：
 
@@ -28,7 +29,7 @@ dp rollback        # 回到上一个版本
 | `@dp/target-static` | ✅ | 静态投放：releases/\<id\> + current 原子切换 + keep N + 自动回退与 rollback |
 | `@dp/log` | ✅ | 结构化日志：JSONL 输出、出口统一脱敏（词段匹配 key + 值模式）、字段对齐 OTel、零运行时依赖 |
 | `@dp/ssh` | ✅ | 远端 Runner：驱动偏好链 `native-ssh` → `ssh2`、主机密钥四态、SSH_ASKPASS 免 sshpass、能力实证探测 |
-| `@dp/cli` | ✅ | 命令行：`plan` / `facts` / `schema` / `apply`，配置发现与冲突检测、退出码契约 |
+| `@dp/cli` | ✅ | 命令行：`plan` / `facts` / `schema` / `apply` / `deploy` / `status` / `verify` / `rollback`；配置发现与冲突检测、退出码契约。`deploy` 是零配置入口（不写配置文件也能用） |
 | `@dp/transport` | ✅ | 传输协商与执行：`rsync-ssh` / `tar-ssh` / `sftp` / `scp` / `local-copy`，全部 argv-only；远端 `apply` 已走它 |
 | `@dp/template` | ✅ | 纯模板渲染：`${env.NAME}` / `${git.*}` / `${release.*}` 展开 + 按落点分档的危险字符校验。零 IO，`$host` 之类原样保留 |
 | `@dp/target-nginx` | ✅ | nginx 目标：conf 渲染 + 步骤规划 + 执行器 + CLI/schema 接线（反代默认头、影子校验、所有权保护、两步 `-t`、失败按步骤 undo 回收）。confd 由实测可写性推导 |
@@ -60,8 +61,10 @@ dp rollback --json      # 切回上一版并复查；只切换，不删任何版
 
 尚未实现：其它目标类型（`systemd` / `process`）。
 
-`dp deploy` 的零配置**装配层**已落地（`@dp/cli` 的 `deriveZeroConfig`）：源根、目标类型、环境三件事
-自动决定，每一步打印理由；产物只在内存里 —— dp 不会替你写一份配置文件到磁盘。命令入口尚未接线。
+`dp deploy` 已接线：盘上没有配置文件时走零配置（`@dp/cli` 的 `deriveZeroConfig`）—— 源根、
+目标类型、环境三件事自动决定，每一步打印理由，产物只在内存里（不替你写一份配置文件）。
+它**默认干跑**，加 `--yes` 才落盘：用户一行配置都没写过时，直接动目录太激进。
+有配置文件时行为与 `dp apply` 一致，零配置不介入。
 
 三条运维命令已接线，语义刻意分开：
 

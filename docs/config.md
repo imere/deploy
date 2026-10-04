@@ -26,7 +26,7 @@ export default defineConfig({
     },
   },
   hosts: {
-    prod: { ssh: 'deploy@10.0.0.7' }   // ssh 连接串简写形式，等价于 hops: [{...}]
+    prod: { ssh: 'deploy@10.0.0.7' }   // ssh 连接串：user@host[:port]。当前只支持单跳
   },
 })
 ```
@@ -128,30 +128,39 @@ scheme 有 `env:` / `file:` / `prompt:` / `cmd:`，注册表化，未来可加 `
 
 ## 4. 主机与多跳、提权、传输
 
+> **这一节混了「已落地」与「设计形态」，逐项标注如下，别照抄。**
+> 已落地的字段：`ssh`（**单跳**连接串）、`local`、`become`、`layout`、`transport`。
+> **未落地**：`hops`（多跳）、`crypto` / `knownHosts` / `timeouts` —— 这三个 schema 里没有，
+> 抗量子目前由驱动偏好链决定（只能走 `native-ssh`，`ssh2` 不支持 PQC），不是配置项。
+
+已落地的写法：
+
 ```yaml
 hosts:
-  prod-bastion:
-    ssh:
-      hops:
-        - { ssh: 'ops@jump.example.com', auth: { type: agent }, knownHosts: tofu }
-        - { ssh: 'deploy@10.0.0.7',     auth: { type: password, passwordRef: env:DEPLOY_PASSWORD } }
-    become:                 # 可选。type: none = 纯普通用户，同样受支持
-      type: sudo            # none | sudo | su | doas | custom
+  prod:
+    ssh: 'deploy@10.0.0.7'          # user@host[:port]。当前**只支持单跳**
+    become:                          # 可选。不写 = 纯普通用户，同样受支持
+      type: sudo                     # none | sudo | su | doas | custom
       user: root
-      method: auto          # auto | nopasswd | stdin | pty
+      method: auto                   # auto | nopasswd | stdin | pty
       passwordRef: env:SUDO_PASSWORD
       preserveEnv: false
-    layout: auto            # auto | system | user。路径由能力推导，不写死系统路径
+    layout: auto                     # auto | system | user。路径由能力推导，不写死系统路径
     transport:
-      strategy: auto        # auto | rsync | tar-ssh | sftp | local
+      strategy: auto                 # auto | rsync | tar-ssh | sftp | local
       delete: false
-    crypto:                 # 见 security.md：抗量子策略逐跳生效
-      kexPolicy: pq-preferred   # pq-preferred | pq-required | compat
-      warnWeakCrypto: true
-    timeouts: { connectMs: 15000, execMs: 120000 }
-    knownHosts: strict
 
-  local-box: { local: true }        # 本机目标
+  local-box: { local: true }         # 本机目标
+```
+
+多跳是**设计形态，尚未开放** —— schema 里没有 `hops` 字段，`@dp/ssh` 的 `connect()`
+对非空 `hops` 会显式报错；argv 层虽能构造 `-J` 与 `ProxyCommand`，但用户侧没有入口：
+
+```yaml
+    ssh:
+      hops:
+        - { ssh: 'ops@jump.example.com', auth: { type: agent } }
+        - { ssh: 'deploy@10.0.0.7',     auth: { type: password, passwordRef: env:DEPLOY_PASSWORD } }
 ```
 
 > **不假设 root。** `sshUser` 一律是普通账号，`become` 只是可选项而非必经步骤（`type: none` 是一等公民）。
@@ -230,14 +239,14 @@ projects:
         name: registry.example.com/team/api
         tags: ['${git.sha}', '${env}-latest']     # 多标签
         platform: 'linux/arm64'      # 交叉构建目标架构
-      build:
+      build:                        # **设计形态，未实现**：docker 目前只有 remote-cli 一种 mode
         where: local                # local | remote | buildHost
         buildHost: builder-arm64    # where=buildHost 时用它
         dockerfile: Dockerfile
         context: .
         cacheFrom: ['type=registry,ref=...']
         buildkit: true
-      registry:
+      registry:                     # 同上，未实现
         auth: { usernameRef: env:REG_USER, passwordRef: env:REG_PASS }
       compose:
         files: ['docker-compose.yml', 'docker-compose.prod.yml']
@@ -477,7 +486,7 @@ transport.strategy = auto ← defaults（本次协商结果：tar-ssh）
 | 层级 | 关键字段 |
 | --- | --- |
 | `defaults` / `profiles` | `hosts`、`projects`、`release`、`transport`、`crypto`、`timeouts` |
-| `hosts.*` | `ssh`（含 `hops[]`）、`local`、`become`、`layout`、`transport`、`crypto`、`knownHosts`、`timeouts`、`retry` |
+| `hosts.*` | `ssh`（**单跳**连接串）、`local`、`become`、`layout`、`transport`。**未落地**：多跳 `hops[]`、`crypto`、`knownHosts`、`timeouts`、`retry` |
 | `projects.*.source` | `root`、`include`、`exclude`、`files`、`dotfiles`、`prepare`（本机前置命令） |
 | `projects.*.build` | `where`、`buildHost`、`platform`、`strategy`、`command`、`env`、`artifact` |
 | `projects.*.release` | `root`、`keep`、`shared[]`、`owner`、`dirMode`、`fileMode`、`switchStrategy` |
