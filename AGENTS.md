@@ -47,7 +47,7 @@ docs/           设计文档（★ 优先读：spikes.md failures.md decisions.m
                  wiring-completeness shared-input-semantics
                  doc-truthfulness single-source-of-truth cleanup-not-silent
                  automation-iron-rules secret-hygiene repo-sanitize-history
-                 git-noninteractive windows-sandbox-gotchas
+                 git-noninteractive windows-sandbox-gotchas crash-recovery-audit
                  **本仓专属**：dp-subagent-dispatch（通用版之上的本仓必读清单与包名）
                  dp-spike-env（容器 SSH 靶机）
 .tmp/           临时物（已 gitignore）
