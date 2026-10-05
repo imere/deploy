@@ -198,7 +198,10 @@ export function buildSshArgv(options: SshArgvOptions): string[] {
         hint: '留一个。多跳用 hops；proxyJump 只留给"直接写一条跳板串"的场景（不经过配置校验）',
       })
     }
-    argv.push('-o', `ProxyJump=${hopsProxyJump(options.hops, { knownHosts: options.knownHostsMode })}`)
+    const jump = hopsProxyJump(options.hops, { knownHosts: options.knownHostsMode })
+    // 一条跳板都没有（hops 只有目标机）时不产出 -J：那是直连，写 `-J ''` 反而
+    // 会被 OpenSSH 当成一条空的跳板而报错
+    if (jump !== undefined) argv.push('-o', `ProxyJump=${jump}`)
   } else if (options.proxyJump !== undefined) {
     argv.push('-o', `ProxyJump=${options.proxyJump}`)
   }
@@ -232,6 +235,10 @@ export function hostTarget(host: string, user?: string): string {
 /**
  * 把跳板链变成 `-o ProxyJump=` 的值。
  *
+ * `hops` 的**最后一跳是目标机**，不进 -J（理由见函数体）。因此下面所有"逐跳"
+ * 限制都只落在真正当跳板的那几跳上 —— 目标机的认证走整体 `auth`，密码也能用，
+ * 因为那次连接是我们自己发起的、有 SSH_ASKPASS 通道。
+ *
  * 为什么逐跳 `auth` 只允许 key / agent：`-J` 让系统 ssh **自己**去连跳板机，
  * 我们只有一条 SSH_ASKPASS 通道且它只服务最终目标 —— 逐跳密码既喂不进去，
  * 也无法保证"不交互"（ssh 会去读 tty，在 CI 里就是一次永久挂起）。
@@ -248,7 +255,7 @@ export function hostTarget(host: string, user?: string): string {
 export function hopsProxyJump(
   hops: readonly HopSpec[],
   ctx: { readonly knownHosts?: KnownHostsMode; readonly path?: string },
-): string {
+): string | undefined {
   if (hops.length === 0) {
     throw new DpError('DP.CONFIG.INVALID', 'hopsProxyJump 收到空跳板链', {
       path: ctx.path ?? 'hosts.*.ssh.hops',
@@ -256,7 +263,13 @@ export function hopsProxyJump(
     })
   }
   const base = ctx.path ?? 'hosts.*.ssh.hops'
-  return hops
+  // 最后一跳是**目标机**，它出现在 ssh 命令行的 host 位置，不是 -J 里。
+  // 把它也算进 -J 会变成 `ssh -J jump,target target`：ssh 先生到 target 开一条
+  // 转发通道，再从 target 连 target —— 多一次认证，且目标机往往不允许自己连自己。
+  // 所以链里只剩跳板的那些跳才进 -J；一条跳板都没有时返回 undefined（等价于直连）。
+  const jumps = hops.slice(0, -1)
+  if (jumps.length === 0) return undefined
+  return jumps
     .map((hop, i) => {
       const path = `${base}[${i}]`
       const authType = hop.auth?.type

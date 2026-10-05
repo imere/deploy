@@ -400,52 +400,59 @@ describe('hops -> ProxyJump（纯函数，产出 argv 元素而非 shell 字符�
     return opt === undefined ? undefined : opt.slice('ProxyJump='.length)
   }
 
-  it('单跳', () => {
-    assert.equal(jumpOf([{ ssh: 'ops@jump.example.com' }]), 'ops@jump.example.com')
+  // hops 的最后一跳是目标机：它不进 -J，所以这批用例的链尾都挂一个目标机
+  const TARGET: HopSpec = { ssh: 'deploy@10.0.0.7' }
+
+  it('最后一跳是目标机，不进 -J：两跳只产出第一跳', () => {
+    assert.equal(jumpOf([{ ssh: 'ops@jump.example.com' }, TARGET]), 'ops@jump.example.com')
   })
 
-  it('两跳用英文逗号连接，顺序即链顺序', () => {
+  it('三跳：两条跳板按链顺序用英文逗号连接', () => {
     assert.equal(
-      jumpOf([{ ssh: 'ops@jump1.example.com' }, { ssh: 'ops@jump2.example.com' }]),
+      jumpOf([{ ssh: 'ops@jump1.example.com' }, { ssh: 'ops@jump2.example.com' }, TARGET]),
       'ops@jump1.example.com,ops@jump2.example.com',
     )
   })
 
+  it('链里只有目标机时不产出 -J：那不是多跳，写空 -J 会让 ssh 报一条空跳板', () => {
+    assert.equal(jumpOf([TARGET]), undefined)
+  })
+
   it('带端口：连接串里的端口与 port 字段都写出来', () => {
-    assert.equal(jumpOf([{ ssh: 'ops@jump.example.com:2200' }]), 'ops@jump.example.com:2200')
-    assert.equal(jumpOf([{ ssh: 'ops@jump.example.com', port: 2222 }]), 'ops@jump.example.com:2222')
+    assert.equal(jumpOf([{ ssh: 'ops@jump.example.com:2200' }, TARGET]), 'ops@jump.example.com:2200')
+    assert.equal(jumpOf([{ ssh: 'ops@jump.example.com', port: 2222 }, TARGET]), 'ops@jump.example.com:2222')
   })
 
   it('端口 22 也显式写出：ssh_config 里给该 Host 配过 Port 时，省略会连到另一台', () => {
-    assert.equal(jumpOf([{ ssh: 'ops@jump.example.com:22' }]), 'ops@jump.example.com:22')
+    assert.equal(jumpOf([{ ssh: 'ops@jump.example.com:22' }, TARGET]), 'ops@jump.example.com:22')
   })
 
   it('无 user 前缀时只写 host', () => {
-    assert.equal(jumpOf([{ ssh: 'jump.example.com' }]), 'jump.example.com')
+    assert.equal(jumpOf([{ ssh: 'jump.example.com' }, TARGET]), 'jump.example.com')
   })
 
-  it('逐跳密码认证 -> 报错并给出出路（-J 无法逐跳喂密码）', () => {
-    assert.throws(
-      () => buildSshArgv({ authKind: 'agent', knownHostsMode: 'strict', hops: [{ ssh: 'ops@jump', auth: { type: 'password', passwordRef: 'env:P' } }] }),
-      (err: unknown) => {
-        assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.CONFIG.INVALID')
-        assert.match(err.hint ?? '', /config/)
-        return true
-      },
+  it('密码限制只落在进 -J 的跳板：目标机用密码放行，跳板用密码才报错', () => {
+    assert.doesNotThrow(() =>
+      buildSshArgv({
+        authKind: 'agent',
+        knownHostsMode: 'strict',
+        hops: [{ ssh: 'ops@jump' }, { ssh: 'deploy@t', auth: { type: 'password', passwordRef: 'env:P' } }],
+      }),
     )
-  })
-
-  it('逐跳 keyboard-interactive 同样拒绝', () => {
     assert.throws(
-      () => buildSshArgv({ authKind: 'agent', knownHostsMode: 'strict', hops: [{ ssh: 'ops@jump', auth: { type: 'keyboard-interactive', passwordRef: 'env:P' } }] }),
+      () =>
+        buildSshArgv({
+          authKind: 'agent',
+          knownHostsMode: 'strict',
+          hops: [{ ssh: 'ops@jump', auth: { type: 'password', passwordRef: 'env:P' } }, TARGET],
+        }),
       { code: 'DP.CONFIG.INVALID' },
     )
   })
 
-  it('逐跳 knownHosts 与整体冲突 -> 报错（-J 只有一条命令行）', () => {
+  it('跳板用密码认证 -> 报错并给出出路（-J 无法逐跳喂密码）', () => {
     assert.throws(
-      () => buildSshArgv({ authKind: 'agent', knownHostsMode: 'strict', hops: [{ ssh: 'ops@jump', knownHosts: 'off' }] }),
+      () => buildSshArgv({ authKind: 'agent', knownHostsMode: 'strict', hops: [{ ssh: 'ops@jump', auth: { type: 'password', passwordRef: 'env:P' } }, TARGET] }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
         assert.equal(err.code, 'DP.CONFIG.INVALID')
@@ -455,8 +462,48 @@ describe('hops -> ProxyJump（纯函数，产出 argv 元素而非 shell 字符�
     )
   })
 
-  it('逐跳 knownHosts 与整体一致 -> 放行', () => {
-    assert.doesNotThrow(() => buildSshArgv({ authKind: 'agent', knownHostsMode: 'strict', hops: [{ ssh: 'ops@jump', knownHosts: 'strict' }] }))
+  it('跳板 keyboard-interactive 同样拒绝', () => {
+    assert.throws(
+      () => buildSshArgv({ authKind: 'agent', knownHostsMode: 'strict', hops: [{ ssh: 'ops@jump', auth: { type: 'keyboard-interactive', passwordRef: 'env:P' } }, TARGET] }),
+      { code: 'DP.CONFIG.INVALID' },
+    )
+  })
+
+  it('跳板的 knownHosts 与整体冲突 -> 报错（-J 只有一条命令行）', () => {
+    assert.throws(
+      () =>
+        buildSshArgv({
+          authKind: 'agent',
+          knownHostsMode: 'strict',
+          hops: [{ ssh: 'ops@jump', knownHosts: 'off' }, TARGET],
+        }),
+      (err: unknown) => {
+        assert.ok(err instanceof DpError)
+        assert.equal(err.code, 'DP.CONFIG.INVALID')
+        assert.match(err.hint ?? '', /config/)
+        return true
+      },
+    )
+  })
+
+  it('目标机的 knownHosts 与整体冲突 -> 放行（它不进 -J，不受那条限制）', () => {
+    assert.doesNotThrow(() =>
+      buildSshArgv({
+        authKind: 'agent',
+        knownHostsMode: 'strict',
+        hops: [{ ssh: 'ops@jump' }, { ssh: 'deploy@t', knownHosts: 'off' }],
+      }),
+    )
+  })
+
+  it('跳板 knownHosts 与整体一致 -> 放行', () => {
+    assert.doesNotThrow(() =>
+      buildSshArgv({
+        authKind: 'agent',
+        knownHostsMode: 'strict',
+        hops: [{ ssh: 'ops@jump', knownHosts: 'strict' }, TARGET],
+      }),
+    )
   })
 
   it('hops 与 proxyJump 同时给 -> 报错，不替用户二选一', () => {
