@@ -136,7 +136,8 @@ describe('args · 跨命令串用', () => {
   })
 
   it('允许的开关不报错', () => {
-    assertAllowedFlags(parseArgs(['facts', '--json', '--host', 'local']), ['json', 'host'])
+    // 显式写 doesNotThrow：只调用不写断言也能「靠抛了就失败」生效，但读的人看不出这是有意放行
+    assert.doesNotThrow(() => assertAllowedFlags(parseArgs(['facts', '--json', '--host', 'local']), ['json', 'host']))
   })
 })
 
