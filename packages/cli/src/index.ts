@@ -29,9 +29,9 @@ import {
 } from './output.js'
 import { createContext, parseLogFormat, parseLogLevel, type ResolvedFlags, type RunContext } from './run.js'
 import type { ApplyDeps } from './deps.js'
-import { runPlan } from './commands/plan.js'
+import { runPlan, PLAN_OPTION_HINT } from './commands/plan.js'
 import { runApply } from './commands/apply.js'
-import { runDeploy } from './commands/deploy.js'
+import { runDeploy, DEPLOY_ALLOWED_FLAGS } from './commands/deploy.js'
 import { runFacts } from './commands/facts.js'
 import { runStatus } from './commands/status.js'
 import { runVerify } from './commands/verify.js'
@@ -87,7 +87,12 @@ export function resolveFlags(parsed: ParsedArgs): ResolvedFlags {
   }
 }
 
-const PLAN_FLAGS = ['config', 'env', 'host', 'project', 'all', 'facts', 'json', 'dry-run', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
+/**
+ * plan 的开关集合直接取命令模块自己声明的那一份，不在这里再抄一遍。
+ * 抄一份的代价不是多写一行，而是「给命令加了开关却忘了同步这里」——
+ * 表现为用户按文档加了 flag 却被拒绝，而且两侧代码单看都对。
+ */
+const PLAN_FLAGS = PLAN_OPTION_HINT.allowedFlags
 /**
  * apply 的开关集合与 plan 一致 —— **刻意不给 `yes`**。
  * 铁律 0 不许交互，也就意味着没有「人看过提示再敲 y」这个环节；
@@ -99,7 +104,7 @@ const APPLY_FLAGS = ['config', 'env', 'host', 'project', 'all', 'facts', 'json',
  * deploy 的开关集合 = apply 的全部 + `yes`。它多出来的那个只对零配置有意义：
  * apply 前面有一份用户写好的配置，而 deploy 的配置是探测出来的。
  */
-const DEPLOY_FLAGS = ['config', 'env', 'host', 'project', 'all', 'facts', 'json', 'dry-run', 'yes', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
+const DEPLOY_FLAGS = DEPLOY_ALLOWED_FLAGS
 const FACTS_FLAGS = ['config', 'env', 'host', 'project', 'all', 'json', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
 const SCHEMA_FLAGS = ['out', 'json', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
 
