@@ -9,13 +9,29 @@ import { DpError, type Facts, type Layout, type Platform } from '@dp/ports'
 // 模板展开
 // ------------------------------------------------------------
 
+/**
+ * 展开所需的三个值。**全由调用方注入**，本文件不读 `process.env`：
+ * 注入让展开结果可断言（给定 env 必得给定字符串），直读环境则没法测。
+ */
 export interface TemplateContext {
+  /** 项目名，替换模板里的 `<name>` */
   readonly name: string
+  /** 目标机 home 目录。取**目标机**的而不是本机的 —— 展开发生在目标机语境下 */
   readonly homedir: string
+  /** 目标机的环境变量全集，不是本机的 */
   readonly env: Readonly<Record<string, string | undefined>>
 }
 
-/** 展开 `~` / `$XDG_*` / `%LOCALAPPDATA%` / `%ProgramFiles%` / `<name>` */
+/**
+ * 展开 `~` / `$XDG_*` / `%LOCALAPPDATA%` / `%ProgramFiles%` / `<name>`
+ *
+ * 只在**串首**替换环境变量（`out.startsWith`），中间的 `$FOO` 原样保留：
+ * 全文替换会把路径里合法的 `${...}` 形态也吃掉，产出的路径指向一个不存在的目录。
+ *
+ * @param tpl 待展开的模板串，形如 `/srv/<name>`
+ * @param ctx 注入的 home / env / name
+ * @returns 展开后的路径；未识别的 token 原样保留（不报错，交由后续的实证去否定它）
+ */
 export function expandTemplate(tpl: string, ctx: TemplateContext): string {
   const home = ctx.homedir.replace(/[\\/]+$/, '')
   const table: ReadonlyArray<readonly [string, string]> = [
@@ -37,6 +53,13 @@ export function expandTemplate(tpl: string, ctx: TemplateContext): string {
 // 发布目录候选（规则明示）
 // ------------------------------------------------------------
 
+/**
+ * 发布根目录候选表：platform × layout → 按优先级排好的路径模板。
+ *
+ * 顺序即优先级，**不可按字母排**：第一个可写的目录会被采用，
+ * 调换顺序等于悄悄改了部署落点，而 plan 之外没有任何地方会暴露这个变化。
+ * 每条都写明所属 layout，是为了让「为什么这台机器选了 user 布局」能从表本身读出来。
+ */
 export const RELEASE_ROOT_CANDIDATES: Readonly<
   Record<Platform, Readonly<Record<Layout, readonly string[]>>>
 > = {
@@ -67,6 +90,7 @@ export const RELEASE_ROOT_CANDIDATES: Readonly<
   },
 }
 
+/** 一个候选的实测结论。`writable: false` 时 reason 必填 —— 只判死不解释等于没明示 */
 export interface CandidateResult {
   readonly path: string
   readonly writable: boolean
@@ -74,19 +98,36 @@ export interface CandidateResult {
   readonly reason?: string
 }
 
+/**
+ * 选定的发布根。`candidates` 一并返回（**包括没选中的**），
+ * 因为「为什么不是 /opt」是用户最常问的问题，plan 阶段就要能答。
+ */
 export interface ReleaseRootChoice {
   readonly root: string
+  /** 是否来自 `release.root` 显式配置。false 表示是按能力挑的默认落点 */
   readonly explicit: boolean
   readonly candidates: readonly CandidateResult[]
 }
 
+/** 选根的输入。`explicitRoot` 给了也不保证可用 —— 仍要过一遍可写性实证 */
 export interface PickReleaseRootInput {
   readonly facts: Facts
   readonly layout: Layout
   readonly name: string
+  /** 配置里显式写的 `release.root`；不可写时报错而不静默换一个 */
   readonly explicitRoot?: string
 }
 
+/**
+ * 按候选表 + 实测可写性选定发布根。
+ *
+ * 显式配置**优先于**能力推导但仍要过可写性检查：用户显式指定一个不可写的目录时
+ * 静默改用别的落点，症状是「配了 root 却发到了别处」，比直接报错难查得多。
+ *
+ * @param input 注入的事实、布局、项目名与可选的显式 root
+ * @returns 选中的根、是否来自显式配置，以及**全部**候选的判定结果
+ * @throws DpError 显式 root 不可写，或没有任何候选可写
+ */
 export function pickReleaseRoot(input: PickReleaseRootInput): ReleaseRootChoice {
   const { facts, layout, name } = input
   const ctx: TemplateContext = {
@@ -140,7 +181,16 @@ export function pickReleaseRoot(input: PickReleaseRootInput): ReleaseRootChoice 
 
 const SYSTEM_PROBE_PATHS = ['/var/lib', '/usr/local', 'C:/ProgramData'] as const
 
-/** 由**实证能力**推导布局，不靠 uid 推断 */
+/**
+ * 由**实证能力**推导布局，不靠 uid 推断
+ *
+ * uid 0 不等于有权限：`canWrite` 是建了文件再删掉测出来的，
+ * 容器里 root 照样可能只读挂载。凭 uid 判成 system 布局，
+ * 后果是 plan 通过而 install 阶段在第一行就失败。
+ *
+ * @param facts 目标机事实，布局只看 capabilities 里的可写性
+ * @returns 'system'（系统目录可写）/ 'hybrid'（需提权）/ 'user'（两者都不行）
+ */
 export function deriveLayout(facts: Facts): Layout {
   const c = facts.capabilities
   const systemWritable = SYSTEM_PROBE_PATHS.some((p) => c.canWrite[p] === true)
@@ -171,6 +221,10 @@ const PATH_LIMIT: Readonly<Record<Platform, number>> = {
  *  - `DP.PATH.ILLEGAL_CHAR`   目标平台非法字符
  *  - `DP.PATH.TOO_LONG`       超过目标平台长度上限
  *  - `DP.PATH.CASE_COLLISION` 仅大小写不同的路径，在不敏感平台上会静默互相覆盖
+ *
+ * @param entries 源里的相对路径清单
+ * @param platform **目标机**平台：按源机的平台判非法字符会漏掉目标机才会炸的那些
+ * @throws DpError 命中上面四类之一
  */
 export function checkSourcePaths(entries: readonly string[], platform: Platform): void {
   const limit = PATH_LIMIT[platform]

@@ -8,8 +8,19 @@
 // 平台与身份
 // ============================================================
 
+/**
+ * 目标机 OS。取值与 Node 的 `process.platform` 对齐但**不共用**：
+ * 'unknown' 是探测失败时必须能表达的第四态。混用会让人在探测失败时
+ * 拿到一个看起来合法的假平台，于是所有路径判断都基于猜测跑完。
+ */
 export type Platform = 'linux' | 'darwin' | 'win32' | 'freebsd' | 'unknown'
+/** CPU 架构。unknown 之外的 'other' 表示已知非 x86/arm，决策上按「不能假设行为一致」处理 */
 export type Arch = 'x64' | 'arm64' | 'x86' | 'arm' | 'other'
+/**
+ * init 系统。'none' 是合法结论而非探测失败：容器里没有 init 是常态，
+ * 而它决定了 unit 文件写给谁。把「没装 systemd」和「没测出来」分成两态，
+ * 前者继续部署、后者报错 —— 合成一个值的结果是部署在容器里被 systemd 假设拖死。
+ */
 export type InitSystem = 'systemd' | 'sysvinit' | 'openrc' | 'launchd' | 'winsvc' | 'none'
 
 /**
@@ -73,6 +84,12 @@ export type Layout = 'system' | 'hybrid' | 'user'
  * 而漏掉的那处表现为**路径指到了一个真实存在但内容不对的目录**：不报错，只是部署了个寂寞。
  */
 export const RELEASES_DIR_NAME = 'releases'
+/**
+ * 指向当前生效版本的软链名。
+ *
+ * 必须是软链而不是「复制一份」：服务读的路径要能在两次部署之间**零成本换指向**，
+ * 任何需要搬文件才能切版本的方案都会产生一个「服务已停止而新目录还没就绪」的窗口。
+ */
 export const CURRENT_LINK_NAME = 'current'
 /** 传输中的半成品后缀。正在服务的目录永远不直接被写 */
 export const INCOMING_SUFFIX = '.incoming'
@@ -100,11 +117,20 @@ export const POSIX_WRITE_CANDIDATES: readonly string[] = [
 
 /** 主机密钥策略。放这里是因为 schema（校验枚举）与 ssh（消费它）都要用，两处各写一份字面量必然漂移 */
 export const KNOWN_HOSTS_MODES = ['strict', 'accept-new', 'tofu', 'off'] as const
+/** 从 KNOWN_HOSTS_MODES 派生，schema 校验与驱动实现读的是同一组字面量 */
 export type KnownHostsMode = (typeof KNOWN_HOSTS_MODES)[number]
 
+/**
+ * 解析结果。`user` / `port` 可缺省是**刻意的**：缺省意味着「交给 ssh 自己按
+ * ssh_config 决定」，而补一个默认值会绕开 ssh_config —— 配了 `Port 2222` 的
+ * Host 别名会静默连到 22 端口的另一台机器上。
+ */
 export interface SshTarget {
+  /** 已剥掉端口的纯主机名或 IP，不含 user@ */
   readonly host: string
+  /** 未写 user@ 时为 undefined，交给 ssh 兜底（不猜 root） */
   readonly user?: string
+  /** 未写 :port 时为 undefined，理由同 user */
   readonly port?: number
 }
 
@@ -114,6 +140,11 @@ export interface SshTarget {
  * 为什么住在契约层：`hosts.*.ssh` 与每一跳的 `ssh` 字段是**同一种写法**，
  * 解析它的三处（配置校验、连接装配、argv 拼装）必须共享一份实现 ——
  * 各写一份就会出现「配置层认为合法、连接时才炸」的错位错误。
+ *
+ * @param value 配置里写的原始串，形如 `deploy@10.0.0.5:2222`
+ * @param path 该字段的配置路径，仅用于错误消息定位
+ * @returns 拆开的 user/host/port；未写的部分保持 undefined 而非补默认值
+ * @throws DpError 主机名为空或端口不在 1–65535
  */
 export function parseSshTarget(value: string, path: string): SshTarget {
   const at = value.lastIndexOf('@')
@@ -140,7 +171,13 @@ export function parseSshTarget(value: string, path: string): SshTarget {
   return { user: userPart, host: hostPart }
 }
 
-/** 端口是否在 TCP 有效区间内。单独给是因为逐跳的 `port` 字段不走连接串解析 */
+/**
+ * 端口是否在 TCP 有效区间内。单独给是因为逐跳的 `port` 字段不走连接串解析
+ *
+ * @param port 端口号，必须是 1–65535 的整数（0 与 65536 都不含在区间内）
+ * @param path 配置路径，仅用于错误消息定位
+ * @throws DpError 越界或非整数
+ */
 export function assertPortInRange(port: number, path: string): void {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new DpError('DP.CONFIG.INVALID', `端口不合法：${port}`, {
@@ -154,6 +191,13 @@ export function assertPortInRange(port: number, path: string): void {
 // 错误
 // ============================================================
 
+/**
+ * 全仓唯一的错误码登记表，`DpErrorCode` 由它派生。
+ *
+ * 之所以用登记而不是各包自由发字符串：散着发时「同一个故障两处用了不同码」
+ * 无法被发现，而调用方只能按码分派处置方式（改配置 / 回滚 / 重试）——
+ * 码一漂，分派就静默走错分支。
+ */
 export const DP_ERROR_CODES = [
   'DP.CONFIG.INVALID',
   'DP.PATH.CASE_COLLISION',
@@ -238,11 +282,18 @@ export const DP_ERROR_CODES = [
 /** 从数组派生：加码只改上面那一个地方，类型自动跟上 */
 export type DpErrorCode = (typeof DP_ERROR_CODES)[number]
 
+/**
+ * 错误附带的定位信息。
+ *
+ * 三项全可选是刻意的：错误可以来自 CLI 自身的用法问题（与配置无关），
+ * 强制填写只会让每一处 throw 都为凑字段而编造路径。
+ */
 export interface DpErrorOptions {
   /** 出错的配置路径，如 `projects.web.source` */
   readonly path?: string
   /** 给用户的修复建议 */
   readonly hint?: string
+  /** 底层异常。挂上去是为了不丢原始堆栈，但**不参与**本错误的判定 */
   readonly cause?: unknown
 }
 
@@ -275,6 +326,12 @@ export class DpError extends Error {
 // 管线步骤
 // ============================================================
 
+/**
+ * 管线的固定八段。
+ *
+ * 定死枚举而不是让各目标自造阶段名：上层按 kind 分派「这步失败要不要回滚上一步」，
+ * 名字一自由化这套分派就会漏掉新名字 —— 表现为失败后停在半路且无人察觉。
+ */
 export type StepKind =
   | 'prepare'
   | 'stage'
@@ -300,24 +357,47 @@ export interface Step {
 // Runner —— 对"一台机器"的抽象
 // ============================================================
 
+/**
+ * 一次命令执行的结果。
+ *
+ * 不设「成功」布尔量：退出码为 0 但 stderr 有内容是常态（编译器的 warning、
+ * 服务的启动提示），把它当失败会让「先看看再说」变成硬错误。
+ */
 export interface ExecResult {
+  /** 进程退出码。被信号杀掉时按惯例给 128+信号号，不归一化成 1 —— 归一化会抹掉「是谁杀的」 */
   readonly code: number
   readonly stdout: string
   readonly stderr: string
 }
 
+/**
+ * 执行选项。**没有 shell 选项**是接口层的硬约束：
+ * 参数只能是 argv 数组，命令注入的面从类型上就不存在。
+ */
 export interface ExecOptions {
+  /** 工作目录。不存在时由驱动报错，不自动创建 —— 自动创建会把拼错的路径变成真目录 */
   readonly cwd?: string
+  /**
+   * 超时（毫秒）。**每个子进程都必须给**：ssh 到一台不可达的主机上会挂住，
+   * 没有兜底就是一次永不返回的部署。
+   */
   readonly timeoutMs?: number
+  /** 覆盖式环境变量，与父进程合并而非替换 */
   readonly env?: Readonly<Record<string, string | undefined>>
   /** 绝不喂 stdin —— 避免远端 prompt 挂起（铁律 0：永不交互） */
   readonly stdin?: string
 }
 
+/**
+ * 一条路径的元信息。字段是 stat 的直接映射，不做「友好化」：
+ * 预检需要的是和文件系统一致的原始事实。
+ */
 export interface FileStat {
   readonly isDirectory: boolean
   readonly isSymbolicLink: boolean
+  /** 字节数，符号链接本身的大小而非目标的大小 */
   readonly size: number
+  /** 毫秒时间戳。与 `Date.now()` 同一时基，不做本地化 */
   readonly mtimeMs: number
 }
 
@@ -339,28 +419,57 @@ export interface SourceFile {
   read(): Promise<Uint8Array>
 }
 
+/**
+ * 一个待创建的目录。与 SourceFile 的区别是**没有 read()**：
+ * 目录不产出字节，给它一个空的 read 会诱导实现编造空内容。
+ */
 export interface SourceDir {
   readonly kind: 'dir'
+  /** 相对 source 根的路径，始终用 `/` 分隔 */
   readonly relativePath: string
+  /** 权限位（八进制，如 0o755）。省略时由传输层按 umask 决定，不硬编码 0o644 */
   readonly mode?: number
 }
 
+/**
+ * 源清目的一个条目。文件与目录的联合，让传输层能一次遍历而不必分两次枚举 ——
+ * 分开枚举会让「先建目录再传文件」的顺序依赖两次独立快照，中间被改动的文件会漏掉。
+ */
 export type SourceEntry = SourceFile | SourceDir
 
 // ============================================================
 // Target —— 投递目标（static / nginx / docker / 未来更多）
 // ============================================================
 
+/**
+ * 一次目标操作的输入。
+ *
+ * `previousReleaseId` 叫「前一个」而不是「上一个版本」，因为它在**回滚时是当前版本**：
+ * 目标靠它判断该退到哪，两种方向共用这一个字段，少一个字段就少一类传错身份的可能。
+ */
 export interface TargetContext {
   readonly host: string
+  /** 发布根目录，已按实测能力选定，不是用户配置原样 */
   readonly root: string
+  /** 本次部署的版本号 */
   readonly releaseId: string
   /** 当前生效版本；首次部署为 undefined */
   readonly previousReleaseId?: string
+  /** 保留的历史版本数（含当前版本）。超出即 prune */
   readonly keep: number
 }
 
+/**
+ * 一个投递目标。
+ *
+ * 四个方法都是**纯函数**（吃 ctx 与 config，吐 Step[]），没有 IO：
+ * 这样 plan 的产物能在没有目标机的机器上逐条断言。
+ * 拆成 install/activate/verify/rollback 四段而不是一个 deploy，
+ * 是因为它们的**失败后果不同** —— activate 失败不回滚 release，
+ * verify 失败要回滚，合成一个方法后调用方无法分别处置。
+ */
 export interface Target<C = unknown> {
+  /** 目标类型标识，进日志与报告；不参与行为分派 */
   readonly type: string
   planInstall(ctx: TargetContext, config: C): readonly Step[]
   planActivate(ctx: TargetContext, config: C): readonly Step[]
@@ -406,6 +515,7 @@ export interface Runner {
 // Logger —— 结构化日志（实现见 @dp/log）
 // ============================================================
 
+/** 严重度。定义在 log 包之前，因为 sinks 与调用方都要按它过滤 */
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error'
 
 /** 一条日志。固定字段对齐 OTel 语义约定，其余字段自由扩展。 */
@@ -431,6 +541,12 @@ export interface LogSink {
   flush?(): Promise<void>
 }
 
+/**
+ * 结构化日志的写入端。
+ *
+ * 只给 `write(line, record)` 而不是只有格式化好的字符串：JSON 报告要读结构化字段，
+ * 而人读的格式里字段已经被拼进文本、再解析回去等于二次编码。
+ */
 export interface Logger {
   /** 派生一个绑定了固定字段的子 logger；子字段覆盖父字段，只影响自己 */
   child(bind: Readonly<Record<string, unknown>>): Logger

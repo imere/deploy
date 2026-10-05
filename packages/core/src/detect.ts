@@ -23,6 +23,11 @@ export type TargetPick = 'auto' | 'fail'
  */
 export const IMPLEMENTED_KINDS: readonly string[] = ['static', 'nginx', 'docker']
 
+/**
+ * 探测的输入。**没有**「源目录」字段，只有展开后的条目名：
+ * 探测关心的是「有没有 compose 文件」，不是「文件在哪」——
+ * 给了路径就得关心它从哪来，纯函数的前提随即破掉。
+ */
 export interface DetectInput {
   /**
    * 源条目。**相对路径**（`./dist/**` 展开后的形态，如 `docker-compose.yml`、`assets/app.js`）
@@ -35,6 +40,13 @@ export interface DetectInput {
   readonly packageScripts?: readonly string[]
 }
 
+/**
+ * 一个候选目标类型。
+ *
+ * 三个字段共同构成「可解释」：kind 是什么、凭什么这么认为（evidence）、
+ * 能不能真跑（implemented）。少了 evidence，CLI 就答不出「为什么判定成 docker」，
+ * 用户只能靠猜去改配置。
+ */
 export interface DetectCandidate {
   /** 命中的目标类型。`caddy` / `k8s` 也要能报出来（它们是「看到了但还没实现」） */
   readonly kind: string
@@ -46,6 +58,12 @@ export interface DetectCandidate {
   readonly confidence: number
 }
 
+/**
+ * 仲裁的结论。
+ *
+ * `rejected` 不是可选的调试信息，而是**对外契约的一部分**：
+ * `pick: auto` 的每一次自动选择都必须能回答「还有谁、凭什么被排除」。
+ */
 export interface DetectResult {
   readonly kind: string
   readonly evidence: readonly string[]
@@ -136,6 +154,9 @@ function sortUnique(paths: readonly string[]): readonly string[] {
 /**
  * 列出候选。**一个 kind 最多一个候选** —— docker 的两条证据（compose / Dockerfile）
  * 合并成同一个候选，见 docker 那一支。
+ *
+ * @param input 注入的源条目与 package scripts 名字
+ * @returns 候选列表，按置信度从高到低；同一 kind 只会出现一次
  */
 export function detectCandidates(input: DetectInput): readonly DetectCandidate[] {
   const out: DetectCandidate[] = []
@@ -252,6 +273,20 @@ function noEvidenceError(input: DetectInput): DpError {
   })
 }
 
+/**
+ * 仲裁：候选 → 唯一的 target.kind。
+ *
+ * 比探测更保守，四条都不给「自动降级」的余地：
+ *  1. 0 命中报错（并列出它看到的文件）—— 不假装成 static
+ *  2. 命中未实现的类型直接报错，不退回已实现的那个
+ *  3. `auto` 下最高分**并列**即报错 —— 并列还靠数组顺序选就是暗选
+ *  4. 未实现的候选不参与取最高 —— 否则源里躺一个 `Caddyfile` 就能否决一个 compose 项目
+ *
+ * @param input 注入的探测输入
+ * @param pick 'auto' 按置信度选（并列报错）/ 'fail' 只接受唯一命中
+ * @returns 选中的 kind、证据、落选原因与人话解释
+ * @throws DpError 无证据、命中未实现类型，或 auto 下最高分并列
+ */
 export function resolveTargetKind(input: DetectInput, pick: TargetPick): DetectResult {
   const candidates = detectCandidates(input)
 
