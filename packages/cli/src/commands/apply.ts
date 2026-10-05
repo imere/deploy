@@ -23,7 +23,13 @@ import { DpError, type BecomeConfig, type SourceEntry, type TargetContext } from
 import type { Config, HostConfig, ProjectConfig } from '@dp/schema'
 import type { LoadedConfig } from '../config-file.js'
 import { defaultApplyDeps, type ApplyDeps } from '../deps.js'
-import { acquireFacts as acquireFactsDefault, parseSshTarget, readFactsFile, resolveAuth } from '../facts-source.js'
+import {
+  acquireFacts as acquireFactsDefault,
+  hopJumpStrings,
+  readFactsFile,
+  resolveAuth,
+  resolveSshEndpoint,
+} from '../facts-source.js'
 import { nginxConfigFor, releaseCurrentPath, resolveConfd } from '../nginx-config.js'
 import { dockerConfigFor } from '../docker-config.js'
 import {
@@ -304,15 +310,8 @@ async function makeTransferHook(
   const { context, deps, logger, hostConfig, host, spec, entries, releaseRoot, releaseId, remoteFacts } = input
   const hostPath = `hosts.${host}`
 
-  if (hostConfig.ssh === undefined) {
-    throw new DpError('DP.CONFIG.INVALID', `主机 ${host} 既没有 local: true 也没有 ssh`, {
-      path: hostPath,
-      hint: '远端部署需要 ssh 目标；本机目标请写 { "local": true }（它走逐条 writeFile，不经过传输层）',
-    })
-  }
-
-  const target = parseSshTarget(hostConfig.ssh, `${hostPath}.ssh`)
   const auth = resolveAuth(context.env, `${hostPath}.ssh`)
+  const endpoint = resolveSshEndpoint(hostConfig, hostPath, auth)
   const preferred = transportPreference(hostConfig, `${hostPath}.transport.strategy`)
 
   // 只传**文件**条目：rsync / tar 都会自己建父目录，而目录条目传进去只是
@@ -339,12 +338,14 @@ async function makeTransferHook(
       : {}),
   })
 
-  // 多跳还没进 schema（多跳尚未实现）。不加 `hops` 字段是对的 ——
-  // 为一个还不存在的配置项写 `(hostConfig as { hops?: ... })` 只是换个写法骗过类型
-  // 检查，运行时永远是 undefined，还会让人以为多跳已经通了。
+  // sshTarget 只带**最后一跳**（目标机）：hops 的最后一跳就是目标机。
+  // 其余跳走 rsh 侧 —— transport 的 hops 只含跳板、不含目标机（它会被拼进 -J，
+  // 再由 rsync 把 sshTarget 追加在后面）。两处若都把目标机算进去，
+  // 就成了 `ssh -J jump,target target`：多一次认证，且目标机往往不允许自己连自己。
   // 端口走 rsh 的 -p，不进 sshTarget：rsync 自己会在目标串后追加 host，
   // 写成 user@host:2222 会被当成主机名的一部分
-  const sshTarget = target.user !== undefined ? `${target.user}@${target.host}` : target.host
+  const sshTarget = endpoint.user !== undefined ? `${endpoint.user}@${endpoint.host}` : endpoint.host
+  const hopJumps = hopJumpStrings(endpoint.hops)
   const become = becomeFor(hostConfig, hostPath)
 
   return async (stagingDir: string): Promise<{ readonly filesWritten: number; readonly warnings: readonly string[] }> => {
@@ -365,8 +366,10 @@ async function makeTransferHook(
       remoteRoot: stagingDir,
       host,
       sshTarget,
+      // 跳板链交给 rsh 侧的 -J：多跳时不传就等于直连目标机
+      ...(hopJumps !== undefined ? { hops: hopJumps } : {}),
       ...(auth.type === 'key' ? { identityFile: auth.identityFile } : {}),
-      ...(target.port !== undefined ? { port: target.port } : {}),
+      ...(endpoint.port !== undefined ? { port: endpoint.port } : {}),
       ...(become !== undefined ? { become } : {}),
       deleteExtraneous: hostConfig.transport?.delete ?? false,
     }

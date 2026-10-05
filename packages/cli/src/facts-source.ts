@@ -11,11 +11,11 @@
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { existsSync, promises as fs } from 'node:fs'
-import { DpError, type Facts, type Platform, type Runner, parseSshTarget } from '@dp/ports'
+import { DpError, type Facts, type Platform, type Runner, assertPortInRange, parseSshTarget } from '@dp/ports'
 import type { HostConfig } from '@dp/schema'
 import type { Logger } from '@dp/log'
 import { probeLocalFacts, probeWritable } from '@dp/local'
-import { connectSsh, type SshConnectionOptions } from '@dp/ssh'
+import { connectSsh, type AuthConfig, type HopSpec, type SshConnectionOptions } from '@dp/ssh'
 import { RELEASE_ROOT_CANDIDATES, expandTemplate } from '@dp/core'
 
 export const DEFAULT_CONNECT_TIMEOUT_MS = 30_000
@@ -58,6 +58,11 @@ export interface FactsRequest {
   readonly projectName?: string
   /** 配置里显式写的 release.root：它优先于候选，必须单独实测 */
   readonly releaseRoot?: string
+  /**
+   * 连接实现。默认真的 `connectSsh`；测试注入假的才能断言「推导出来的 hops
+   * 真的被送到了连接层」—— 否则推导对了却忘了往下传，测试照样全绿。
+   */
+  readonly connect?: typeof connectSsh
 }
 
 export interface FactsResult {
@@ -159,6 +164,136 @@ function leftoverNotes(leftovers: readonly string[]): string[] {
   ]
 }
 
+/**
+ * 一台远端主机的连接目标。
+ *
+ * `hops` 存在时它就是**整条链**（含目标机），不是「跳板们」—— 驱动需要完整链条
+ * 才能判断哪一跳是目标、哪些该进 `-J`。两份 `hops` 语义若各写一份，迟早一边
+ * 少传一跳而测试全绿。
+ */
+export interface SshEndpoint {
+  readonly host: string
+  readonly user?: string
+  readonly port?: number
+  readonly hops?: readonly HopSpec[]
+}
+
+/**
+ * `HostConfig` → 连接目标。**本包唯一的推导入口** —— `acquireFacts`（探测）
+ * 与 `apply`（传输）必须从同一份结论出发，否则会出现「探测直连、传输走跳板」
+ * 这种每一步都成功但连的是两台机器的组合。
+ *
+ * 纯函数，零 IO：认证由调用方 `resolveAuth` 后经 `targetAuth` 注入。
+ *
+ * 为什么 `ssh` 与 `hops` 同时出现要在**这里**再拒一次：配置层已互斥，但本函数
+ * 会被不经过 schema 的路径调用（测试夹具、`--facts` 旁路），「二选一」得在代码
+ * 里也成立，否则两条连接路径会同时成立而没有一条报错。
+ */
+export function resolveSshEndpoint(host: HostConfig, path: string, targetAuth?: AuthConfig): SshEndpoint {
+  const hops = host.hops !== undefined && host.hops.length > 0 ? host.hops : undefined
+
+  if (host.ssh !== undefined && hops !== undefined) {
+    throw new DpError('DP.CONFIG.INVALID', 'ssh 与 hops 同时给了，二者只能选一个', {
+      path: `${path}.ssh`,
+      hint: '二选一：单跳写 ssh: user@host[:port]；多跳把整条链写进 hops（最后一跳就是目标机）',
+    })
+  }
+
+  if (hops !== undefined) {
+    const last = hops[hops.length - 1]!
+    const lastPath = `${path}.hops[${hops.length - 1}]`
+    const target = parseSshTarget(last.ssh, `${lastPath}.ssh`)
+    const port = resolvedHopPort(last, target.port, `${lastPath}.port`)
+    // 目标机的凭据取自整体 auth（最后一跳认 opts 上的凭据），但配置里显式给了就以配置为准
+    const lastAuth = last.auth !== undefined ? hopAuthConfig(last.auth) : targetAuth
+    const chain: HopSpec[] = hops.map((hop, i) => {
+      // 中间跳的 auth 绝不兜底：继承意味着把目标机的凭据发给跳板机。
+      // 缺 auth 时留空，由 planHopChain 在碰网络之前报错。
+      const auth = i === hops.length - 1 ? lastAuth : hop.auth !== undefined ? hopAuthConfig(hop.auth) : undefined
+      return {
+        ssh: hop.ssh,
+        ...(auth !== undefined ? { auth } : {}),
+        ...(hop.knownHosts !== undefined ? { knownHosts: hop.knownHosts } : {}),
+        ...(hop.port !== undefined ? { port: hop.port } : {}),
+      }
+    })
+    return {
+      host: target.host,
+      ...(target.user !== undefined ? { user: target.user } : {}),
+      ...(port !== undefined ? { port } : {}),
+      hops: chain,
+    }
+  }
+
+  if (host.ssh === undefined) {
+    throw new DpError('DP.CONFIG.INVALID', `主机 ${path} 既没有 local: true，也没有 ssh 或 hops`, {
+      path,
+      hint: '写 { "local": true } 指向本机，或写 { "ssh": "user@host:port" } 单跳，或写 { "hops": [...] } 多跳（最后一跳就是目标机）。三者都没有就无法确定目标',
+    })
+  }
+
+  const target = parseSshTarget(host.ssh, `${path}.ssh`)
+  return {
+    host: target.host,
+    ...(target.user !== undefined ? { user: target.user } : {}),
+    ...(target.port !== undefined ? { port: target.port } : {}),
+  }
+}
+
+/**
+ * schema 的逐跳 auth → 驱动的 `AuthConfig`。
+ *
+ * 为什么显式转一手而不靠结构兼容：schema 那一层的 `type` 是可缺省的（`withDefault`
+ * 只在**校验后**补值，类型上仍是 `type?`），直接塞进驱动会在「没写 type」时拿到
+ * 一个既不是 key 也不是 agent 的空壳 —— 那是「凭据类型未知」而不是「用 agent」，
+ * 猜错等于把私钥路径当成空值传下去。
+ */
+function hopAuthConfig(auth: NonNullable<NonNullable<HostConfig['hops']>[number]['auth']>): AuthConfig {
+  if (auth.type === 'key') {
+    return { type: 'key', ...(auth.identityFile !== undefined ? { identityFile: auth.identityFile } : {}) }
+  }
+  if (auth.type === 'agent') return { type: 'agent' }
+  throw new DpError('DP.CONFIG.INVALID', '这一跳的 auth.type 不是 key / agent', {
+    hint: '多跳只支持 key 与 agent：`-J` 无法逐跳喂密码，写错类型会让 ssh 去读 tty，在 CI 里就是一次永久挂起',
+  })
+}
+
+/**
+ * 串里的端口与 `port` 字段同时给出且不一致 → 报错。
+ *
+ * 与 hop-chain/validateHops 同一约定：静默取一个会让用户以为连的是自己写的
+ * 那一台，而那次连接**往往还是成功的**。
+ */
+function resolvedHopPort(
+  hop: { readonly port?: number },
+  portInSsh: number | undefined,
+  path: string,
+): number | undefined {
+  if (hop.port === undefined) return portInSsh
+  assertPortInRange(hop.port, path)
+  if (portInSsh !== undefined && portInSsh !== hop.port) {
+    throw new DpError('DP.CONFIG.INVALID', `这一跳给了两个互相矛盾的端口：ssh 串里是 ${portInSsh}，port 字段是 ${hop.port}`, {
+      path,
+      hint: '留一个就行。静默取其中一个会连到另一台机器上，而那次连接往往还是成功的',
+    })
+  }
+  return hop.port
+}
+
+/** 给 rsync `--rsh` 用的跳板串：只有 `user@host[:port]`，不含目标机那一跳 */
+export function hopJumpStrings(hops: readonly HopSpec[] | undefined): readonly string[] | undefined {
+  if (hops === undefined) return undefined
+  const jumps = hops.slice(0, -1)
+  if (jumps.length === 0) return undefined
+  return jumps.map((hop, i) => {
+    const path = `hosts.*.hops[${i}].ssh`
+    const target = parseSshTarget(hop.ssh, path)
+    const port = resolvedHopPort(hop, target.port, `hosts.*.hops[${i}].port`)
+    const base = target.user === undefined || target.user === '' ? target.host : `${target.user}@${target.host}`
+    return port === undefined ? base : `${base}:${port}`
+  })
+}
+
 export async function acquireFacts(request: FactsRequest): Promise<FactsResult> {
   const env = request.env ?? process.env
   const timeoutMs = request.timeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS
@@ -195,25 +330,21 @@ export async function acquireFacts(request: FactsRequest): Promise<FactsResult> 
     }
   }
 
-  if (host.ssh === undefined) {
-    throw new DpError('DP.CONFIG.INVALID', `主机 ${request.hostId} 既没有 local: true 也没有 ssh`, {
-      path: `hosts.${request.hostId}`,
-      hint: '写 { "local": true } 指向本机，或写 { "ssh": "user@host:port" } 指向远端。两者都没有就无法确定目标',
-    })
-  }
-
-  const target = parseSshTarget(host.ssh, `hosts.${request.hostId}.ssh`)
+  const targetAuth = resolveAuth(env, `hosts.${request.hostId}.ssh`)
+  const endpoint = resolveSshEndpoint(host, `hosts.${request.hostId}`, targetAuth)
   const options: SshConnectionOptions = {
-    host: target.host,
-    auth: resolveAuth(env, `hosts.${request.hostId}.ssh`),
+    host: endpoint.host,
+    auth: targetAuth,
     knownHosts: 'strict',
     timeoutMs,
     // 端口与用户不写就交给驱动默认值（22 / 本机用户名），不猜
-    ...(target.user !== undefined ? { user: target.user } : {}),
-    ...(target.port !== undefined ? { port: target.port } : {}),
+    ...(endpoint.user !== undefined ? { user: endpoint.user } : {}),
+    ...(endpoint.port !== undefined ? { port: endpoint.port } : {}),
+    // hops 是整条链（含目标机），驱动自己判断哪一跳进 -J
+    ...(endpoint.hops !== undefined ? { hops: endpoint.hops } : {}),
   }
 
-  const connected = await connectSsh(options, {
+  const connected = await (request.connect ?? connectSsh)(options, {
     ...(request.logger !== undefined ? { logger: request.logger } : {}),
     timeoutMs,
   })

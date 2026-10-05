@@ -148,6 +148,8 @@ interface Harness {
   readonly calls: { count: number; remoteRoots: string[]; entryCounts: number[]; deleteExtraneous: (boolean | undefined)[] }
   /** 每次调用传输时拿到的 `deps.preferred` —— 用户写的 strategy 有没有真的传下去 */
   readonly prefs: (readonly string[] | undefined)[]
+  /** 每次调用传输时拿到的请求本体。跳板链/sshTarget 有没有真的传下去，只有这里看得见 */
+  readonly requests: Readonly<{ sshTarget?: string; port?: number; hops?: readonly string[] }>[]
 }
 
 interface HarnessOptions {
@@ -161,6 +163,7 @@ function makeHarness(options: HarnessOptions = {}): Harness {
   const runner = new RemoteRunner(remoteFacts('prod'))
   const calls = { count: 0, remoteRoots: [] as string[], entryCounts: [] as number[], deleteExtraneous: [] as (boolean | undefined)[] }
   const prefs: (readonly string[] | undefined)[] = []
+  const requests: Readonly<{ sshTarget?: string; port?: number; hops?: readonly string[] }>[] = []
 
   const deps: ApplyDeps = {
     acquireFacts: async () => ({
@@ -173,6 +176,7 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     transfer: async (req, xferDeps) => {
       calls.count += 1
       prefs.push(xferDeps.preferred)
+      requests.push(req)
       calls.remoteRoots.push(req.remoteRoot)
       calls.entryCounts.push(req.entries.length)
       calls.deleteExtraneous.push(req.deleteExtraneous)
@@ -197,7 +201,7 @@ function makeHarness(options: HarnessOptions = {}): Harness {
       }
     },
   }
-  return { deps, runner, calls, prefs }
+  return { deps, runner, calls, prefs, requests }
 }
 
 async function withWorkspace(
@@ -367,6 +371,50 @@ describe('apply · 远端走 transport', () => {
       assert.equal(r.code, 0, `stderr: ${r.stderr}`)
       assert.equal(h.calls.count, 1)
       assert.deepEqual(h.prefs[0], ['tar-ssh'], `用户写的 strategy 必须原样到达 transfer，实际：${JSON.stringify(h.prefs[0])}`)
+    }, config)
+  })
+
+  it('多跳：sshTarget 是最后一跳，跳板链交给 rsh 侧且不含目标机', async () => {
+    // 只测 facts-source 的推导不够：传输层是**另一个**接线点，推导对了却忘了把
+    // hops 塞进 TransferRequest，功能仍然是断的，而上面那些测试照样全绿。
+    const config = {
+      hosts: {
+        prod: {
+          hops: [
+            { ssh: 'bastion@bastion.internal', auth: { type: 'agent' } },
+            { ssh: 'bastion2@bastion2.internal:2201', auth: { type: 'agent' } },
+            { ssh: 'deployer@10.0.0.5:2222', auth: { type: 'agent' } },
+          ],
+        },
+      },
+      projects: { web: { source: { root: './dist' }, release: { root: '/srv/app' } } },
+    }
+    await withWorkspace(async (dir) => {
+      const h = makeHarness()
+      const r = await run(dir, ['--json', '--host', 'prod'], h.deps)
+      assert.equal(r.code, 0, `stderr: ${r.stderr}`)
+      assert.equal(h.calls.count, 1)
+      const req = h.requests[0]!
+      // 目标机（最后一跳）走 sshTarget，其余跳走 -J。两边都带上目标机就等于
+      // `ssh -J jump,target target`：多一次认证，且目标机往往不允许自己连自己。
+      assert.equal(req.sshTarget, 'deployer@10.0.0.5', 'sshTarget 必须是最后一跳的 user@host')
+      assert.equal(req.port, 2222, '目标机端口走 rsh 的 -p，不进 sshTarget 串')
+      assert.deepEqual(req.hops, ['bastion@bastion.internal', 'bastion2@bastion2.internal:2201'], '跳板链必须到达传输层，且不含目标机')
+    }, config)
+  })
+
+  it('单跳主机不产出 hops（老路径没被改坏）', async () => {
+    const config = {
+      hosts: { prod: { ssh: 'deployer@10.0.0.5:2222' } },
+      projects: { web: { source: { root: './dist' }, release: { root: '/srv/app' } } },
+    }
+    await withWorkspace(async (dir) => {
+      const h = makeHarness()
+      const r = await run(dir, ['--json', '--host', 'prod'], h.deps)
+      assert.equal(r.code, 0, `stderr: ${r.stderr}`)
+      const req = h.requests[0]!
+      assert.equal(req.sshTarget, 'deployer@10.0.0.5')
+      assert.equal(req.hops, undefined, '单跳不该产出 hops')
     }, config)
   })
 
