@@ -44,6 +44,7 @@ packages/       @dp/* 各包（ports / schema / core / local / log / ssh / targe
 docs/           设计文档（★ 优先读：spikes.md failures.md decisions.md privilege.md）
 .agents/skills/ 可复用流程。**通用方法论**（与本项目无关，可整体搬到别处）：
                  subagent-dispatch mutation-verify fake-test-audit accept-script
+                 wiring-completeness shared-input-semantics
                  doc-truthfulness single-source-of-truth cleanup-not-silent
                  automation-iron-rules secret-hygiene repo-sanitize-history
                  git-noninteractive windows-sandbox-gotchas
@@ -92,10 +93,13 @@ build/          覆盖率产物所在根目录（已 gitignore）
 - **护栏层**：目标机状态日志 + 带租约的部署锁 + 两阶段激活 `trial→promote`；unit 必须注入 `MemoryMax`/`StartLimitBurst`/`Restart=on-failure`
 - **抗量子**：ssh2 **不支持**，只能靠 `native-ssh` 驱动；密码登录用 `SSH_ASKPASS`（不需要 sshpass）
 - **日志**：一律走 `@dp/log`，脱敏在 sink 出口统一做，禁止单点 `console.log`；日志抛错绝不上抛
-- **远端**：`@dp/ssh` 驱动偏好链 `native-ssh` → `ssh2`（ssh2 运行时可选加载，本机没装即表现为不可用）；
-  **多跳对用户未开放**：`@dp/ssh` 的 `connect()` 对非空 `hops` 显式抛 `DP.CONFIG.INVALID`；
-  `@dp/transport` 的 rsh 能构造 `-J a,b` 与 `ProxyCommand` 两种 argv，但配置里没有 `hops` 字段。
-  开放要同时动 schema 与 ssh 驱动，别在 apply 里 cast 一个不存在的字段假装接上了
+- **远端**：`@dp/ssh` 驱动偏好链 `native-ssh` → `ssh2`（ssh2 运行时可选加载，本机没装即表现为不可用）
+- **多跳**：`hosts.*.hops`（与 `ssh` 互斥）已接通，语义是**最后一跳就是目标机**。
+  两个消费者都得按这条来：native 把它排除在 `-J` 之外（写进去就成了
+  `ssh -J jump,target target`，在目标机上再连一次自己），`@dp/transport` 的 rsh 同理。
+  推导只有一份（`@dp/cli` 的 `resolveSshEndpoint`），`facts-source` 与 `apply` 共用 ——
+  各写一份是分叉的标准形状。逐跳 `auth` **绝不继承**，中间跳没给就留空让驱动报错
+  （替它补一个，等于把目标机的钥匙递给跳板机）
 - **模板**：渲染一律走 `@dp/template`，变量表以 为准（不发明变量名）；
   `$host` / `$request_uri` / `$1` 之类**必须原样保留**（吃掉它们产出的 nginx conf 直接废掉），
   要字面量 `${x}` 写 `$${x}`。包本身零 IO：环境变量、git 状态、时钟都由调用方注入，
