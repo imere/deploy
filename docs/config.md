@@ -161,16 +161,19 @@ hosts:
       - { ssh: 'deploy@10.0.0.7',     auth: { type: key, identityFile: '~/.ssh/id_ed25519' } }
 ```
 
-三条限制都会在配置加载或拼 argv 时**显式报错**，不会静默降级：
+这些限制都会在配置加载或拼 argv 时**显式报错**，不会静默降级。
 
-下面三条是 **`native-ssh`（`-o ProxyJump=`）路径**的限制，由「跳板连接由系统 ssh 自己发起」
-这一点决定，不是 hops 本身的限制：
+下面两条是 **`native-ssh`（`-o ProxyJump=`）路径**的限制，由「跳板连接由系统 ssh 自己发起」
+这一点决定，不是 hops 本身的限制。**它们只约束链里当跳板的那几跳** —— 最后一跳是目标机，
+不进 `-J`，所以不受「`-J` 只有一条命令行」那条的约束。
+（但逐跳 `auth` 的 `type` 只有 `key` / `agent` 两种是**配置层**就定死的，
+对目标机同样成立 —— 目标机要用密码就别走 hops，走单跳 `ssh`。）
 
-- **逐跳只能 key / agent**。我们既没有它的凭据通道，也保证不了不交互
+- **跳板只能 key / agent**。我们既没有它的凭据通道，也保证不了不交互
   （它会去读 tty，在 CI 里就是一次永久挂起）。改用密钥/agent，
-  或把逐跳的端口与密钥写进 ssh_config 的 `Host` 块。
-- **逐跳不能单独设 knownHosts**。`-J` 只有一条命令行，跳板机与目标机共用同一组
-  `StrictHostKeyChecking` / `UserKnownHostsFile`；逐跳要不同策略只能走 ssh_config。
+  或把跳板的端口与密钥写进 ssh_config 的 `Host` 块。
+- **跳板不能单独设 knownHosts**。`-J` 只有一条命令行，跳板机与目标机共用同一组
+  `StrictHostKeyChecking` / `UserKnownHostsFile`；跳板要不同策略只能走 ssh_config。
 
 `ssh2` 驱动走的是另一条路（逐跳 direct-tcpip 串成链），所以限制不同：
 

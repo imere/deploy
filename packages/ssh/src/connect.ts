@@ -43,9 +43,9 @@ export interface ConnectedSsh {
 /**
  * 连上一台远端机器。
  *
- * 顺序刻意如此：**先过非空 hops 的校验**（挡掉未实现配置的静默误用），再走
- * 偏好链选驱动，最后才探测 —— 探测是有往返成本的，不该为一条注定失败的
- * 连接买单。
+ * 顺序刻意如此：**先过非空 hops 的校验**（不合法的链在碰网络之前就报错，而不是
+ * 连到一半才失败），再走偏好链选驱动，最后才探测 —— 探测是有往返成本的，不该
+ * 为一条注定失败的连接买单。
  */
 export async function connectSsh(
   options: SshConnectionOptions,
