@@ -92,7 +92,7 @@ dp rollback --json  # 切回上一版，然后**再验一次**；新版本不健
 与「每次 exec 一次性连接」不合，所以那里明确失败而不是给一条走不通的通道。
 
 ```bash
-pnpm verify      # build + test + 覆盖率 + 六项静态门禁（产物落在 build/，lcov 在 build/coverage/）
+pnpm verify      # build + test + 门禁自测 + 七项静态门禁（产物落在 build/，lcov 在 build/coverage/）
 ```
 
 ---
@@ -179,9 +179,11 @@ flowchart TB
 
 ## 质量门禁
 
-**当前 `pnpm verify` = `build` + `test` + 七项静态门禁**（见根 `package.json`）。七项按
+**当前 `pnpm verify` = `build` + `test` + `test:scripts` + 七项静态门禁**（见根 `package.json`）。七项按
 `dead-code` → `check-imports` → `check-tests` → `check-jsdoc` → `check-coverage` → `smoke` → `accept-gates` 依次串起，
-单独跑它们的那一段叫 `verify:gates`。`check-coverage` 只读 `test` 产出的 `build/coverage/lcov.info`，
+单独跑它们的那一段叫 `verify:gates`。`test:scripts` 跑的是**门禁脚本自己的测试**（`scripts/*.test.mjs`），
+与 `packages` 的测试分开跑 —— 混进同一条命令会让两份 lcov 互相覆盖，门禁读到的就不是全量覆盖率了；
+它不写 `lcov`，也就不参与覆盖率统计。`check-coverage` 只读 `test` 产出的 `build/coverage/lcov.info`，
 `smoke` 只读 `build/` 产物 —— 排在 `build` / `test` 之前跑它们，拿到的是编排错误而不是质量信号。
 CI 只跑这一条 `pnpm verify`，不挑着跑。下面这张表是这套门禁**想达到的强度**，
 其中只有一部分已经落地 —— 没落地的标 ❌，别当成已经在跑的保障。

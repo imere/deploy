@@ -21,10 +21,11 @@ pnpm 单仓多包，包名前缀 `@dp/*`。**Node ≥ 24**。
 ## 命令
 
 ```
-pnpm build    # tsc -b，产物 packages/<pkg>/build
-pnpm test     # 构建 + node --test + 覆盖率 → build/coverage/lcov.info
-pnpm verify   # build + test + 六项静态门禁（verify:gates）
-pnpm clean    # tsc -b --clean
+pnpm build             # tsc -b，产物 packages/<pkg>/build
+pnpm test              # 构建 + node --test + 覆盖率 → build/coverage/lcov.info
+pnpm run test:scripts  # 门禁脚本自己的测试（scripts/*.test.mjs）—— 判据被改坏要有东西变红
+pnpm verify            # build + test + test:scripts + 七项静态门禁（verify:gates）
+pnpm clean             # tsc -b --clean
 ```
 
 Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：它依赖的 esbuild 平台二进制在部分 Windows 环境装不上，
