@@ -25,7 +25,17 @@ import { DpError } from '@dp/ports'
 /** cmd.exe 会解释的字符。含它们的密码**拒绝**，不给注入面留缝。 */
 const CMD_UNSAFE = /[&|<>^%!"\r\n]/
 
+/**
+ * 一个已落盘的 askpass 助手。
+ *
+ * 为什么 `path` 与 `env` 分开给：`env` 里**只有** OpenSSH 要的那三个变量，
+ * 密码本体不在这里 —— 进了子进程环境的值会出现在 `/proc/<pid>/environ`，
+ * 任何有该进程读权限的都能看到，而 argv 至少还能定位到是哪一次部署。
+ * 这个对象是一次性的：`dispose()` 之后 `path` 指向的东西必须已经不存在，
+ * 留着它当长期句柄用，就等于把明文凭据的存活期从「一次 exec」拉长到「进程生命周期」。
+ */
 export interface AskpassHelper {
+  /** 助手脚本的绝对路径。POSIX 是 .sh，Windows 是 .cmd —— 后者的表达能力更差，见文件头 */
   readonly path: string
   /** 注入给 ssh 子进程的环境变量。密码本体不在这里 */
   readonly env: Readonly<Record<string, string>>
@@ -33,6 +43,14 @@ export interface AskpassHelper {
   dispose(): void
 }
 
+/**
+ * 助手的落盘位置。
+ *
+ * 为什么可选：askpass 文件**永远落在本机**（ssh 子进程也在本机跑），
+ * 所以它跟目标机的 tmpdir 没有关系，只是调用方常常已经知道一个合适的本机目录。
+ * 不给就退到 `os.tmpdir()`，而不是像其他临时物那样要求必须显式给 ——
+ * 这里放错的后果是本机上多一个 0700 目录，不会碰到任何生产路径。
+ */
 export interface AskpassOptions {
   /** 临时目录。远端场景由调用方给 Facts.tmpdir；本机测试用 os.tmpdir() */
   readonly dir?: string
@@ -47,6 +65,11 @@ function shQuote(value: string): string {
  *
  * @param secret 要打印的内容。密码或密钥 passphrase —— 都不是 shell 语法，
  *               所以按 POSIX 单引号整体包住即可。
+ * @param options 落盘位置。不给就用 `os.tmpdir()`
+ * @returns 助手句柄。**调用方必须调 `dispose()`** —— 密码就在 `path` 指向的文件里，
+ *   不删掉的话它会一直留在磁盘上等一次重启
+ * @throws DpError 空 secret（`DP.CONFIG.INVALID`，与"密码错了"分开，
+ *   前者改配置、后者查凭据），或 Windows 上密码含 cmd 会解释的字符
  */
 export function createAskpassHelper(secret: string, options: AskpassOptions = {}): AskpassHelper {
   if (secret === '') {
@@ -102,5 +125,13 @@ export function createAskpassHelper(secret: string, options: AskpassOptions = {}
   }
 }
 
-/** 助手文件名里的随机后缀来源，导出仅为测试断言存在性 */
+/**
+ * 随机后缀的来源，导出**仅为测试**能断言临时目录名不撞车。
+ *
+ * 为什么它不进生产路径：目录名已经是 `mkdtemp` 生成的 —— 随机且原子创建，
+ * 那里已经用满了所需的不确定性。再拼一个后缀既不加熵，又多一个将来会有人
+ * 依赖的导出面，而那个导出并不提供任何它名字暗示的能力。
+ *
+ * @returns 12 个十六进制字符（6 字节随机数），**不含**任何机器相关或时间相关成分
+ */
 export const askpassToken = (): string => randomBytes(6).toString('hex')

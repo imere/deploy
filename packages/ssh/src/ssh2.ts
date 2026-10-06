@@ -40,16 +40,29 @@ import { truncateOutput } from './parse.js'
 // 最小接口声明（不是 ssh2 的完整类型，是我们用到的部分）
 // ------------------------------------------------------------
 
+/**
+ * 一条 exec/sftp/forwardOut 通道。**只声明我们用到的那几个成员**：
+ * ssh2 的真实类型是巨大的 EventEmitter 面，照抄一份只会让升级 ssh2 变成改类型文件；
+ * 而这里需要的恰恰是「缺什么就报什么」，所以窄接口比完整类型更诚实。
+ *
+ * `stderr` 单独可选：ssh2 的版本差异就在这个流上，有的版本不单独给。
+ */
 export interface Ssh2ChannelLike {
   on(event: string, handler: (...args: readonly unknown[]) => void): unknown
   stderr?: { on(event: string, handler: (...args: readonly unknown[]) => void): unknown }
   close?(): void
 }
 
+/** sftp 子系统会话。同样是窄声明：只需要"事件到数据"这一件事 */
 export interface Ssh2SftpLike {
   on(event: string, handler: (...args: readonly unknown[]) => void): unknown
 }
 
+/**
+ * 客户端。三个方法都是**回调式**而不是 Promise —— 直接沿用 ssh2 的形状，
+ * 包一层 Promise 会让"回调抛异常"变成一个静默的未捕获异常，
+ * 而那正是我们在 try/catch 里想看见的东西。
+ */
 export interface Ssh2ClientLike {
   on(event: string, handler: (...args: readonly unknown[]) => void): unknown
   connect(config: Readonly<Record<string, unknown>>): void
@@ -69,10 +82,21 @@ export interface Ssh2ClientLike {
   end(): void
 }
 
+/**
+ * 加载到的 ssh2 模块 —— **只保留我们核对过的部分**。
+ *
+ * 核对发生在运行时（见 narrowModule）而不是靠 TypeScript 的类型断言：
+ * `ssh2` 是可选依赖，我们不能假设它装的就是预期那个版本，
+ * 而"形状对不上"必须表现为"这条驱动不可用"，不是"跑到一半才崩"。
+ */
 export interface Ssh2ModuleLike {
   Client: new () => Ssh2ClientLike
 }
 
+/**
+ * 加载结果。用**判别联合**而不是抛异常：模块没装是一个正常的、
+ * 要进偏好链失败列表的状态，异常会让上层必须用 try/catch 去问一个布尔值。
+ */
 export type Ssh2Load =
   | { readonly ok: true; readonly mod: Ssh2ModuleLike }
   | { readonly ok: false; readonly reason: string; readonly hint: string }
@@ -84,6 +108,12 @@ let cached: Ssh2Load | undefined
  *
  * 失败**不是**异常 —— 它是一个正常的"这条驱动不可用"状态，要进偏好链的
  * 失败原因列表里（错误要能指导下一步）。
+ *
+ * @param force 跳过缓存重新 require。**只有测试用** ——
+ *   生产的加载是一次性的，反复 require 拿到的永远是同一份模块，
+ *   而"每次都重新读文件"在 Windows 上还慢得离谱
+ * @returns 加载结果，**永不为 null、永不抛错**。失败分支的 `reason` 说明发生了什么，
+ *   `hint` 给出能真正解决它的下一步（装包 / 换驱动）
  */
 export function loadSsh2(force = false): Ssh2Load {
   if (cached !== undefined && !force) return cached
@@ -130,6 +160,16 @@ function narrowModule(mod: unknown): Ssh2Load {
 // 驱动
 // ------------------------------------------------------------
 
+/**
+ * 纯 JS 的 ssh2 驱动，偏好链里的降级项。
+ *
+ * 它比 native 多两样东西（keyboard-interactive、进程内的 rsync 隧道），
+ * 少一样致命的东西：**不支持任何抗量子 KEX**。
+ * 所以它是降级不是替代 —— `crypto.kexPolicy=pq-required` 时只能走 native。
+ *
+ * 构造函数**不做任何 IO**：模块在 `available()` 里才加载。
+ * 跟 native 同一个理由 —— 偏好链要能逐条试，构造期抛错会让链走不下去。
+ */
 export class Ssh2Driver implements SshDriver {
   readonly kind: SshDriverKind = 'ssh2'
   private client: Ssh2ClientLike | undefined
@@ -358,7 +398,20 @@ function toBuffer(chunk: unknown): Buffer {
 
 const joinBufs = (list: readonly Buffer[]): string => Buffer.concat(list).toString('utf8')
 
-/** ssh2 的错误文案 → 结构化。**绝不带上 password 字段的值** */
+/**
+ * ssh2 的错误文案 → 结构化。**绝不带上 password 字段的值**
+ *
+ * 判据与 native 那条路径（`parse.ts` 的 classifySshError）分开写是刻意的：
+ * 两个库的文案体系完全不同，硬凑成一个正则表只会让两边都判不准。
+ * 共同遵守的是**同一个错误码集** —— 上层按码分派处置，不关心它从哪来。
+ *
+ * @param message ssh2 抛出的原始错误消息。会被截到 200–300 字符再进 message：
+ *   它可能夹带连接参数，拼全了既难读又有泄漏风险
+ * @param auth 配置里的认证方式。**只读它的 `type`，不碰明文** ——
+ *   它用来选建议（比如私钥权限太开 vs agent 里没有身份），两种都值得说
+ * @returns 一个 `DpError`。认不出文案时落`DP.SSH.CONNECT_FAILED`（笼统）——
+ *   误判成认证失败会把用户引到完全错误的方向
+ */
 export function classifyConnectError(message: string, auth: AuthConfig): DpError {
   const kind = auth.type
   if (/All configured authentication methods failed/i.test(message)) {
@@ -389,6 +442,13 @@ function authHint(kind: AuthConfig['type']): string {
   }
 }
 
+/**
+ * 偏好链的工厂。**函数而不是 class 导出**：模块在 `available()` 里才按需加载，
+ * 让没装 ssh2 的机器在 import 阶段就炸掉是本末倒置。
+ *
+ * @param options 连接配置
+ * @returns 一条**尚未校验可用性**的驱动；能不能用要问它的 `available()`
+ */
 export function createSsh2Driver(options: SshConnectionOptions): SshDriver {
   return new Ssh2Driver(options)
 }

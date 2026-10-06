@@ -55,6 +55,14 @@ const WRAPPER_EXT = /\.(cmd|bat|ps1)$/i
  * 除了包装后缀，还检查「无扩展名但带 shebang」的脚本：在 Windows 上无扩展名的
  * 文件根本不会被当程序执行；在 POSIX 上若 PATH 里恰好有同名脚本，它会让「不过
  * shell」的 argv 语义失效。
+ *
+ * @param path 待检查的路径。**不检查它存不存在** —— 存在性由 resolveTool 用 X_OK 判，
+ *   这里只判形状，免得把「权限不足」误说成「这是个脚本」
+ * @param name 工具名（`ssh` / `sftp`…）。只用于错误消息，让用户知道该动哪个工具
+ * @returns **原样返回**同一个路径字符串。规范化相对路径请在调用前做完 ——
+ *   悄悄改写调用方给的路径会让日志里出现的命令与实际执行的不是一个
+ * @throws DpError `DP.SSH.TOOL_MISSING` 且带 hint：它是包装脚本或带 shebang 的脚本。
+ *   **不降级**成「换个工具试试」—— 找到了却不能用，与没找到是两种不同的配置问题
  */
 export function assertNativeExecutable(path: string, name: string): string {
   const isWrapper = WRAPPER_EXT.test(path)
@@ -83,6 +91,24 @@ function hasShebang(path: string): boolean {
   }
 }
 
+/**
+ * 在 PATH 里解析一个**原生可执行文件**。
+ *
+ * 自己走 PATH 而不靠 `spawn` 的解析：Windows 上我们 `shell: false`，
+ * spawn 不会去找 `.cmd`/`.bat`，但也**不会**告诉我们它跳过了什么 ——
+ * 于是「ssh 明明装了却连不上」会变成一条毫无线索的 ENOENT。
+ *
+ * 传入 env 而不是直接读 `process.env`：测试要能在不污染真实环境的前提下
+ * 构造一条假的 PATH。
+ *
+ * @param name 工具名。**含 `/` 或 `\` 时按路径处理**，不走 PATH 查找 ——
+ *   这样调用方可以给绝对路径，而 `PATH` 里的顺序不再对它有影响
+ * @param env 环境变量。只读 `PATH` / `Path`（Windows 大小写不敏感，两种拼法都认）
+ * @returns 第一个**能执行且是原生程序**的绝对路径；全部候选都不合格时返回 `null`。
+ *   `null` 表示「没找到」，而"找到了但不能用"会抛 DpError —— 两者必须能区分
+ * @throws DpError 候选中存在包装脚本 / 带 shebang 的脚本（见 {@link assertNativeExecutable}）。
+ *   读不动文件（权限不足）**不算**这种错，按"没找到"继续找下一个候选
+ */
 export function resolveTool(
   name: string,
   env: Readonly<Record<string, string | undefined>>,
@@ -127,6 +153,9 @@ const sshCandidates = (): readonly string[] => (process.platform === 'win32' ? [
  * 只 `child.kill()` 杀的是 ssh 本身；它拉起的 askpass / ssh-agent / ProxyJump
  * 子 ssh 会变成孤儿继续跑，在 Windows 上更明显（没有进程组概念）。
  * Windows 用 `taskkill /T /F`，POSIX 用进程组（spawn 时 detached:true）。
+ *
+ * @param pid 目标进程号。`undefined`（进程还没起来 / 已经退了）直接返回 ——
+ *   这不是错误，超时路径上它出现得太常见，为它抛错只会把真错误挤掉
  */
 export function killProcessTree(pid: number | undefined): void {
   if (pid === undefined) return
@@ -157,6 +186,15 @@ export function killProcessTree(pid: number | undefined): void {
 // 驱动
 // ------------------------------------------------------------
 
+/**
+ * 走系统 `ssh` 二进制的驱动。
+ *
+ * 它在偏好链里排第一只有一个理由，但它不可替代：**只有它能协商抗量子 KEX**。
+ *
+ * 构造期**不抛错**：找不到 ssh 或只找到包装脚本时把原因记下来，
+ * 由 `available()` 报出去。构造期抛错会让「这一条不可用、下一条可能可用」
+ * 没法表达 —— 偏好链还没开始就已经结束了。
+ */
 export class NativeSshDriver implements SshDriver {
   readonly kind: SshDriverKind = 'native-ssh'
   private readonly sshPath: string | null
@@ -504,6 +542,15 @@ export class NativeSshDriver implements SshDriver {
   }
 }
 
+/**
+ * 偏好链的工厂。**函数而不是 class 导出**：ssh2 走的是按需加载，
+ * 让调用方只在真正轮到那条驱动时才 import 它，
+ * 免得一个没装 ssh2 的机器在 import 阶段就炸掉。
+ *
+ * @param options 与偏好链选出来的那条相同的连接配置
+ * @returns 一条**尚未校验可用性**的驱动；能不能用要问它的 `available()`。
+ *   工厂不做任何 IO
+ */
 export function createNativeDriver(options: SshConnectionOptions): SshDriver {
   return new NativeSshDriver(options)
 }

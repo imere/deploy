@@ -66,6 +66,12 @@ export function quoteArgv(argv: readonly string[]): string {
  *
  * 换行一律**拒绝**而不是转义：换行在远端 shell 里是命令分隔符，
  * 而且任何 argv 元素里出现换行本身就说明上游拼接错了。
+ *
+ * @param argv 远端命令的 argv，已由调用方保证是**完整的**一条命令。
+ *   要管道或 `&&` 就传 `['sh', '-c', script]` —— 在这里把两三条命令塞进来，
+ *   等于把「这条脚本长什么样」的责任推给字符串拼接，而那一层已经不再有转义
+ * @returns 拼好的命令串，每个元素都过了 {@link quoteArg}
+ * @throws DpError 空 argv，或任一元素含换行 / `\r` / NUL（`DP.CONFIG.INVALID`）
  */
 export function buildRemoteCommand(argv: readonly string[]): string {
   if (argv.length === 0) {
@@ -91,6 +97,14 @@ export function buildRemoteCommand(argv: readonly string[]): string {
  * 这一点在 hint 里写明，不假装它是必然生效的。
  *
  * 键名只允许 POSIX 环境变量名那套字符；值里禁换行/NUL（原因同上）。
+ *
+ * 凭据**不走这条路**：`-o SetEnv=...` 的值会出现在本机进程的命令行里，
+ * 而本文件只接受普通环境变量，不为凭据提供任何入口。
+ *
+ * @param env 要设置的远端环境变量。遍历顺序即输出顺序，不排序也不去重 ——
+ *   重复的键原样发出，让 ssh 自己决定最后一个赢
+ * @returns `['-o', 'SetEnv=K=V', ...]` 形态的选项片段，可直接拼进 ssh argv
+ * @throws DpError 键名不符合 POSIX 命名，或值含换行 / `\r` / NUL
  */
 export function setEnvOptions(env: Readonly<Record<string, string>>): string[] {
   const out: string[] = []
@@ -180,6 +194,13 @@ function authOptions(kind: SshAuthKind, identitiesOnly: boolean): string[] {
  * 只有 accept-new / tofu 会带 `UserKnownHostsFile`，strict 走系统默认（那里已经有
  * 用户自己积累的信任），off 则钉到 `/dev/null` 让 ssh 完全不落盘 —— 配了不落盘，
  * 否则"关掉校验"会顺带把指纹写回用户的 known_hosts。
+ *
+ * @param mode 策略。四档全覆盖，switch 里没有 default 分支 ——
+ *   枚举新增一档而这里忘了写，TypeScript 会报错，这比运行时"安静地落到 strict"好
+ * @param userKnownHostsFile 隔离用的 known_hosts 路径。
+ *   `strict` 忽略它（信任用户自己积累的记录），`tofu` 不给就用 {@link defaultPinPath}，
+ *   `accept-new` 不给就让 ssh 写系统默认位置
+ * @returns ssh 选项片段，顺序固定（策略在前、路径在后），便于日志与断言
  */
 export function knownHostsOptions(
   mode: KnownHostsMode,
@@ -213,6 +234,9 @@ function knownHostsFileArgs(path: string | undefined): string[] {
  * tofu 模式的默认 pin 文件位置。放 `.local/state` 而不是 tmpdir —— pin 必须活过重启：
  * 放 tmpdir 的话每次重启都变成一台"第一次见"的主机，tofu 的不一致检测就整段失效。
  * XDG_STATE_HOME 与 HOME/USERPROFILE 都拿不到时退回 `/tmp`，那次部署的 pin 不跨重启。
+ *
+ * @returns 绝对路径。它**不保证目录存在** —— 创建目录要由调用方做，
+ *   因为这里被 argv.ts 调用时那条路径可能还没进过任何一次 IO 探测
  */
 export function defaultPinPath(): string {
   const stateHome = process.env.XDG_STATE_HOME ?? `${process.env.HOME ?? process.env.USERPROFILE ?? '/tmp'}/.local/state`
@@ -226,6 +250,12 @@ export function defaultPinPath(): string {
  * 是 OpenSSH 自己做的事：它把 host 之后的全部 argv 拼成一条远程命令字符串发过去
  * （远端由 sshd 交给用户 shell 解析）。这是唯一的边界 —— 想用管道/`&&` 就必须由
  * 调用方显式传 `['sh','-c', script]`，见 runner.ts。
+ *
+ * @param options 见 {@link SshArgvOptions}。**每个缺省都留白而不是补值** ——
+ *   端口不补 22、用户不补 root，这些空缺是 ssh_config 该说话的地方
+ * @returns argv 片段（**不含主机名**）：调用方负责把 host 放在命令之后、
+ *   `remoteArgv` 之前。放错位置的症状很隐蔽 —— ssh 会把主机名当成远端命令的一部分
+ * @throws DpError `hops` 与 `proxyJump` 同时给（多跳链有两个互相矛盾的来源）
  */
 export function buildSshArgv(options: SshArgvOptions): string[] {
   const argv: string[] = []
@@ -271,6 +301,12 @@ export function buildSshArgv(options: SshArgvOptions): string[] {
  * 改用它自己的本地用户名，而那台机器上的本地用户名往往根本不是我们想用的那个。
  * 所以「没给 user」必须表达成"不带前缀"（让 rsync 走它那条路），
  * 而不是拼一个空的 `user@`。
+ *
+ * @param host 纯主机名或 IP，**不含端口**（端口是独立的 `-p` 选项，
+ *   混进这里会连到一台同名但不同端口的机器上）
+ * @param user 登录用户。`undefined` **与空串同义**，都产出不带前缀的主机名 ——
+ *   空串同样表达「没给」，两种情况拼出同一个结果，免得调用方还得先判空
+ * @returns `user@host`，或只有 `host`
  */
 export function hostTarget(host: string, user?: string): string {
   return user === undefined || user === '' ? host : `${user}@${host}`

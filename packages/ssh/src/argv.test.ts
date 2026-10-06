@@ -400,7 +400,19 @@ describe('setEnvOptions', () => {
 
   it('非法变量名拒绝', () => {
     for (const bad of ['1A', 'A-B', 'A B', '', 'A.B']) {
-      assert.throws(() => setEnvOptions({ [bad]: 'v' }), bad)
+      // 第二个参数不能是 bad 本身：字符串在 assert.throws 里只当失败消息，
+      // 错误校验整个是空的 —— 那就退化成「抛了任何东西都算过」。
+      assert.throws(
+        () => setEnvOptions({ [bad]: 'v' }),
+        (e: unknown) => {
+          assert.ok(e instanceof DpError, `期望 DpError，实际 ${String(e)}`)
+          assert.equal(e.code, 'DP.CONFIG.INVALID')
+          // 消息必须回显被拒的名字，才能分得开是「变量名非法」而不是上面那条「值含换行」
+          assert.ok(e.message.includes(JSON.stringify(bad)), `${e.message} 未回显 ${bad}`)
+          return true
+        },
+        bad,
+      )
     }
   })
 

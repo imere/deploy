@@ -15,6 +15,13 @@ import { quoteArg, quoteArgv } from './argv.js'
 
 export type { BecomeConfig }
 
+/**
+ * 包装阶段的旁路开关。**只影响「能不能产出这条命令」，不影响命令长什么样** ——
+ * 真正的密码投喂发生在运行期（askpass / pty），那是驱动的事。
+ *
+ * 把这两件事拆开是为了让本文件保持纯函数：一旦包装阶段去管怎么拿到密码，
+ * 它就必须 IO，而 IO 一进来就没法 100% 单测。
+ */
 export interface WrapOptions {
   /** 替换默认的 POSIX 转义器。测试与自定义 shell 可以换掉它 */
   readonly shellEscape?: (arg: string) => string
@@ -93,6 +100,15 @@ function splitShellWords(input: string): string[] {
  *  - `doas`    → `doas -n [-u user] -- <argv...>`
  *  - `su`      → `su <user> [-s <shell>] -c <escaped script>`
  *  - `custom`  → 模板里 `${cmd}` 替换为**已转义的整条命令**，再按 shell 引号语义切 argv
+ *
+ * @param argv 要提权的命令，已在 `@dp/ssh` 内部过完路径校验。空数组报错而不是返回空 —
+ *   一个什么都不做的"提权成功"会让上层以为动作已经发生
+ * @param become 提权方式。`sudo` 分支会读它的 `nonInteractive`，
+ *   为 false 时必须同时给 `opts.passwordChannel`，否则抛错而不是产出一个会等输入的命令
+ * @param opts 见 {@link WrapOptions}。不给时用 POSIX 转义器 + 判定「没有密码通道」
+ * @returns 新的 argv；`none` 时**原样返回入参**（不复制、不重排），
+ *   其余分支的产出形状见上面的五种列表。空数组永不返回
+ * @throws DpError 空 argv、模板缺 `${cmd}` 占位、或要求交互却没有密码通道
  */
 export function wrapCommand(
   argv: readonly string[],
@@ -164,7 +180,16 @@ export function wrapCommand(
 export const ELEVATE_FAILED_HINT =
   '在目标机给这几条命令加 sudoers NOPASSWD 白名单（实测 `sudo -n` 可用），或改用 become.type=none 以普通用户身份部署到可写目录。我们不会替你改 /etc/sudoers.d/ —— 授权必须由运维显式完成'
 
-/** 把远端 `sudo -n` 的原话转成安全的、可进 message 的一句话 */
+/**
+ * 把远端 `sudo -n` 的原话转成安全的、可进 message 的一句话
+ *
+ * 只取**首个非空行**并截到 200 字符：sudo 的输出常在后面跟着 sudoers 的
+ * 规则回显与主机名，把整段拼进 message 会既难读又可能带出不该进日志的环境信息。
+ *
+ * @param stderr 远端 stderr 原文。会先按行切开，容忍 `\n` / `\r\n` 混用
+ * @returns 首行原文（已 trim、已截断）；全部为空行时给一句显式的「没有输出」，
+ *   而不是空串 —— 空串会让错误消息看起来像漏了信息，读者无法区分「没输出」与「代码没写」
+ */
 export function summarizeElevateFailure(stderr: string): string {
   const first = stderr
     .split(/\r?\n/)

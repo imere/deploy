@@ -54,15 +54,31 @@ const TOOLS_TO_PROBE = [
  */
 const DEFAULT_WRITE_PATHS = [...POSIX_WRITE_CANDIDATES, '/tmp'] as const
 
+/**
+ * 探测的开关。**全可选、且都有对应的"默认值来源"**：
+ * 工具表与候选目录见本文件顶部，环境变量由 `resolveTimeoutMs` 兜底，
+ * 没有任何一项需要调用方自己算一遍。
+ */
 export interface ProbeOptions {
+  /** 要探测的工具名。给空数组则**一个都不探**，而不是退回默认表 —— 想省往返的调用方要能说清自己在省什么 */
   readonly tools?: readonly string[]
+  /** 探测可写性的候选目录。与本机那份共享同一张表，只多一个 `/tmp` */
   readonly writeProbePaths?: readonly string[]
+  /** 单次探测的毫秒上限。不给则走 `resolveTimeoutMs` 的三级回落 */
   readonly timeoutMs?: number
+  /** 目标机标识。**只进 facts 与日志，不参与任何判定** */
   readonly host: string
-  /** sudo 探测的目标用户；不给则用远端自己的 `id -un` */
+  /** sudo 探测的目标用户；不给则用远端自己的 `id -un`（不猜 root） */
   readonly sudoAsUser?: string
 }
 
+/**
+ * 探测结果。
+ *
+ * `probeNotes` 与 `facts` 同等重要：facts 里那些 `unknown` / `null` 是**保守默认值**，
+ * 而 note 是"这个默认值是怎么来的"。少了 note，一份全是 unknown 的 facts
+ * 与一台真的什么都没装的机器长得一模一样，两者的处置完全不同。
+ */
 export interface ProbeResult {
   readonly facts: Facts
   /** 哪些没探到、为什么。plan 必须能打印它 */
@@ -91,6 +107,22 @@ function tagFields(stdout: string, tag: string): readonly string[] {
   return out
 }
 
+/**
+ * 一次远端事实探测。**一条复合脚本拿完所有字段** ——
+ * 每次 exec 都要穿整条连接（多跳时每多一跳就多一次往返），
+ * 把 20 次往返合并成 1 次，比把脚本写得多漂亮都值。
+ *
+ * 探不到的字段一律取**保守默认值 + 一条 note**，不抛错：
+ * 探测失败不该让整个部署停下来 —— 有些部署（只读检查、纯用户态）
+ * 在 facts 不全的情况下也能跑，而把它们一起拦掉是过度反应。
+ * 真正的硬要求由 `makePlan()` 在 facts 之上判定，那才是该报错的地方。
+ *
+ * @param driver 已建立的驱动。**只用它 exec，不开第二条连接** ——
+ *   探测用的凭据若与实际执行用的那条不是同一条，探出来的可写性就说明不了任何事
+ * @param options 见 {@link ProbeOptions}
+ * @returns 事实与全部说明。`facts` 里每个保守默认值都必然在 `probeNotes` 里有一条对应记录，
+ *   两者不是各自独立的产出
+ */
 export async function probeFacts(driver: SshDriver, options: ProbeOptions): Promise<ProbeResult> {
   const notes: string[] = []
   const timeoutMs = resolveTimeoutMs(options.timeoutMs)
@@ -337,7 +369,12 @@ async function probeSudoAllowlist(
 // 提权实证
 // ------------------------------------------------------------
 
+/**
+ * 提权的实证结论。`available: false` **不是一个错误**，是一个可以被 plan 用来
+ * 改方案的正常结论 —— 部署到用户可写目录本来就不需要提权。
+ */
 export interface CanElevateResult {
+  /** 能不能真的提权。由远端跑一次 `id -un` 得出，不由配置声明 */
   readonly available: boolean
   /** 不可用时是失败原因（远端原话首行，脱敏后）；可用时是实测依据 */
   readonly reason: string
@@ -350,6 +387,17 @@ export interface CanElevateResult {
  *
  * 这正是的教训：`command -v su` 有，但它缺 suid 位，
  * 实际调用会失败。所以每种 become 都要真跑一次。
+ *
+ * 探测时**强制** `nonInteractive`：这一步自己绝不能是第一个去等密码的地方 ——
+ * 它跑在 plan 之前，那时候还没有任何机制能给它喂密码，也没人看着。
+ *
+ * @param driver 已建立的驱动
+ * @param become 配置里的提权方式。`none` 不做任何提权，只跑一次 `id -un`
+ *   确认"普通用户身份确实可用" —— 连这都失败的话，后面每一次 exec 都会失败
+ * @param options 只留超时。**没有**"允许交互"这类开关：需要密码的探测
+ *   在这个位置永远是错的
+ * @returns 结论。`reason` 在可用与不可用时都非空：可用时它记录的是"实证通过 + 拿到了什么身份"，
+ *   这句话会进报告，读者需要能复核而不是只能看到一个 true
  */
 export async function canElevate(
   driver: SshDriver,
