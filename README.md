@@ -179,9 +179,10 @@ flowchart TB
 
 ## 质量门禁
 
-**当前 `pnpm verify` = `build` + `test` + `test:scripts` + 七项静态门禁**（见根 `package.json`）。七项按
-`dead-code` → `check-imports` → `check-tests` → `check-jsdoc` → `check-coverage` → `smoke` → `accept-gates` 依次串起，
-单独跑它们的那一段叫 `verify:gates`。`test:scripts` 跑的是**门禁脚本自己的测试**（`scripts/*.test.mjs`），
+**当前 `pnpm verify` = `build` + `test` + `test:scripts` + 六项静态门禁**（见根 `package.json`）。六项按
+`dead-code` → `check-imports` → `check-tests` → `check-jsdoc` → `check-coverage` → `smoke` 依次串起，
+单独跑它们的那一段叫 `verify:gates`。第七项门禁自检（`accept-gates.mjs`）**不在这条链里**，
+是 `pnpm run verify:selfcheck`、由 CI 单独一步跑 —— 理由见下表那一行。`test:scripts` 跑的是**门禁脚本自己的测试**（`scripts/*.test.mjs`），
 与 `packages` 的测试分开跑 —— 混进同一条命令会让两份 lcov 互相覆盖，门禁读到的就不是全量覆盖率了；
 它不写 `lcov`，也就不参与覆盖率统计。`check-coverage` 只读 `test` 产出的 `build/coverage/lcov.info`，
 `smoke` 只读 `build/` 产物 —— 排在 `build` / `test` 之前跑它们，拿到的是编排错误而不是质量信号。
@@ -199,7 +200,7 @@ CI 只跑这一条 `pnpm verify`，不挑着跑。下面这张表是这套门禁
 | `smoke` | 发布产物能被真实 import | ✅ `scripts/smoke.mjs`，12 个包通过；凭据只在非测试产物里硬失败 |
 | JSDoc | 每个函数都要中文描述 + 逐个 `@param` + `@returns`，描述写「为什么」 | ✅ `scripts/check-jsdoc.mjs`，465 个公共 API 符号缺口 0 |
 | 假测试 | 弱断言 / 被忽略的校验参数要能被扫出来；**恒等断言**（两个实参是同一表达式的拷贝、永不失败）与零断言同级判 P0 | ✅ `scripts/check-tests.mjs`，当前 P0 致命 0 |
-| 门禁自检 | 给每个门禁注入一次它理应抓到的违规，对照必须绿、注入必须红 —— 否则「全绿」可能是它根本抓不到东西 | ✅ `scripts/accept-gates.mjs`，9 组注入全过（只改 `.tmp/gate-mut/` 下的副本） |
+| 门禁自检 | 给每个门禁注入一次它理应抓到的违规，对照必须绿、注入必须红 —— 否则「全绿」可能是它根本抓不到东西 | ✅ `scripts/accept-gates.mjs`，9 组注入全过（只改 `.tmp/gate-mut/` 下的副本）；**单独一步跑**，不在 `pnpm verify` 里 —— 它靠派生子进程跑副本里的六个门禁，而 Windows 上经 pnpm 链条派子进程会 EBUSY（直接 `node scripts/accept-gates.mjs` 没问题）。留在 `verify` 里会让本地那条命令恒红在最后一项，而一个需要人判断「这次红是不是环境」的门禁就已经不是门禁了。Linux runner 无此限制，CI 照跑 |
 | 变异测试 | nightly 跑：故意改坏源码，红 = 真守着，绿 = 形同虚设 | ⚠️ `scripts/mutate.mjs` 已落地（只改 `.tmp/` 下的副本，不碰真实产物），**未接进 `verify`** —— 它验的是「测试有没有守住源码」，与上一行验的「门禁有没有守住仓库」不是一回事，两者都要有 |
 | 覆盖率 | 纯逻辑包（`schema` / `core` / `template`）**三项 100%**；IO 层靠契约测试与集成，不追数字 | ✅ `scripts/check-coverage.mjs`，三个受门禁包均达 100% |
 | 发版 | Conventional Commits，scope 用包名；版本由 changesets 推导 | ❌ changesets 未接入，版本号手工维护 |

@@ -40,7 +40,14 @@ jobs:
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
 
-    # 门禁顺序在根 package.json 里：build → test → 六项静态检查。
+    # 门禁顺序在根 package.json 里：build → test → 门禁自测 → 六项静态检查。
     # 不在这里挑着跑 —— 门禁的价值在于全绿，拆开单跑某几项等于把编排责任搬到 YAML 里再分叉一次。
     - name: Verify
       run: pnpm verify
+
+    # 门禁自检单独一步，不并进 pnpm verify：它靠派生子进程跑副本里的六个门禁，
+    # 而 Windows 上经 pnpm 链条派子进程会 EBUSY（直接 node 该脚本没问题，实测 9/9 全过），
+    # 留在 verify 里会让本地那条命令恒红在最后一项 —— 一个需要人判断「这次红是不是环境」
+    # 的门禁，就已经不是门禁了。Linux runner 没有这个限制，所以在 CI 里照跑。
+    - name: 门禁自检（注入违规看它是否还拦得住）
+      run: pnpm run verify:selfcheck
