@@ -190,6 +190,11 @@ function nginxAutoConfigError(projectName: string, detected: DetectResult): DpEr
  * 探测出来的事实），nginx 不行（server 块的内容无处可推），static 不需要
  * （它本来就是默认目标，写出来是噪声）。三者统一成「一律装配」或「一律报错」
  * 都会在某一种上编造用户意图。
+ *
+ * @param input 全部事实由调用方注入（源条目、已存在目录、scripts），本函数不 stat、不读盘 ——
+ *   一旦它自己去看文件系统，「同一份源清单推导出同一份配置」这条断言就没法在测试里成立
+ * @returns 内存中的配置 + 探测结论 + 逐条理由
+ * @throws DP.CONFIG.INVALID 探测到 nginx（server 块无从推导）或目标类型不在零配置支持范围内
  */
 export function deriveZeroConfig(input: ZeroConfigInput): ZeroConfigResult {
   const root = pickSourceRoot(input.projectName, input.existingDirs ?? [])

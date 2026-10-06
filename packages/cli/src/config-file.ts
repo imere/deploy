@@ -30,8 +30,15 @@ export const CONFIG_FILENAMES: readonly string[] = [
  */
 export type ConfigSource = 'explicit' | 'env' | 'discovered'
 
+/**
+ * 配置文件的位置，外加它是被哪一级选中的。
+ *
+ * 为什么要带 `source` 而不只给一个路径：三级来源里「显式 --config」与「镜像里烤进去的
+ * discovered」在盘上长得一模一样，只报路径的话，用户看到配置不生效时无从判断该改命令行
+ * 还是改镜像。来源级别让报告能直接说「这次是谁定的」。
+ */
 export interface ConfigLocation {
-  /** 绝对路径 */
+  /** 绝对路径。相对路径在这里就该已经解完，下游不必再拼接 cwd */
   readonly path: string
   /** 它是被哪一级选中的 */
   readonly source: ConfigSource
@@ -284,6 +291,13 @@ export interface LoadConfigOptions {
   readonly skipDiscovery?: boolean
 }
 
+/**
+ * 一份已加载并过校验的配置，连同伴生的出处信息。
+ *
+ * 为什么配置与出处要一起返回而不是只返回配置：下游写报告、写 `dp config show` 都要说清
+ * 「这次用的是哪个文件、谁定的」，而等到了下游再回头找，出处已经丢了（尤其 discovered
+ * 那一级，路径是搜索出来的，不记下来就再也复现不出同一个结果）。
+ */
 export interface LoadedConfig {
   /** 已过 schema 校验，且 `release.root` 已绝对化（`source.root` 保持原样） */
   readonly config: Config
