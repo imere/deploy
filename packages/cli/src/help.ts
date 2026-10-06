@@ -8,6 +8,12 @@
  */
 import { EXIT_CODE_ROWS } from './output.js'
 
+/**
+ * 一条命令的完整说明。**数据即帮助文本**：`dp help <cmd>` 全部由它拼出来。
+ *
+ * 把 `implemented` 放进同一份表而不是另列一张「已实现」清单：两张表必然会漂移，
+ * 表现为 `dp help` 里还列着一个会立刻报「还没接入」的命令。
+ */
 export interface CommandDoc {
   readonly name: string
   /** 一句话用途 */
@@ -41,6 +47,13 @@ const GLOBAL_FLAGS: readonly (readonly [string, string])[] = [
   ['-V, --version', '打印版本'],
 ]
 
+/**
+ * 命令表，**顺序即帮助里的显示顺序** —— 按「读 → 查 → 动 → 退」排，
+ * 让新用户从上往下走就能覆盖日常用法。
+ *
+ * 增删命令只改这里：命令名、用法、开关白名单都从这张表派生，
+ * 单独再维护一份清单的结果是三处各说各话。
+ */
 export const COMMANDS: readonly CommandDoc[] = [
   {
     name: 'plan',
@@ -224,7 +237,17 @@ export function findCommand(name: string): CommandDoc | undefined {
   return COMMANDS.find((c) => c.name === name)
 }
 
-/** 最相近命令建议。纯函数：编辑距离足够，不需要引任何库 */
+/**
+ * Levenshtein 距离。**纯函数**：命令名都很短（≤ 10 字符），
+ * 引一个库换来的只是几百 KB 依赖，而这里的匹配场景「差一个字母」占绝大多数。
+ *
+ * 代价是 O(rows×cols) 的完整矩阵：命令表是固定的十几行，最长的一次调用也在
+ * 微秒级，不需要为「理论上 O(min) 空间」去引入更绕的实现。
+ *
+ * @param a 第一个串，**不**要求与 b 同长（不补齐，差异体现在距离里）
+ * @param b 第二个串
+ * @returns 令两串相同所需的最少增/删/改次数；空串对非空串返回对方长度
+ */
 export function editDistance(a: string, b: string): number {
   const rows = a.length
   const cols = b.length
@@ -243,6 +266,14 @@ export function editDistance(a: string, b: string): number {
 /**
  * 未找到命令时给最相近的那个。阈值取「长度的一半取整」—— 再远就没有参考价值了，
  * 硬凑一个不像的建议比不给更糟（用户会以为那就是对的）。
+ *
+ * 并列取**先出现的那个**：命令表是刻意排过顺序的（读 → 查 → 动 → 退），
+ * 顺带也把「没给建议时用户看到的最后一个命令」定了下来 —— 而那恰恰是
+ * 拼错时最可能的原意。
+ *
+ * @param name 用户输入的命令名，原样比较（不 trim、不小写化：`Dp plan` 是两处错）
+ * @param candidates 候选表，默认全体命令名
+ * @returns 最相近的命令名；没有在阈值内则为 undefined（**不**返回次优凑数）
  */
 export function suggestCommand(name: string, candidates: readonly string[] = COMMAND_NAMES): string | undefined {
   let best: string | undefined
@@ -267,6 +298,15 @@ function renderTable(rows: readonly (readonly [string, string])[]): string[] {
   return rows.map(([left, right]) => `  ${pad(left, width)}  ${right}`)
 }
 
+/**
+ * 根帮助。**纯函数**，版本号从参数进 —— 读 package.json 是 IO，会毁掉这层的可测性。
+ *
+ * 已实现与未实现的命令**都列**：藏起未实现的会让用户以为命令不存在，
+ * 而 `dp <未实现>` 会明确告诉他「还没接入」—— 两种信息的价值不同，缺哪种都算说谎。
+ *
+ * @param version 打进第一行的版本号字符串
+ * @returns 完整帮助文本，含退出码表与配置发现优先级
+ */
 export function rootHelp(version: string): string {
   const done = COMMANDS.filter((c) => c.implemented)
   const todo = COMMANDS.filter((c) => !c.implemented)
@@ -302,6 +342,15 @@ export function rootHelp(version: string): string {
   ].join('\n')
 }
 
+/**
+ * 单个命令的帮助。同样是纯函数。
+ *
+ * 全局开关在这里**重复一遍**而不是让人去翻根帮助：agent 读单命令帮助时
+ * 不会去执行第二条命令，而漏掉开关表等于让它只能靠猜参数。
+ *
+ * @param doc 来自 COMMANDS 的一项；未收录的命令名不会走到这里
+ * @returns 该命令的完整帮助文本
+ */
 export function commandHelp(doc: CommandDoc): string {
   const lines = [
     `dp ${doc.name} —— ${doc.summary}`,
@@ -328,6 +377,13 @@ export function commandHelp(doc: CommandDoc): string {
   return lines.join('\n')
 }
 
+/**
+ * 未知命令的错误文本。建议给不出来时**不写「你是不是想用」那一行** ——
+ * 空着比凑一个不像的命令强，用户看到错的建议会直接去试它。
+ *
+ * @param name 用户输入的原始命令名
+ * @returns 多行文本，由 main() 包成 CliUsageError（退出码 2）
+ */
 export function unknownCommandMessage(name: string): string {
   const suggestion = suggestCommand(name)
   const lines = [`未知命令：${name}`]
@@ -339,6 +395,15 @@ export function unknownCommandMessage(name: string): string {
   return lines.join('\n')
 }
 
+/**
+ * 已登记但未接入的命令的提示。
+ *
+ * 返回文本而**不**直接退出：退出码由 main() 决定（`EXIT_FAILURE`），
+ * 这样「这条命令存在但没接线」与「命令名不存在」能走同一条错误渲染路径。
+ *
+ * @param doc `implemented === false` 的那条命令记录
+ * @returns 说明性文本；明确告知不会静默成功
+ */
 export function notImplementedMessage(doc: CommandDoc): string {
   return [
     `dp ${doc.name} 还没接入（后续回合实现）。`,

@@ -99,10 +99,14 @@ describe('targets · --all / --env', () => {
 
 // assert.throws/rejects 在本仓的 @types/node 下返回 void，拿不到错误对象。
 // 统一走这两个 helper：类型上直接是 DpError。
-function caughtThrows(fn: () => unknown, _ctor?: unknown): DpError {
+function caughtThrows(fn: () => unknown, ctor?: Function): DpError {
   try {
     fn()
   } catch (err) {
+    // 第二个参数必须真的校验：忽略它就等于「只要抛了任何东西就算过」。
+    if (ctor !== undefined) {
+      assert.ok(err instanceof ctor, `期望抛 ${ctor.name}，实际是 ${(err as Error)?.name}: ${String(err)}`)
+    }
     return err as DpError
   }
   throw new Error('期望抛错，但没有')

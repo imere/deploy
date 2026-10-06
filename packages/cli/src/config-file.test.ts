@@ -260,7 +260,9 @@ describe('config-file · 端到端发现（真实 IO）', () => {
       await fs.writeFile(join(dir, 'deploy.config.js'), `export default ${JSON.stringify(VALID)}`, 'utf8')
       const loaded = await loadConfig({ cwd: dir, env: {} })
       assert.equal(loaded.source, 'discovered')
-      assert.ok(loaded.config.projects['web'])
+      // 只断非空的话，`export default {}` 也能过 —— 内容必须和写进去的 VALID 一致
+      assert.deepEqual(loaded.config.projects['web'], { source: { root: './dist' } })
+      assert.equal(loaded.config.hosts?.['local']?.local, true)
     })
   })
 })

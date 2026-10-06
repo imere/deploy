@@ -22,6 +22,12 @@ export const CONFIG_FILENAMES: readonly string[] = [
   'deploy.config.json',
 ]
 
+/**
+ * 生效配置的来源。三态而不是布尔 `explicit`：
+ * 「用户显式指定的」与「环境里继承来的」在用户心里的份量不同 ——
+ * 后者常常是 CI 镜像里烤进去的，用户根本没意识到它存在。所以这个值会进
+ * 报告与帮助里，让人能看出「这次到底是谁定的」。
+ */
 export type ConfigSource = 'explicit' | 'env' | 'discovered'
 
 export interface ConfigLocation {
@@ -35,8 +41,22 @@ export interface ConfigLocation {
 // 纯逻辑：扩展名 → 加载方式
 // ============================================================
 
+/**
+ * 两种加载方式，判据只有扩展名。
+ *
+ * 为什么不看内容：`deploy.config.js` 里写 JSON 是合法的（很多人就这么干），
+ * 而 `.json` 文件里带注释则不是。按内容判会让同一个文件在不同 Node 版本上
+ * 走不同分支，而分支差异体现在「报错来自 JSON.parse 还是 import」上 ——
+ * 用户看到的是两条毫不相干的错误，却实际是同一个配置问题。
+ */
 export type ConfigLoaderKind = 'json' | 'module'
 
+/**
+ * 扩展名 → 加载方式。**纯函数**。
+ *
+ * @param file 配置文件路径，不要求存在、大小写敏感
+ * @returns `.json` 结尾（含 `.JSON` 这类写法不算）走 json，其余一律 module
+ */
 export function loaderKindFor(file: string): ConfigLoaderKind {
   return file.endsWith('.json') ? 'json' : 'module'
 }
@@ -45,6 +65,13 @@ export function loaderKindFor(file: string): ConfigLoaderKind {
 // 纯逻辑：优先级判定
 // ============================================================
 
+/**
+ * 优先级判定的全部输入。
+ *
+ * 三个来源各占一个字段而不是收成数组：数组会逼调用方自己排序，而
+ * 「谁在前」是这个函数唯一的业务事实 —— 写成顺序依赖数组，某个调用方
+ * 少传一项时优先级就悄悄变了，而编译期毫无提示。
+ */
 export interface ResolveConfigInput {
   /** `-c/--config` 的原样值 */
   readonly explicit?: string
@@ -62,6 +89,14 @@ export interface ResolveConfigInput {
  * 冲突只在「显式指定」与「自动发现」之间判定：`-c` 存在时用户已经明确表达了
  * 意图，自动发现到的另一个文件不该把它变成错误 —— 但两者**不是同一个文件**时
  * 必须报出来，否则用户会以为在部署 A。
+ *
+ * `DP_CONFIG` 不参与冲突判定：它是环境级的隐式配置，本来就可能与仓库里那份
+ * 指向不同环境，把它变成硬错误会在 CI 里拦住大量本来正确的运行。
+ *
+ * @param input 三个来源 + 解析相对路径用的基准目录
+ * @returns 选中的绝对路径与来源；三者皆无时为 undefined（**不**抛错 ——
+ *   「没找到配置」的错误要由调用方给出，因为那里才知道该提示哪几处候选）
+ * @throws DpError `DP.CONFIG.INVALID` 显式指定与自动发现指向不同文件
  */
 export function resolveConfigPath(input: ResolveConfigInput): ConfigLocation | undefined {
   const { cwd, discovered, envValue, explicit } = input
@@ -99,6 +134,13 @@ function samePath(a: string, b: string): boolean {
 /**
  * 从 cwd 向上冒泡找配置文件，**到 git 根为止**（再往上就是仓库外的家目录，
  * 在那里找到的配置几乎一定是用户搞错了）。
+ *
+ * 每层内部按 `CONFIG_FILENAMES` 的顺序挑，不做「哪个更新」的比较 ——
+ * 时间戳比较在 checkout、缓存恢复、容器分层拷贝之后都不再代表用户的意图。
+ *
+ * @param cwd 起点目录，可以是相对路径
+ * @returns 第一个命中的**绝对**路径；一路到文件系统根都没找到则为 undefined
+ *   （不抛错：还没到能区分「没配」与「配错了」的时候）
  */
 export function findConfigUpwards(cwd: string): string | undefined {
   let dir = resolvePath(cwd)
@@ -143,6 +185,13 @@ function notFoundError(cwd: string): DpError {
  * `.ts` 能被 Node 24 原生加载（type stripping），但**只在它是纯 ESM 且不含
  * 需要擦除的类型语法之外的东西**时才成立；失败信息要指向可执行的下一步，
  * 而不是把 node 的原始栈糊给用户。
+ *
+ * 只做**加载**，不校验也不归一化：校验错误要带配置内的字段路径（`projects.web.…`），
+ * 而这里还没有 sourcePath 之外的上下文；两者分开后，校验可以纯函数化。
+ *
+ * @param path 配置文件的绝对路径
+ * @returns 模块的 default 导出；`module.exports = {...}` 形态时返回整个 module 对象
+ * @throws DpError 读文件失败 / JSON 语法错 / 模块加载失败，三者的 hint 各自指向不同的修复动作
  */
 export async function loadConfigFile(path: string): Promise<unknown> {
   if (loaderKindFor(path) === 'json') {
@@ -193,6 +242,14 @@ function messageOf(err: unknown): string {
  * 走 @dp/schema 的 configSchema。schema 抛的 DpError 已经带 `path`（形如
  * `config.projects.web.source.root`），直接透传即可 —— 不在这里二次包装，
  * 否则用户会看到两层 message 且丢掉最精确的那个路径。
+ *
+ * **纯函数**（除抛错外无副作用）：默认值在这里被填上，所以下游拿到的
+ * 一定是归一化形态，不必再各自判 undefined。
+ *
+ * @param raw loadConfigFile 的原样产物，不要求是对象
+ * @param sourcePath 配置文件路径，仅在 schema 没能给出更精确的字段路径时兜底
+ * @returns 通过校验的配置；带 schema 的默认值，release.root **未**绝对化
+ * @throws DpError 保留 schema 的 code 与 path
  */
 export function validateConfig(raw: unknown, sourcePath: string): Config {
   try {
@@ -215,6 +272,10 @@ export function validateConfig(raw: unknown, sourcePath: string): Config {
 // 组装：发现 + 加载 + 校验
 // ============================================================
 
+/**
+ * 发现 + 加载 + 校验的输入。`env` 可注入是为了让「环境里烤着 DP_CONFIG」
+ * 这条路径能被单测覆盖，而不真的去改 process.env（改了会污染同进程里的其他测试）。
+ */
 export interface LoadConfigOptions {
   readonly cwd: string
   readonly explicit?: string
@@ -224,11 +285,23 @@ export interface LoadConfigOptions {
 }
 
 export interface LoadedConfig {
+  /** 已过 schema 校验，且 `release.root` 已绝对化（`source.root` 保持原样） */
   readonly config: Config
+  /** 绝对路径，与 `config` 的来源同一个文件 */
   readonly path: string
   readonly source: ConfigSource
 }
 
+/**
+ * 一次到位：定来源 → 读文件 → 校验 → 归一化 release.root。**这里是 config-file 里唯一的编排点。**
+ *
+ * 顺序上刻意把「存在性检查」放在「加载」之前：让用户先看到「文件不存在」，
+ * 而不是拿到一段 import 失败栈。两者都是错，但后者看不出是自己路径打错了。
+ *
+ * @param options cwd 必给，其余按需
+ * @returns 归一化后的配置及其来源；`release.root` 已相对 cwd 绝对化
+ * @throws DpError 任一来源指向不存在的文件、两处来源冲突、schema 校验不过
+ */
 export async function loadConfig(options: LoadConfigOptions): Promise<LoadedConfig> {
   const env = options.env ?? process.env
   const explicit = options.explicit
@@ -306,7 +379,17 @@ function withAbsoluteReleaseRoots(config: Config, cwd: string): Config {
   return { ...config, projects }
 }
 
-/** `--config` 的相对路径解析：只在 index.ts 用，避免各处各写一遍 isAbsolute 判断 */
+/**
+ * `--config` 的相对路径解析：只在 index.ts 用，避免各处各写一遍 isAbsolute 判断。
+ *
+ * **不做展开**（`~`、环境变量都不认）：命令行里的路径是用户敲进来的字面量，
+ * 而 shell 在多数情况下已经展开过一次；dp 再展开一次会让「配置文件里写的相对
+ * 路径是相对谁」这个问题在两个不同基准之间漂移。
+ *
+ * @param p 用户写的路径，可以是绝对或相对
+ * @param cwd 相对路径的基准目录
+ * @returns 绝对路径；已是绝对的原样返回（不做归一化，`..` 保留）
+ */
 export function absolutize(p: string, cwd: string): string {
   return isAbsolute(p) ? p : resolvePath(cwd, p)
 }

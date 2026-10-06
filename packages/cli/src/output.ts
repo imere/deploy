@@ -31,13 +31,26 @@ import { isUsageError } from './args.js'
  * 看 code，别只看 exit code。
  */
 export const EXIT_OK = 0
+/**
+ * 未知错误 / 部署失败（已完整回滚）共用 1。
+ *
+ * 刻意不给「未知错误」单独一码：编一个新码意味着 CI 里要为一个没人能修的分类
+ * 专门配处置动作，而它的实际处置与部署失败一样 —— 看日志、修输入、重跑。
+ */
 export const EXIT_FAILURE = 1
+/** 与 EXIT_VERIFY_FAILED 同为 2：两者对 CI 都是「先改输入再重跑」 */
 export const EXIT_USAGE = 2
 /** 验证失败且已回滚。与 EXIT_USAGE 同码，见上方说明 */
 export const EXIT_VERIFY_FAILED = 2
+/** 配置错：用户改了配置重跑就能好，与机器状态无关 */
 export const EXIT_CONFIG = 3
+/** 缺依赖：重跑无用，要装东西 / 换驱动 / 改配置里的传输链 */
 export const EXIT_MISSING_DEPENDENCY = 4
 
+/**
+ * 退出码 → 人话。**help.ts 引用这一份**，不另抄：
+ * 退出码表在帮助里出现两次的话，用户会拿到两份可能不一致的说法。
+ */
 export const EXIT_CODE_ROWS: readonly (readonly [number, string])[] = [
   [EXIT_OK, '成功'],
   [EXIT_FAILURE, '失败（未知错误，或需要 --verbose 看细节）'],
@@ -46,7 +59,16 @@ export const EXIT_CODE_ROWS: readonly (readonly [number, string])[] = [
   [EXIT_MISSING_DEPENDENCY, '环境缺依赖：ssh 驱动不可用、工具缺失、传输链全失败'],
 ]
 
-/** 纯函数：一条错误 → 退出码。CI 只认这个契约，所以它不接受任何外部状态。 */
+/**
+ * 一条错误 → 退出码。纯函数：CI 只认这个契约，所以它不接受任何外部状态。
+ *
+ * 判据是**错误码**而不是异常类型：`DpError` 的 code 是全仓登记的封闭联合，
+ * 而按类型分派的话，同一个 code 从不同包抛出就会得到不同退出码。
+ *
+ * @param err 任意抛出物；非 DpError 一律退 1（不猜 —— `undefined is not a
+ *   function` 这类信息在退出码上没有可区分的语义）
+ * @returns `EXIT_*` 之一
+ */
 export function exitCodeFor(err: unknown): number {
   if (err instanceof DpError) {
     if (isUsageError(err)) return EXIT_USAGE
@@ -88,6 +110,11 @@ export function exitCodeFor(err: unknown): number {
 // 错误渲染
 // ============================================================
 
+/**
+ * 错误的标准形态。**结构化**而不是一段拼好的字符串：
+ * JSON 输出与 pretty 输出消费的是同一份数据，pretty 那边加行、裁字段
+ * 都不会让 JSON 侧漂移。
+ */
 export interface ErrorReport {
   readonly code: string
   readonly message: string
@@ -101,6 +128,16 @@ export interface ErrorReport {
 /** 未知错误也要给一行可执行建议 —— 裸 "undefined is not a function" 对谁都没用。 */
 const GENERIC_HINT = '加 --verbose 看完整 stack；若确认是 dp 的问题，请连同命令与配置一起报 issue'
 
+/**
+ * 异常 → ErrorReport。pretty 与 json 两种渲染的唯一共同入口。
+ *
+ * 非 DpError 一律给 `DP.CLI.INTERNAL` 加一句可执行建议：裸 message
+ * （比如 `undefined is not a function`）对谁都没用，而 code 这个字段
+ * 存在的意义就是让调用方有稳定的字符串可匹配。
+ *
+ * @param err 任意抛出物，非 Error 也接受（`String(err)` 兜底）
+ * @returns 报告；`stack` 永远不填（栈是渲染期按 --verbose 现取的）
+ */
 export function describeError(err: unknown): ErrorReport {
   if (err instanceof DpError) {
     const report: ErrorReport = {
@@ -116,6 +153,16 @@ export function describeError(err: unknown): ErrorReport {
   return { code: 'DP.CLI.INTERNAL', message, hint: GENERIC_HINT, exitCode: EXIT_FAILURE }
 }
 
+/**
+ * 人看的错误文本。写 stderr（由调用方决定），这里只管内容。
+ *
+ * 非 verbose 时**不**打 stack 但仍打一行「--verbose 可打印完整 stack」——
+ * 静默不给栈会让用户以为 dp 已经把根因处理掉了。
+ *
+ * @param err 任意抛出物
+ * @param verbose 是否附带完整 stack
+ * @returns 多行文本，不含结尾换行
+ */
 export function renderErrorPretty(err: unknown, verbose: boolean): string {
   const r = describeError(err)
   const lines = [`错误 [${r.code}]：${r.message}`]
@@ -128,6 +175,17 @@ export function renderErrorPretty(err: unknown, verbose: boolean): string {
   return lines.join('\n')
 }
 
+/**
+ * 机器看的错误。**恰好一个 JSON 文档**（铁律：--json 时 stdout 只有 JSON）。
+ *
+ * `exitCode` 在 JSON 里重复一份：退出码本身不足以区分（2 号位承载两种语义），
+ * 靠这里的 `error.code` 才是可靠信号。
+ *
+ * @param err 任意抛出物
+ * @param verbose true 时顶层多一个 stack 字段（**只有** verbose 才出现，
+ *   不给 null 占位 —— 让调用方用 `'stack' in obj` 判断即可）
+ * @returns 缩进 2 的 JSON 字符串
+ */
 export function renderErrorJson(err: unknown, verbose: boolean): string {
   const r = describeError(err)
   const out: Record<string, unknown> = {
@@ -175,6 +233,14 @@ function formatDetailValue(value: unknown): string {
   return JSON.stringify(value)
 }
 
+/**
+ * plan 的人看输出。**只读干跑**是它承诺的核心，所以最后一行明写
+ * 「没有创建任何目录，也没有写任何文件」—— 这行字是给用户和 CI 同时看的断言。
+ *
+ * @param plan makePlan 的产物
+ * @param options probeNotes 是探测过程的说明（为什么选了不可写的目录之类）
+ * @returns 多行文本；末行固定是干跑声明
+ */
 export function renderPlanPretty(plan: Plan, options: { readonly probeNotes?: readonly string[] } = {}): string {
   const width = indexWidth(plan.steps.length)
   const lines = [
@@ -195,6 +261,15 @@ export function renderPlanPretty(plan: Plan, options: { readonly probeNotes?: re
   return lines.join('\n')
 }
 
+/**
+ * plan 的 JSON 输出。**结构完整、不做裁剪** —— 它是 `--facts` 的对照组，
+ * 裁掉字段会让「同一份配置在两台机器上推出不同结果」变得无法复查。
+ *
+ * @param plan makePlan 的产物，原样嵌入
+ * @param context 项目 / 主机 / releaseId 是 plan 之外的信息，只能由调用方给；
+ *   probeNotes 缺省给空数组而不是省略键，省得消费方写两套取值
+ * @returns 缩进 2 的 JSON 字符串
+ */
 export function renderPlanJson(
   plan: Plan,
   context: { readonly project?: string; readonly host?: string; readonly releaseId?: string; readonly probeNotes?: readonly string[] },
@@ -224,6 +299,14 @@ function renderWritable(canWrite: Readonly<Record<string, boolean>>): string[] {
   return keys.map((k) => `  ${canWrite[k] === true ? '✓' : '✗'} ${k}`)
 }
 
+/**
+ * facts 的人看输出。逐条列出**实测**结论与对应的路径/命令名，
+ * 让人能自己核对某条结论（比如「canWrite 里为什么少了 /opt」）。
+ *
+ * @param facts 探测产物
+ * @param probeNotes 探测说明，默认不打印
+ * @returns 多行文本
+ */
 export function renderFactsPretty(facts: Facts, probeNotes: readonly string[] = []): string {
   const c = facts.capabilities
   const lines = [
@@ -253,6 +336,17 @@ export function renderFactsPretty(facts: Facts, probeNotes: readonly string[] = 
   return lines.join('\n')
 }
 
+/**
+ * facts 的 JSON 输出，**原样嵌整个 Facts**。
+ *
+ * 它的用途是喂给 `dp plan --facts` 复现同一份计划，所以一个字段都不能少：
+ * 少一个字段就等于「用这份 facts 跑出来的结论和真机探测的不一定一致」，
+ * 而那种不一致是在几周后才体现的 bug。
+ *
+ * @param facts 探测产物
+ * @param probeNotes 探测说明，默认空数组
+ * @returns 缩进 2 的 JSON 字符串
+ */
 export function renderFactsJson(facts: Facts, probeNotes: readonly string[] = []): string {
   return JSON.stringify({ ok: true, command: 'facts', facts, probeNotes }, null, 2)
 }
@@ -326,6 +420,9 @@ export interface ApplyTargetResult {
  * 单目标时把字段平铺到顶层：最常见的形状，也省掉 agent 侧的一层解包；
  * 多目标时平铺不了，就统一读 `results`。规则是确定的、只看数组长度，
  * 调用方不需要猜。
+ *
+ * @param results 这次实际处理的目标列表；空数组也能渲染（ok 为 true）
+ * @returns 缩进 2 的 JSON 字符串，`ok` = 所有目标都没有 error 字段
  */
 export function renderApplyJson(results: readonly ApplyTargetResult[]): string {
   const single = results.length === 1 ? results[0] : undefined
@@ -341,6 +438,17 @@ export function renderApplyJson(results: readonly ApplyTargetResult[]): string {
   )
 }
 
+/**
+ * 单个目标机的人看输出。
+ *
+ * 步骤的标记刻意分三种（`-` / `✓` / `✗`）：`skipped` 的判据是
+ * 「机器上有没有留下作用」，不是「跑没跑」。渲染成同一个 `✓` 会让 dry-run
+ * 的报告看起来像真备份过、真拉过镜像、真起过容器 —— 「报告了没发生的副作用」
+ * 比不做更难发现。
+ *
+ * @param result 一个目标的执行结论
+ * @returns 多行文本
+ */
 export function renderApplyPretty(result: ApplyTargetResult): string {
   const head = result.dryRun
     ? `apply --dry-run · ${result.project} → ${result.host}（未写入任何文件）`

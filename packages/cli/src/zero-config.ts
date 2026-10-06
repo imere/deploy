@@ -37,6 +37,11 @@ import { CliUsageError } from './args.js'
  */
 export const SOURCE_ROOT_CANDIDATES: readonly string[] = ['dist', 'build', 'out', 'public']
 
+/**
+ * 零配置装配的输入。**目录清单与源清单都由调用方注入**：
+ * 本文件不 stat、不读 package.json —— 一旦它自己枚举 cwd，
+ * 「给一组 entries 就能断言结论」就再也做不到，而那正是最值得反复断言的部分。
+ */
 export interface ZeroConfigInput {
   /** 项目名。零配置下就是当前目录名 */
   readonly projectName: string
@@ -55,6 +60,10 @@ export interface ZeroConfigInput {
   readonly env?: string
 }
 
+/**
+ * 装配结果。配置只在内存里（见文件头），`notes` 逐条说明每个自动决定的理由 ——
+ * 「自动不等于静默」：用户必须能一条条反驳，而不是只能整体接受或放弃。
+ */
 export interface ZeroConfigResult {
   /** 补出来的配置。形状与 schema 的 Config 完全一致（可以直接喂给 selectTargets） */
   readonly config: Config
@@ -72,7 +81,21 @@ export interface ZeroConfigResult {
  *
  * `env` 给了却不在 profiles 里 → 报用法错（与 `selectTargets` 对 `--host` 的
  * 处理同风格：退出码不同，CI 要区别对待「命令行写错」与「配置文件写错」）。
+ *
+ * **只有一个 profile 时不追问**：那不是歧义，是「这个项目没有环境概念」，
+ * 追问会逼单环境项目每次都写 `--env`。
+ *
+ * @param profiles 配置里真实存在的环境名（零配置下通常为空数组）
+ * @param env `--env` 的值；undefined 表示没给
+ * @param defaultEnv 可选的默认环境（如来自 `profiles.default`），
+ *   它同样必须是在册的真实环境 —— 不存在的默认值在这里报错而不是静默忽略，
+ *   否则「配了 default 但拼错了」这件事永远不会被发现
+ * @returns 环境名；**没有 profile 且没给 env 时返回空串**（不是 undefined：
+ *   空串是「不套用任何环境覆盖」的可承载值，undefined 会逼调用方再判一次）
+ * @throws CliUsageError `--env` 或 defaultEnv 不在 profiles 里
+ * @throws DpError 多个 profile 且没给 --env、也没有 defaultEnv
  */
+
 export function resolveEnv(
   profiles: readonly string[],
   env: string | undefined,

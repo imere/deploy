@@ -25,6 +25,13 @@ const MAX_ENTRIES = 2000
  */
 const EXCLUDED_DIRS: ReadonlySet<string> = new Set(['node_modules', '.git'])
 
+/**
+ * 零配置装配需要的全部「cwd 到底是什么样」。
+ *
+ * 字段与 `zero-config.ts` 的输入**逐个对应**且不多不少：多一个字段就得在
+ * 纯函数那边加一个必填项，少一个则探测结论少一块证据 —— 两边不对齐时
+ * 编译期毫无提示，只在「改了探测却忘了改装配」之后表现为一次诡异的部署。
+ */
 export interface ProjectFacts {
   readonly projectName: string
   /** cwd 下**一层**目录名（相对 cwd） */
@@ -142,7 +149,12 @@ function packageScriptsOf(cwd: string, projectName: string): readonly string[] {
  * 找不到源根时**不**在这里报错：`entries` 就是空的，源根由 `deriveZeroConfig`
  * 用同一张候选表去挑并给出带候选名的错误 —— 两处各挑一次就会有两份「源根在哪」
  * 的判据，而它们迟早会不一致。
+ *
+ * @param cwd 起点目录；项目名取它的 basename
+ * @returns 项目名、cwd 下的一层目录名、源根下的文件清单、package.json 的 scripts 名
+ * @throws DpError 推不出项目名、源条目超上限、package.json 解析失败
  */
+
 export function collectProjectFacts(cwd: string): ProjectFacts {
   const projectName = projectNameOf(cwd)
   const existingDirs = existingDirsOf(cwd)

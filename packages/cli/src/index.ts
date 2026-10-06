@@ -38,6 +38,12 @@ import { runVerify } from './commands/verify.js'
 import { runRollback } from './commands/rollback.js'
 import { runSchema } from './commands/schema.js'
 
+/**
+ * 打进帮助与 `--version` 的版本号。
+ *
+ * 读 package.json 失败时回落 `0.0.0` 而不是抛错：版本号不值得让整条命令失败，
+ * 而抛错的代价是「在没有任何有效配置的环境里，`dp --help` 也会失败」。
+ */
 export const VERSION: string = readVersion()
 
 function readVersion(): string {
@@ -51,7 +57,17 @@ function readVersion(): string {
   }
 }
 
-/** 归一化开关。默认值在这里定一次，其余代码不必再判断 undefined */
+/**
+ * 归一化开关。默认值在这里定一次，其余代码不必再判断 undefined。
+ *
+ * 「用户没给」与「给了这个值」必须能区分，所以取值型选项用条件展开
+ * 而不是 `?? '默认值'`：logFormat 若被补上兜底值，createContext 就无法
+ * 判断该不该按 TTY 推断（日志格式会永远锁死在 json 或 pretty 上）。
+ *
+ * @param parsed parseArgs 的结果
+ * @returns 归一化开关；没给定的取值型选项**键不存在**（不是 undefined 值）
+ * @throws TypeError log-format / log-level 给了非法字面量
+ */
 export function resolveFlags(parsed: ParsedArgs): ResolvedFlags {
   const { flags } = parsed
   const config = stringFlag(flags, 'config')
@@ -149,6 +165,13 @@ function allowedFor(command: string): readonly string[] {
   }
 }
 
+/**
+ * 注入点。**每一项都对应一个「测试时不想碰的东西」**：
+ * cwd / env 是外部状态，write / writeErr 是全局 stdout/stderr，
+ * isTTY 影响日志格式推断，deps 让远端部署测试完全不联网。
+ *
+ * 全部可选且默认取真实全局值，所以生产路径只调 `main(argv)` 就行。
+ */
 export interface MainOptions {
   readonly cwd?: string
   readonly env?: NodeJS.ProcessEnv
@@ -159,6 +182,24 @@ export interface MainOptions {
   readonly deps?: ApplyDeps
 }
 
+/**
+ * 唯一入口。**永不抛、永不自己 exit**，一律把错误渲染完返回退出码。
+ *
+ * 由 bin.ts 决定 `process.exit`：测试可以直接 `await main([...])` 拿退出码，
+ * 而捕获全局状态（尤其 exit）会让「命令跑得对不对」这件事没法断言。
+ *
+ * 阶段顺序是硬约束，别调换：
+ *  ① parseArgs —— 失败也要按 --json 输出（早期失败最容易被调用方误判成崩溃）
+ *  ② 帮助 / --version —— **碰文件系统之前**返回，所以 `dp` 单独跑不需要配置
+ *  ③ 查命令是否存在 / 是否已实现
+ *  ④ 开关白名单校验
+ *  ⑤ 建 context（至此才知道日志格式与 json）
+ *  ⑥ 执行
+ *
+ * @param argv 完整参数，`process.argv.slice(2)` 的形态
+ * @param options 注入点，全部可省
+ * @returns 进程退出码，取 `EXIT_*` 之一
+ */
 export async function main(argv: readonly string[], options: MainOptions = {}): Promise<number> {
   let parsed: ParsedArgs
   try {

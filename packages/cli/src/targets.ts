@@ -9,6 +9,11 @@ import { DpError } from '@dp/ports'
 import type { Config, HostConfig, ProjectConfig } from '@dp/schema'
 import { CliUsageError } from './args.js'
 
+/**
+ * 选择目标所需的全部输入。**只有配置与开关**，没有 IO：
+ * 这个文件一旦开始 stat 主机是否可达，「多个候选却没指定」这条最容易写错的
+ * 分支就只能在起子进程的前提下测了。
+ */
 export interface TargetSelectionInput {
   readonly config: Config
   /** `--project` */
@@ -21,6 +26,11 @@ export interface TargetSelectionInput {
   readonly env?: string
 }
 
+/**
+ * 一个要处理的 (项目, 主机) 组合。**已选好、已合并环境覆盖**，
+ * 下游不必再查 `config.hosts[host]` 也不必再套 profile ——
+ * 覆盖顺序（defaults < hosts < profiles）只有这一处知道。
+ */
 export interface SelectedTarget {
   readonly project: string
   readonly host: string
@@ -63,6 +73,12 @@ function resolveHostConfig(config: Config, host: string, env?: string): HostConf
  *  - 没给 `--host` 且候选主机多于一个 → 报错并列出全部名字
  *  - `--all` 与 `--host` 同时给 → 报错（一个要全部一个要一个，意图冲突）
  *  - 只有一个候选时**不**追问，直接用它 —— 这不是歧义
+ *
+ * @param input 配置 + 四个选择类开关
+ * @returns 展开后的 (项目, 主机) 列表；主机来自 `projects.<name>.hosts`
+ *   声明时按声明顺序，否则按可用主机全取（`--all`）或报错
+ * @throws CliUsageError 歧义（多个项目 / 多台主机且未指定、`--all` 与 `--host` 并存、名字不存在）
+ * @throws DpError 配置本身不成立（`projects` 或 `hosts` 为空）
  */
 export function selectTargets(input: TargetSelectionInput): SelectedTarget[] {
   const { all, config, env, host, project } = input
