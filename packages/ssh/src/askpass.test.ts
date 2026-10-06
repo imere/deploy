@@ -132,7 +132,11 @@ describe('createAskpassHelper —— 拒绝不安全输入', () => {
   }, () => {
     const before = existsSync(tmpdir())
     assert.equal(before, true)
-    assert.throws(() => createAskpassHelper('a&b'))
+    assert.throws(() => createAskpassHelper('a&b'), (err: unknown) => {
+      assert.ok(err instanceof DpError, `不是 DpError：${String(err)}`)
+      assert.equal(err.code, 'DP.SSH.AUTH_FAILED')
+      return true
+    })
   })
 })
 

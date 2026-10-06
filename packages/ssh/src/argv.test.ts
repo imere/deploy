@@ -55,6 +55,18 @@ function unquoteArg(q: string): string {
   }
 }
 
+/**
+ * `rshOptionValue` / `sftpQuote` 抛的是裸 `Error`（不是 DpError，没有 code 可断言），
+ * 所以只能钉住消息里的拒绝理由。只断言 `instanceof Error` 的话，实现改成抛别的错照样绿。
+ */
+function bareErrorMatching(re: RegExp): (e: unknown) => boolean {
+  return (e: unknown) => {
+    assert.ok(e instanceof Error, `期望 Error，实际 ${String(e)}`)
+    assert.match(e.message, re)
+    return true
+  }
+}
+
 const BASE: SshArgvOptions = { authKind: 'key', knownHostsMode: 'strict' }
 
 describe('quoteArg —— POSIX 单引号转义（注入的唯一出口）', () => {
@@ -267,9 +279,20 @@ describe('buildRshArgv —— rsync --rsh 契约', () => {
   })
 
   it('rshArgv 含空白或引号时拒绝拼串（rsync 按空白切，粘在一起就切错了）', () => {
-    assert.throws(() => rshOptionValue(['/usr/bin/ssh', '-o', 'ProxyJump=a b']))
-    assert.throws(() => rshOptionValue(['/usr/bin/ssh', 'a b']))
-    assert.throws(() => rshOptionValue(['/usr/bin/ssh', 'a"b']))
+    // 三个用例各自钉住「被拒的那一个 argv 元素」：只钉前缀的话，
+    // 哪天校验漏了另一个元素也照样绿。
+    assert.throws(
+      () => rshOptionValue(['/usr/bin/ssh', '-o', 'ProxyJump=a b']),
+      bareErrorMatching(/ProxyJump=a b/),
+    )
+    assert.throws(
+      () => rshOptionValue(['/usr/bin/ssh', 'a b']),
+      bareErrorMatching(/"a b"/),
+    )
+    assert.throws(
+      () => rshOptionValue(['/usr/bin/ssh', 'a"b']),
+      bareErrorMatching(/"a\\"b"/),
+    )
   })
 
   // 说明：`a;id` 这种**不**该抛。事实 2 实测 rsync 侧不过 shell，
@@ -322,7 +345,11 @@ describe('buildRemoteCommand', () => {
   })
 
   it('空 argv 拒绝', () => {
-    assert.throws(() => buildRemoteCommand([]))
+    assert.throws(() => buildRemoteCommand([]), (e: unknown) => {
+      assert.ok(e instanceof DpError, `期望 DpError，实际 ${String(e)}`)
+      assert.equal(e.code, 'DP.CONFIG.INVALID')
+      return true
+    })
   })
 })
 
@@ -355,8 +382,20 @@ describe('setEnvOptions', () => {
   })
 
   it('值里的换行/NUL 拒绝', () => {
-    assert.throws(() => setEnvOptions({ A: 'x\ny' }))
-    assert.throws(() => setEnvOptions({ A: 'x\0y' }))
+    // 消息必须命中「值」这条分支而不是上面的「变量名非法」——
+    // 只断 code 的话，实现调换两个分支的顺序这条照样绿。
+    assert.throws(() => setEnvOptions({ A: 'x\ny' }), (e: unknown) => {
+      assert.ok(e instanceof DpError, `期望 DpError，实际 ${String(e)}`)
+      assert.equal(e.code, 'DP.CONFIG.INVALID')
+      assert.match(e.message, /值含换行或 NUL/)
+      return true
+    })
+    assert.throws(() => setEnvOptions({ A: 'x\0y' }), (e: unknown) => {
+      assert.ok(e instanceof DpError, `期望 DpError，实际 ${String(e)}`)
+      assert.equal(e.code, 'DP.CONFIG.INVALID')
+      assert.match(e.message, /值含换行或 NUL/)
+      return true
+    })
   })
 
   it('非法变量名拒绝', () => {
@@ -389,7 +428,7 @@ describe('sftp 批量脚本', () => {  it('每条命令一行，末尾自动补 
   })
 
   it('含换行的参数直接拒绝 —— 换行在 -b 脚本里是命令分隔符', () => {
-    assert.throws(() => sftpQuote('a\nb'))
+    assert.throws(() => sftpQuote('a\nb'), bareErrorMatching(/不能含换行/))
   })
 })
 

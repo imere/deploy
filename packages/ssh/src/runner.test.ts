@@ -98,7 +98,11 @@ describe('路径校验 —— 发出之前的两道关', () => {
   })
 
   it('NUL 字节拒绝', () => {
-    assert.throws(() => normalizeRemotePath('/srv/a\0b', { platform: 'linux' }))
+    assert.throws(() => normalizeRemotePath('/srv/a\0b', { platform: 'linux' }), (e: unknown) => {
+      assert.ok(e instanceof DpError, `不是 DpError：${String(e)}`)
+      assert.equal(e.code, 'DP.PATH.ILLEGAL_CHAR')
+      return true
+    })
   })
 
   it('归一化 . 与 ..', () => {
@@ -108,7 +112,13 @@ describe('路径校验 —— 发出之前的两道关', () => {
   })
 
   it('越过根往上走拒绝', () => {
-    assert.throws(() => normalizeRemotePath('/../../etc/passwd', { platform: 'linux' }))
+    assert.throws(() => normalizeRemotePath('/../../etc/passwd', { platform: 'linux' }), (e: unknown) => {
+      assert.ok(e instanceof DpError, `不是 DpError：${String(e)}`)
+      assert.equal(e.code, 'DP.PATH.ILLEGAL_CHAR')
+      // 与「不是绝对路径」是同一条码，靠消息才分得开是哪一条守卫拦的
+      assert.match(e.message, /逃出根目录/)
+      return true
+    })
   })
 
   it('允许根之外的路径拒绝（路径穿越）', () => {

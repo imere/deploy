@@ -14,8 +14,17 @@
 import { DpError, assertPortInRange, parseSshTarget, type KnownHostsMode as PortsKnownHostsMode } from '@dp/ports'
 import type { SshArgvOptions } from './argv.js'
 
+/**
+ * 驱动的两种身份。**native-ssh 排第一**是硬排序而不是偏好（`DEFAULT_PREFERENCE`）：
+ * 只有它能协商抗量子 KEX，而 ssh2 遇到 PQ 算法直接抛错 —— 顺序反过来的后果是
+ * "配了 pq-required 却连不上"，且错误指向认证而不是 KEX 策略。
+ */
 export type SshDriverKind = 'native-ssh' | 'ssh2'
 
+/**
+ * 一条驱动能不能用。**reason / hint 是必填语义而不是可选补充**：
+ * 偏好链全失败时要把每一项的理由逐条打给用户；留空的理由是没办法救的建议。
+ */
 export interface DriverAvailability {
   readonly ok: boolean
   readonly reason?: string

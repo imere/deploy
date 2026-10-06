@@ -28,6 +28,12 @@ const SHELL_SAFE = /^[A-Za-z0-9_@%+=:,./-]+$/
  * 这条规则**没有例外** —— `$`、反引号、换行、空格、`;` 全部因为落在单引号内
  * 而失去特殊含义。不做 Windows cmd 转义：远端是 POSIX 才是主场景，
  * 硬塞 cmd 规则只会制造"看起来转义了其实没转义"的假安全感。
+ *
+ * @param arg 远端 shell 语境下的**一个词**。空串不代表"不需要引号"而是
+ *   "需要一个空参数"，所以它单独产出 `''` —— 原样返回空串会让 `sh -c` 少收一个参数，
+ *   表现为远端脚本整体错位一个位置，而不是在原处报错。
+ * @returns 可直接拼进脚本的参数。落在 SHELL_SAFE 内的原样返回（不加引号），
+ *   是因为这些串会出现在错误信息与 dryRun 报告里，全加引号会让人读不出哪个是真路径。
  */
 export function quoteArg(arg: string): string {
   if (arg === '') return "''"
@@ -35,7 +41,17 @@ export function quoteArg(arg: string): string {
   return `'${arg.replaceAll("'", `'\\''`)}'`
 }
 
-/** 逐参数转义后用空格拼成一条脚本。只在必须过一层 shell 时用（su -c、sh -c）。 */
+/**
+ * 逐参数转义后用空格拼成一条脚本。只在必须过一层 shell 时用（su -c、sh -c）。
+ *
+ * 与 buildRemoteCommand 的区别：那条路要额外拒绝换行与 NUL，这条路不拒 ——
+ * 它服务的是 `su -c` / `sh -c` 的**单个** argv，而那一层已经由 wrapCommand
+ * 把整条脚本当一个参数转义过；在这里再拒一遍等于把「脚本里本来就有换行」
+ * 这件正常的事判成配置错误。
+ *
+ * @param argv 要拼成一条 shell 字符串的参数，已按普通 argv 逐个转义
+ * @returns 等价于在远端 shell 里依次展开这些参数的命令串
+ */
 export function quoteArgv(argv: readonly string[]): string {
   return argv.map(quoteArg).join(' ')
 }
@@ -98,17 +114,34 @@ export function setEnvOptions(env: Readonly<Record<string, string>>): string[] {
 // ssh 客户端 argv
 // ------------------------------------------------------------
 
+/**
+ * 认证方式。**刻意不叫 `password` 一把梭**：四种的失败含义不同 ——
+ * key/agent 失败说明机器上没有可用钥匙，password 失败说明凭据或 askpass 通道有问题，
+ * 报一个笼统的"认证失败"会让这两种问题无法区分。
+ */
 export type SshAuthKind = 'key' | 'agent' | 'password' | 'keyboard-interactive'
 
+/**
+ * 拼 ssh argv 的全部输入。
+ *
+ * 没有"默认值"字段是刻意的：端口、密钥路径、known_hosts 策略都不在这里猜，
+ * 缺省端口尤其不补 22 —— 用户在 ssh_config 里给某个 Host 配过的 `Port` 正是他要的，
+ * 硬补一个 `-p 22` 会盖掉它，连到另一台去。
+ */
 export interface SshArgvOptions {
+  /** 认证方式；决定是否加 BatchMode（见 authOptions 的注释，password 分支必须不加） */
   readonly authKind: SshAuthKind
+  /** 1–65535 闭区间，缺省**不传**（让 ssh_config 的 Port 生效），而不是补 22 */
   readonly port?: number
+  /** 私钥路径。走 argv 的 `-i`，不经环境变量 —— 进程列表里看得见，但比写进环境变量更容易定位是哪一次部署 */
   readonly identityFile?: string
   /** 无 agent 可用时禁用公钥，避免 ssh 挨个试过把失败计数打满 */
   readonly identitiesOnly?: boolean
+  /** 主机密钥策略。默认必须是 strict，调用方没给就是配置缺失而不是"放宽" */
   readonly knownHostsMode: KnownHostsMode
   /** accept-new / tofu / off 时用于隔离的 known_hosts 路径；strict 时用系统默认 */
   readonly userKnownHostsFile?: string
+  /** 与 hops 互斥：两者都给直接报错，不做二选一 */
   readonly proxyJump?: string
   /** 多跳链。喂给 -o ProxyJump=，逐跳约束见 hopsProxyJump */
   readonly hops?: readonly HopSpec[]
@@ -116,6 +149,7 @@ export interface SshArgvOptions {
   readonly extraOptions?: readonly string[]
   /** 远端环境变量。走 OpenSSH 的 SetEnv；服务端 AcceptEnv 没放行时 ssh 会静默忽略 */
   readonly setEnv?: Readonly<Record<string, string>>
+  /** 远端命令原样追加（不过 shell）。要管道或 `&&` 由调用方显式传 `['sh','-c',script]` */
   readonly remoteArgv?: readonly string[]
 }
 
@@ -141,7 +175,12 @@ function authOptions(kind: SshAuthKind, identitiesOnly: boolean): string[] {
   return ['-o', 'NumberOfPasswordPrompts=1']
 }
 
-/** 主机密钥策略 → OpenSSH 选项。见 driver.ts 的 KnownHostsMode 注释。 */
+/**
+ * 主机密钥策略 → OpenSSH 选项。四档的差别不只是松紧，**还决定要不要隔离 known_hosts**：
+ * 只有 accept-new / tofu 会带 `UserKnownHostsFile`，strict 走系统默认（那里已经有
+ * 用户自己积累的信任），off 则钉到 `/dev/null` 让 ssh 完全不落盘 —— 配了不落盘，
+ * 否则"关掉校验"会顺带把指纹写回用户的 known_hosts。
+ */
 export function knownHostsOptions(
   mode: KnownHostsMode,
   userKnownHostsFile: string | undefined,
@@ -170,7 +209,11 @@ function knownHostsFileArgs(path: string | undefined): string[] {
   return path === undefined ? [] : ['-o', `UserKnownHostsFile=${path}`]
 }
 
-/** tofu 模式的默认 pin 文件位置。放 `.local/state` 而不是 tmpdir —— pin 必须活过重启。 */
+/**
+ * tofu 模式的默认 pin 文件位置。放 `.local/state` 而不是 tmpdir —— pin 必须活过重启：
+ * 放 tmpdir 的话每次重启都变成一台"第一次见"的主机，tofu 的不一致检测就整段失效。
+ * XDG_STATE_HOME 与 HOME/USERPROFILE 都拿不到时退回 `/tmp`，那次部署的 pin 不跨重启。
+ */
 export function defaultPinPath(): string {
   const stateHome = process.env.XDG_STATE_HOME ?? `${process.env.HOME ?? process.env.USERPROFILE ?? '/tmp'}/.local/state`
   return `${stateHome}/dp/known_hosts.pinned`
@@ -223,7 +266,12 @@ export function buildSshArgv(options: SshArgvOptions): string[] {
   return argv
 }
 
-/** host 目标串。`user` 为空则不带前缀（rsync 与 ssh 都按本地用户名处理） */
+/**
+ * host 目标串。`user` 为空则不带前缀 —— 实测 rsync 在无 user 前缀时会省略 `-l <user>`
+ * 改用它自己的本地用户名，而那台机器上的本地用户名往往根本不是我们想用的那个。
+ * 所以「没给 user」必须表达成"不带前缀"（让 rsync 走它那条路），
+ * 而不是拼一个空的 `user@`。
+ */
 export function hostTarget(host: string, user?: string): string {
   return user === undefined || user === '' ? host : `${user}@${host}`
 }
@@ -314,12 +362,29 @@ export function hopsProxyJump(
  * **不含 host，也不含 `%h`** —— rsync 会自己在后面追加 `[-l user] host rsync --server ...`
  * （实测样本：`ARGC=8 [-l][dpuser][dp-target][rsync][--server][flags][.][/tmp/dst1/]`）。
  * 写上 host 会变成"连错两次"。
+ *
+ * @param options 与 buildSshArgv 同一份选项，外加一个可执行文件名。
+ *   `remoteArgv` 即使传了也被丢掉：rsync 自己会在这个前缀后面追加远端命令，
+ *   我们再塞一条就等于让 ssh 先跑我们的命令、再被 rsync 追加一条。
+ * @returns 交给 rsync `--rsh` 的前缀 argv 数组。首元素是 ssh 可执行文件，
+ *   末元素之后留给 rsync 追加 `[-l user] host rsync --server ...`。
  */
 export function buildRshArgv(options: SshArgvOptions & { readonly sshPath: string }): string[] {
   return [options.sshPath, ...buildSshArgv({ ...options, remoteArgv: undefined })]
 }
 
-/** rsync 的 `-e` 只接受单个字符串；按空白拆分（事实 2：rsync 侧不过 shell） */
+/**
+ * rsync 的 `-e` 只接受单个字符串；按空白拆分（事实 2：rsync 侧不过 shell）。
+ *
+ * 之所以不能像别处那样"拼好再转义"：`-e` 的值会被 rsync **再按空白切一次**，
+ * 所以这一层的转义目标是"不含空白"，而不是"引号闭合"。真出现空白时没有补救办法 ——
+ * 引号本身就会成为传给远端 ssh 的字面字符，于是只能拒绝而不是硬拼。
+ *
+ * @param rshArgv 来自 buildRshArgv 的前缀 argv
+ * @returns 以单空格连接、直接作为 `-e` 下一个参数的字符串
+ * @throws 任一元素含空白或 shell 特殊字符时抛 `Error`（不是 `DpError`：这是
+ *   「调用方拼出了不该出现的东西」的内部违约，没有对应的配置错误码）
+ */
 export function rshOptionValue(rshArgv: readonly string[]): string {
   for (const a of rshArgv) {
     if (/[\s"'\\$`]/.test(a)) {
@@ -341,12 +406,31 @@ export function rshOptionValue(rshArgv: readonly string[]): string {
  * 走 `sftp -b -` 从 stdin 喂脚本：整个脚本是**一个 argv 参数流**（`-b -`），
  * 不经过 shell。批量模式里命令不是 shell，**引号由 sftp 自己解析**，规则与
  * POSIX shell 不同（sftp 认 `\` 转义与双引号，单引号不特殊）。
+ *
+ * @param commands 一条条 sftp 批处理命令，**参数要自己过 sftpQuote**。
+ *   这里不代劳：在这一层按 POSIX 规则转义，会把 sftp 自己能吃的写法改坏，
+ *   而且两种规则不可嵌套（sftp 不认 `'\''`），错了也看不出来。
+ * @returns 可整体喂给 `sftp -b -` 的脚本文本。末尾显式补 `quit` 而不是靠 stdin 到 EOF：
+ *   结束点由脚本内容决定，换一个 sftp 实现（原生 sftp(1) 与 ssh2 内嵌的批处理）
+ *   关闭时机的差异就不成其为一次静默挂起。
  */
 export function buildSftpBatch(commands: readonly string[]): string {
   return `${commands.map((c) => (c.endsWith('\n') ? c : `${c}\n`)).join('')}quit\n`
 }
 
-/** sftp 批量脚本里的参数引用：双引号包裹 + 反斜杠转义 */
+/**
+ * sftp 批量脚本里的参数引用：双引号包裹 + 反斜杠转义。
+ *
+ * 用双引号而不是 POSIX 的单引号：批处理模式里的引号是 sftp 自己解析的，
+ * 它认 `\` 与双引号，单引号**不特殊** —— 照抄 shell 的单引号写法等于把两个 `'` 原样送进路径。
+ * 顺序也是刻意的：先转义反斜杠再转义双引号，反过来会把自己刚加的反斜杠再转义一遍。
+ *
+ * @param value sftp 批处理里的一个参数（远端路径一类）
+ * @returns 可直接写进 `-b` 脚本的引用形式
+ * @throws 含换行时抛 `Error`。换行在批处理脚本里是命令分隔符，
+ *   转义没有对应的表示，只能拒绝 —— 与 `quoteArg` 对空串的处理是相反的取舍：
+ *   空串可以表达（引号内什么都没有），换行表达不了。
+ */
 export function sftpQuote(value: string): string {
   if (value.includes('\n') || value.includes('\r')) {
     throw new Error('sftp 参数不能含换行：换行在 -b 脚本里是命令分隔符')
