@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+
+    - name: Setup Node
+      uses: actions/setup-node@v7
+      with:
+        node-version-file: .nvmrc
+
+    # 版本钉死，但**不写在 package.json 的 packageManager 字段里**：实测 pnpm 12.6.0 一旦见到
+    # 那个字段，就会把 pnpm 自身作为依赖写进 lockfile（+158 行 `@pnpm/exe.*`，各平台二进制各一份）。
+    # 本仓 CI 跑 --frozen-lockfile，lockfile 一变就得跟着提交，等于为「CI 里固定版本」
+    # 平白多一份供应链面 —— 用一行 npm 全局装就能达到同样目的，且 lockfile 保持干净。
+    # 不用 corepack：它在无人值守下需要额外关掉下载提示，而这里的目的是装一个确定的版本。
+    - name: Install pnpm
+      run: |
+        npm install -g pnpm@12.6.0
+        pnpm --version
+
+    # 不开 pnpm store 缓存：求 store 路径要求 pnpm 已在 PATH 上且版本确定，收益不抵多一段配置。
+
+    # 不加 --ignore-scripts：workspace 包的顶层链接由 postinstall 建，
+    # 缺了它 tsc 找不到 @dp/*，报出来的是「模块找不到」，看不出是链接没建。
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+
+    # 门禁顺序在根 package.json 里：build → test → 六项静态检查。
+    # 不在这里挑着跑 —— 门禁的价值在于全绿，拆开单跑某几项等于把编排责任搬到 YAML 里再分叉一次。
+    - name: Verify
+      run: pnpm verify

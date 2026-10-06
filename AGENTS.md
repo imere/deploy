@@ -23,7 +23,7 @@ pnpm 单仓多包，包名前缀 `@dp/*`。**Node ≥ 24**。
 ```
 pnpm build    # tsc -b，产物 packages/<pkg>/build
 pnpm test     # 构建 + node --test + 覆盖率 → build/coverage/lcov.info
-pnpm verify   # build + test
+pnpm verify   # build + test + 六项静态门禁（verify:gates）
 pnpm clean    # tsc -b --clean
 ```
 
@@ -48,7 +48,7 @@ docs/           设计文档（★ 优先读：spikes.md failures.md decisions.m
                  doc-truthfulness single-source-of-truth cleanup-not-silent
                  automation-iron-rules secret-hygiene repo-sanitize-history
                  git-noninteractive windows-sandbox-gotchas crash-recovery-audit
-                 gate-script-false-positives
+                 gate-script-false-positives coverage-honesty
                  **本仓专属**：dp-subagent-dispatch（通用版之上的本仓必读清单与包名）
                  dp-spike-env（容器 SSH 靶机）
 .tmp/           临时物（已 gitignore）

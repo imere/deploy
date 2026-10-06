@@ -92,7 +92,7 @@ dp rollback --json  # 切回上一版，然后**再验一次**；新版本不健
 与「每次 exec 一次性连接」不合，所以那里明确失败而不是给一条走不通的通道。
 
 ```bash
-pnpm verify      # build + test + 覆盖率（产物落在 build/，lcov 在 build/coverage/）
+pnpm verify      # build + test + 覆盖率 + 六项静态门禁（产物落在 build/，lcov 在 build/coverage/）
 ```
 
 ---
@@ -179,7 +179,11 @@ flowchart TB
 
 ## 质量门禁
 
-**当前 `pnpm verify` = `build` + `test`**（见根 `package.json`）。下面这张表是这套门禁**想达到的强度**，
+**当前 `pnpm verify` = `build` + `test` + 六项静态门禁**（见根 `package.json`）。六项按
+`dead-code` → `check-imports` → `check-tests` → `check-jsdoc` → `check-coverage` → `smoke` 依次串起，
+单独跑它们的那一段叫 `verify:gates`。`check-coverage` 只读 `test` 产出的 `build/coverage/lcov.info`，
+`smoke` 只读 `build/` 产物 —— 排在 `build` / `test` 之前跑它们，拿到的是编排错误而不是质量信号。
+CI 只跑这一条 `pnpm verify`，不挑着跑。下面这张表是这套门禁**想达到的强度**，
 其中只有一部分已经落地 —— 没落地的标 ❌，别当成已经在跑的保障。
 
 | 项 | 要求 | 状态 |
@@ -192,9 +196,9 @@ flowchart TB
 | 死代码 | 没有未被引用的导出/文件；**见到冗余代码就删，不留「以后可能用」** | ✅ `scripts/dead-code.mjs`，当前 0 处 |
 | `smoke` | 发布产物能被真实 import | ✅ `scripts/smoke.mjs`，12 个包通过；凭据只在非测试产物里硬失败 |
 | JSDoc | 每个函数都要中文描述 + 逐个 `@param` + `@returns`，描述写「为什么」 | ✅ `scripts/check-jsdoc.mjs`，465 个公共 API 符号缺口 0 |
-| 假测试 | 弱断言 / 被忽略的校验参数要能被扫出来 | ✅ `scripts/check-tests.mjs`，当前通过 |
+| 假测试 | 弱断言 / 被忽略的校验参数要能被扫出来；**恒等断言**（两个实参是同一表达式的拷贝、永不失败）与零断言同级判 P0 | ✅ `scripts/check-tests.mjs`，当前 P0 致命 0 |
 | 变异测试 | nightly 跑：故意改坏源码，红 = 真守着，绿 = 形同虚设 | ⚠️ `scripts/mutate.mjs` 已落地（只改 `.tmp/` 下的副本，不碰真实产物），**未接进 `verify`** |
-| 覆盖率 | 纯逻辑包（`schema` / `core` / `template` / 协商策略）**四项 100%**；IO 层靠契约测试与集成，不追数字 | ✅ `scripts/check-coverage.mjs`，三个受门禁包均达 100% |
+| 覆盖率 | 纯逻辑包（`schema` / `core` / `template`）**三项 100%**；IO 层靠契约测试与集成，不追数字 | ✅ `scripts/check-coverage.mjs`，三个受门禁包均达 100% |
 | 发版 | Conventional Commits，scope 用包名；版本由 changesets 推导 | ❌ changesets 未接入，版本号手工维护 |
 
 对**不可达分支**的处理沿用参考项目的定式：先分清是「没测到」还是「根本走不到」；走不到就**改代码删掉**，不许写替身去凑。
