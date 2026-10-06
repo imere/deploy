@@ -6,7 +6,7 @@
  * 所以本脚本只报信号、不下结论：每一条都要人眼过一遍再决定修不修。
  *
  * 分级：
- *   P0 致命  零断言用例 / 形同虚设的 assert.throws / 被忽略的校验形参（退出码非 0）
+ *   P0 致命  零断言用例 / 形同虚设的 assert.throws / 被忽略的校验形参 / 恒等断言（退出码非 0）
  *   P1 提示  弱存在性 assert.ok / 被 skip 的用例 / 空 catch
  *
  * 另有一类「断言常量字面量」：右值是常量的 assert 是完全正常的写法，它占全部命中的
@@ -363,6 +363,24 @@ for (const file of testFiles) {
       if (spans.length < 2) continue
       const lhs = snippet(body, spans[0][0], spans[0][1])
       const rhs = snippet(body, spans[1][0], spans[1][1])
+
+      /* --- 恒等断言：两个实参归一化后逐字符相同 —— 永不失败 ---
+         与零断言同级判 P0：一个永远不失败的断言，提供的保障与没有断言相同，
+         但它绿着，还会让「这条已经被验证过了」的错觉留在文件里。
+         归一化**只抹空白**：抹字面量会把「结构相同、值不同」的两个实参误判成恒等。
+         比较用未遮罩的原文 —— 遮罩会把字符串内容抹平，`f('a')` 与 `f('b')` 会被判成一样。
+
+         **只认不含函数调用的实参。** 带调用的实参会被求值两次，实现不确定时两边完全可以不等 ——
+         本仓 `packages/log` 的确定性用例就写成了 `assert.equal(formatRecord(rec, f), formatRecord(rec, f))`，
+         那正是它要验的东西（两次格式化必须一致）。把这类算成恒等，就是拿形状当语义。
+         宁可漏掉「两边都调同一个纯函数」这种只能靠人看的情况，也不能把确定性测试判成假测试。 */
+      const squash = (s) => s.replace(/\s+/g, '')
+      const hasCall = (s) => /[\w$)\]]\s*\(/.test(s)
+      if (squash(lhs) !== '' && squash(lhs) === squash(rhs) && !hasCall(lhs)) {
+        add(P0, 'P0', fileRel, bodyLineOf(a.index), name,
+          `assert.${a[1]}(${lhs.trim()}, ${rhs.trim()})：两个实参是同一表达式的拷贝，永不失败 —— 想比的是哪两个量，就各算一次`)
+      }
+
       if (/\w\s*\(/.test(lhs) && /^(?:true|false|-?\d+(?:\.\d+)?|'[^']*'|"[^"]*"|null|undefined|\[\]|\{\})$/.test(rhs)) {
         add(P0_REPORT, '仅报告', fileRel, bodyLineOf(a.index), name,
           `assert.${a[1]}(${lhs}, ${rhs})：右边是常量。可能是「把输出和期望常量对比」的合法写法，也可能是把函数调用结果写死；看被测逻辑对不对`)
