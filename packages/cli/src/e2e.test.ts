@@ -63,7 +63,20 @@ async function withWorkspace(fn: (dir: string) => Promise<void>): Promise<void> 
     )
     await fn(dir)
   } finally {
-    await fs.rm(dir, { recursive: true, force: true })
+    // 清理失败**绝不许盖掉用例真正的失败原因**：finally 里抛出的错误会替换掉 body 的错误。
+    // 实测踩过一次：子进程因超时被 SIGKILL，句柄还没释放，rm 报 EBUSY ——
+    // 于是日志里只剩 `rmdir EBUSY`，真实的「子进程超时 60000ms」被吃掉了，看日志根本查不到。
+    // 工作区在临时目录里，清不掉留给系统；用例的结论比清理重要。
+    try {
+      await fs.rm(dir, { recursive: true, force: true })
+    } catch {
+      try {
+        await new Promise((r) => setTimeout(r, 200))
+        await fs.rm(dir, { recursive: true, force: true })
+      } catch {
+        /* 仍清不掉就放弃：临时目录由系统回收，不能让它改变用例的结论 */
+      }
+    }
   }
 }
 
