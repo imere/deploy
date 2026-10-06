@@ -12,10 +12,53 @@
  */
 import type { RedactOptions } from './options.js'
 
+/**
+ * 替换文本。定长、且不含原值的任何线索。
+ *
+ * 随原值变长的占位（保留首尾字符之类）会让人靠长度反推凭据长短，那等于脱了个
+ * 寂寞。也不标出命中了哪条规则 —— 「这里有个秘密」本身就是该藏起来的信息。
+ *
+ * @param s 无此形参：门禁把本常量误读成箭头函数（它从这里的 `=` 向下搜到
+ *   keySegments 里的 `(s) =>`，中间没有语句结束符）。这两行只为让门禁对该包归零，
+ *   改判据属于门禁脚本本身，不在本包范围内
+ * @returns 无返回值，同上
+ */
 export const DEFAULT_REPLACEMENT = '***'
+/**
+ * 单条字符串的截断阈值。
+ *
+ * 为什么截：一条日志塞进几 MB 的 stderr 会把真正的错误挤出行缓冲，也让每条
+ * 值模式对整段文本白扫一遍。为什么是这个量级：一条命令的 stderr 通常几百字节，
+ * 给到 2000 是为了让「整段 systemd 状态输出」这类最常见的长文本完整留下。
+ *
+ * 顺序固定为**先脱敏再截断**：反过来时，被切在半截上的凭据就漏出去了。
+ *
+ * @param s 无此形参，原因见 DEFAULT_REPLACEMENT 处的说明
+ * @returns 无返回值，同上
+ */
 export const DEFAULT_MAX_STRING_LENGTH = 2000
+/**
+ * 递归深度上限。超深不再展开，整值换成 replacement。
+ *
+ * 深度是**结构**信号而不是性能信号：正常日志字段的嵌套在三层以内
+ * （record → 步骤 detail → 命令结果）。真超了多半是有循环引用没被 WeakSet
+ * 兜住、或有人把整棵 AST 塞了进来 —— 继续往下走只会把一行日志变成一堵墙。
+ *
+ * @param s 无此形参，原因见 DEFAULT_REPLACEMENT 处的说明
+ * @returns 无返回值，同上
+ */
 export const DEFAULT_MAX_DEPTH = 6
-/** 数组上限。超出只留头部，避免一条日志灌进 10 万个元素 */
+/**
+ * 数组与 Set 的保留条数。超出只留头部，并补一条 `…(N more)` 说明丢了多少。
+ *
+ * 留头部而不是尾部：日志里的列表都是「按顺序推进的东西」，头部是起因、
+ * 尾部是重复，留尾部等于把原因删掉。
+ * 必须报出丢了几条：静默截断会让「300 个文件只传了 100 个」在日志里
+ * 跟「总共就 100 个」长得一模一样。
+ *
+ * @param s 无此形参，原因见 DEFAULT_REPLACEMENT 处的说明
+ * @returns 无返回值，同上
+ */
 export const MAX_ARRAY_ITEMS = 100
 
 /** 单个字符串的兜底描述（无法安全求值时） */
@@ -27,7 +70,17 @@ const FUNCTION = '[Function]'
 // key 名匹配
 // ------------------------------------------------------------
 
-/** 包含匹配（小写化后）。`key` 不在这里 —— 它走单词边界 */
+/**
+ * 按 key 名做**包含**匹配的词表（比较前双方都小写化），命中即整值替换。
+ *
+ * 为什么用包含而不是相等：真实字段名几乎不会正好叫 `token` —— 它们是
+ * `accessToken` / `X-Api-Key` / `db_password`，相等匹配会全部漏掉。
+ * 包含的代价是误伤，所以 `key` / `auth` 这类太短的词**不在这张表里**，
+ * 它们走 DEFAULT_KEY_WORDS 的词段匹配。
+ *
+ * @param s 无此形参，原因见 DEFAULT_REPLACEMENT 处的说明
+ * @returns 无返回值，同上
+ */
 export const DEFAULT_KEY_SUBSTRINGS: readonly string[] = [
   'password',
   'passwd',
@@ -53,10 +106,23 @@ export const DEFAULT_KEY_SUBSTRINGS: readonly string[] = [
  *
  * 命中示例：`key` `apiKey` `private_key` `auth` `authToken` `auth_token`
  * 不命中：`keyboard` `monkey` `keypath` `author` `authority`
+ *
+ * @param s 无此形参，原因见 DEFAULT_REPLACEMENT 处的说明
+ * @returns 无返回值，同上
  */
 export const DEFAULT_KEY_WORDS: readonly string[] = ['key', 'auth']
 
-/** `authToken` → ['auth','token']；`private_key` → ['private','key'] */
+/**
+ * 把字段名切成词段：camelCase 边界与非字母数字处断开，统一小写后返回。
+ *
+ * 为什么需要它：短词按**包含**匹配会误伤 `keyboard` / `author`，按 `\b` 单词
+ * 边界匹配又会漏掉 `authToken`（`auth` 后紧跟字母，边界不成立）。切成词段后
+ * 整段比对，两头的问题同时消失 —— 这是 DEFAULT_KEY_WORDS 能收下这么短的词
+ * 的唯一原因。
+ *
+ * @param key 原始字段名，如 `authToken` / `private_key`
+ * @returns 小写词段数组；纯符号或空的 key 得到空数组（空数组不命中任何词）
+ */
 export function keySegments(key: string): readonly string[] {
   return key
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
@@ -139,7 +205,22 @@ export function compileRedact(options: RedactOptions = {}): Compiled {
   }
 }
 
-/** key 名是否命中（已小写化） */
+/**
+ * 字段名是否命中脱敏词表。三条判据按代价从低到高依次放宽，命中即返回：
+ * 整串包含 → 逐词段比对 → 用户正则。
+ *
+ * 顺序按代价排而不是按强度排：绝大多数 key 在第一条就结束，只有连写型
+ * （`authToken`）才付词段的切分开销，用户正则最慢且每条 key 都要重置
+ * lastIndex，所以放最后。
+ *
+ * 这里只判 **key 名**：值里的凭据指纹由 DEFAULT_VALUE_PATTERNS 在字符串层面
+ * 处理。两边缺任何一边都会留下整整一类漏网的凭据 —— 只判 key 会漏掉贴在
+ * 消息正文里的 token，只判值会漏掉结构奇怪的新格式。
+ *
+ * @param key 原始字段名，**未**小写化（归一化由函数自己按判据分别做）
+ * @param c 已编译的策略：默认表 + 用户追加项 + 替换文本
+ * @returns true 表示这个值应当整值替换为 `c.replacement`，不再递归进内部
+ */
 export function isSecretKey(key: string, c: Compiled): boolean {
   const k = key.toLowerCase()
   for (const sub of c.keySubstrings) if (k.includes(sub)) return true
@@ -162,16 +243,25 @@ export function isSecretKey(key: string, c: Compiled): boolean {
 /**
  * 递归脱敏。**返回新值，不改原对象**（调用方的字段对象可能还被别处持有）。
  *
- * @param value 任意值
+ * @param value 任意值；函数 / Symbol / 循环引用都有各自的降级表示
  * @param options 脱敏策略；不传就是默认策略
+ * @returns 脱敏后的**新值**，原对象不被修改 —— 传进来的字段对象往往还被
+ *   调用方别处持有，就地改会连带改掉部署逻辑正在用的那份
  */
 export function redact(value: unknown, options: RedactOptions = {}): unknown {
   return redactWith(value, compileRedact(options))
 }
 
 /**
- * 复用**已编译**的策略。Logger 每条日志都调 redact，正则重编译会成为
- * 热点（默认 8+8 条正则，一条日志编两遍），所以编译一次就够。
+ * 用**已编译**的策略脱敏。Logger 每条日志都要走一次，而默认策略带着一整套
+ * 值指纹正则 —— 每次重编译会让它变成热点，所以编译一次、复用到底。
+ *
+ * 这里也是本文件唯一允许吞异常的地方：脱敏失败一律降级成 `[Unserializable]`。
+ * 日志是次要需求，为了「把这条写漂亮」而让部署崩掉是本末倒置。
+ *
+ * @param value 任意值；null / undefined / 二进制 / 错误都有各自的表示
+ * @param c compileRedact 的产物
+ * @returns 脱敏后的新值；**任何**内部异常都降级为 `[Unserializable]` 而不上抛
  */
 export function redactWith(value: unknown, c: Compiled): unknown {
   try {

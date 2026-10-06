@@ -201,6 +201,21 @@ function isoNow(clock: () => Date): string {
 
 export interface CreateLoggerOptions extends LoggerOptions {}
 
+/**
+ * 全包唯一的装配入口：级别、格式、出口、时钟、脱敏策略在这里一次性定下来。
+ *
+ * 为什么走工厂而不是把 LoggerImpl 暴露出去：编译脱敏策略、套默认 sink、补默认
+ * 时钟这三件事必须发生在**任何一条日志写出之前**，散给调用方就等于允许有人绕过
+ * 它们 —— 绕过一次脱敏就是一次凭据落盘，而这种漏法在日志里看不出来。
+ *
+ * 三个默认值的口径：级别 `info`（理由见 DEFAULT_LEVEL）、格式 `json`（唯一机器
+ * 可解析的，离线分析与报告都只认它）、出口 stdout。时钟默认真时钟，要可断言的
+ * 输出就注入 `clock`。
+ *
+ * @param options 级别 / 格式 / sink / 时钟 / 绑定字段 / 脱敏策略，全可选
+ * @returns 一个 Logger。它的**所有方法都不抛**（写失败只落 stderr），所以调用方
+ *   不需要为记日志准备 try/catch —— 记日志不该改变部署的控制流
+ */
 export function createLogger(options: CreateLoggerOptions = {}): Logger {
   const level = options.level ?? DEFAULT_LEVEL
   const format = options.format ?? 'json'
