@@ -54,10 +54,18 @@ export { runProcess, realSpawn, DEFAULT_TIMEOUT_MS, summarizeFailure, type RunPr
 const DEFAULT_KNOWN_HOSTS: KnownHostsMode = 'strict'
 
 /**
- * 传输一次。
+ * 传一次。
  *
- * 步骤固定为 **协商 → 构造 argv → 执行**，每一步的结论都进日志（
- * 协商必须显式可见，用户有权知道为什么这次比上次慢）。
+ * 固定三段：**协商 → 构造 argv → 执行**。分段的意义是每一步的结论都能单独展示与
+ * 断言，而「计划里说 rsync、实际跑了 tar」是这类系统最难发现的一类分叉。
+ * 协商结论与工具清单不一致时（探测已陈旧）**报 DP.SSH.TOOL_MISSING 而不偷偷换一条**：
+ * 换掉的话报告里显示的传输方式与机器上发生的事就不一致了。
+ *
+ * @param req 一次传输的声明，不含「用哪种方式」——那由两端 Facts 决定
+ * @param deps 依赖与偏好。本机目标需注入 localRunner；远端需给 remoteFacts
+ * @returns 传输结果，`command` 为实际执行的 argv，供日志与报告使用
+ * @throws DpError DP.CONFIG.INVALID（缺 Facts / 缺 localRunner / 本机没有 ssh）、
+ *   DP.SSH.TOOL_MISSING、DP.PREF.UNSUPPORTED（偏好不可用，或选到尚未接入执行的 sftp）
  */
 export async function transfer(
   req: TransferRequest,

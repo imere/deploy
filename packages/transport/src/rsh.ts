@@ -49,8 +49,24 @@ export type HopMode =
   /** `-o ProxyCommand=ssh <jump> nc %h %p`，跳板禁 TCP 转发但允许 exec 时的退路 */
   | 'proxy-command-nc'
 
+/**
+ * 连接阶段的兜底超时（**秒**），写进 ssh 的 `-o ConnectTimeout=`。
+ *
+ * 为什么必须由我们显式给：ssh 自己默认**无限等** TCP 连接。目标机不可达时它卡在
+ * 连接上且没有任何输出 —— 既不会超时也不会失败，在 CI 里就是永久挂起。
+ *
+ * 为什么单位是秒而不是毫秒：这个值直接作为 ssh 选项的值落进 argv，单位由 ssh 定。
+ * 换成毫秒就得多一个换算点，而换算点一多就会漏（漏掉的形状是 `ConnectTimeout=15000`）。
+ */
 export const DEFAULT_CONNECT_TIMEOUT_SEC = 15
 
+/**
+ * 造 `--rsh` / `-e` 需要的 ssh 选项。
+ *
+ * 字段与 `@dp/ssh` 的 ssh argv 同源，但**只收这一处用得到的**：多收一个字段就等于
+ * 承诺会把它正确送进 rsync 的 `-e`，而 `-e` 是按空白拆分的（见文件头），
+ * 多一个含空白的值就会在目标机上静默连错，且不报错。
+ */
 export interface RshOptions {
   /** 本机 ssh 可执行文件的绝对路径（来自 facts.tools.ssh） */
   readonly sshPath: string
@@ -79,6 +95,12 @@ const hasWhitespace = (s: string): boolean => /[\s]/.test(s)
  * **返回的 argv 不含主机名，也不含 `rsync --server`** —— 那半截是 rsync 自己追加的
  * （实测样本 `ARGC=8 [-l][dpuser][dp-target][rsync][--server]...`）。
  * 写上主机名会变成"连错两次"。
+ *
+ * @param options ssh 路径、认证方式、主机密钥策略、跳板链等。`hops` 顺序即到达顺序，
+ *   **最后一跳是目标机**，所以它不进 `-J`
+ * @returns `--rsh` 的 argv 前缀，**不含主机名**，也不含 `rsync --server` 那半截
+ * @throws DpError DP.CONFIG.INVALID：ProxyCommand 形态收到多跳（它只表达一跳）、
+ *   跳板标识含空白或为空（无法作为单个 argv）、ConnectTimeout 不是正整数秒
  */
 export function buildRshArgv(options: RshOptions): readonly string[] {
   const hops = options.hops ?? []
@@ -147,6 +169,15 @@ export function buildRshArgv(options: RshOptions): readonly string[] {
  * 这里额外做一件事：rsync 按空白拆分 `-e`，所以含空白的 argv 元素（典型就是
  * ProxyCommand 形态）**不能**这么用。@dp/ssh 的 `rshOptionValue` 会抛一个纯
  * 事实性错误；我们把它翻译成可执行的下一步。
+ *
+ * 为什么把「不能这么用」做成显式断言而不是照常拼字符串：拼出来的字符串在 rsync 侧
+ * 会被按空白切成几段，于是 ssh 收到一堆错位的参数 —— 它不会报「你的 -e 有问题」，
+ * 而是报一个和目标机毫无关系的用法错误，排障方向直接错。
+ *
+ * @param argv `buildRshArgv` 的返回值（不含主机名）
+ * @returns 可以直接交给 rsync `-e` 的单字符串
+ * @throws DpError DP.CONFIG.INVALID：argv 里有含空白的元素（典型是 ProxyCommand 形态），
+ *   hint 里给出两条出路（改 `-J` 形态 / 走 dp-rsh 助手）
  */
 export function rshValueForRsync(argv: readonly string[]): string {
   try {

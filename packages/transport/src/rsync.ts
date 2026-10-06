@@ -16,6 +16,13 @@ import { runProcess, summarizeFailure, type RunProcessResult } from './proc.js'
 import { buildRshArgv, rshValueForRsync, type RshOptions } from './rsh.js'
 import type { TransferRequest, TransferResult, SpawnImpl } from './types.js'
 
+/**
+ * 构造 rsync argv 需要的外部输入。
+ *
+ * 三样东西全部来自**探测**而不是配置：`rsyncPath` 与 `rsh.sshPath` 是 `facts.tools`
+ * 的实证结果，`remoteTarget` 只是个标识。让调用方直接传命令路径，就等于允许
+ * 「配置里写一个并不存在的 rsync」—— 而协商是按 facts 做的，两处会悄悄分叉。
+ */
 export interface RsyncArgvOptions {
   /** 本机 rsync 绝对路径与本机 ssh 绝对路径（均来自 facts.tools） */
   readonly rsyncPath: string
@@ -23,8 +30,10 @@ export interface RsyncArgvOptions {
   /** 目标主机标识，不含 user 前缀。rsync 自己追加 `[-l user] host`，所以它只在目标串里出现 */
   readonly remoteTarget: string
   /**
-   * 保留 owner/group。默认**不带** `-o -g`：多数部署用户没有 chown 权限，
-   * 带了会在每台机器上稳定失败（的教训：看起来有 ≠ 真能用）。
+   * 额外要求保留 owner/group。默认**不再追加** `-o -g`：多数的部署身份没有 chown 权限，
+   * 显式追加强制保留会让 rsync 对**每一个**条目去 chown/chgrp —— 做不到时要么报一堆
+   * 权限错误把真正的传输错误淹掉，要么静默丢掉属主而让人以为保留了。
+   * 需要它时必须显式打开：那时用户已经确认自己有这个权限。
    */
   readonly preserveOwner?: boolean
 }
@@ -33,10 +42,15 @@ const rsyncPath = (req: TransferRequest): string =>
   req.remoteRoot.endsWith('/') ? req.remoteRoot : `${req.remoteRoot}/`
 
 /**
- * 提权后的远端 rsync 前缀。
+ * `--rsync-path` 的值：用提权命令把远端 `rsync` **这一个词**包起来。
  *
- * `--rsync-path` 是**前缀**而非完整命令：rsync 自己会在后面追加 `--server`。
- * 所以这里包装的只有 `rsync` 这一个词。
+ * 只包装一个词而不是写整条命令，是因为 `--rsync-path` 是**前缀**：rsync 会在后面
+ * 追加 `--server` 及它自己的参数。补写完整命令就会变成「我们要执行的命令」，
+ * 少一个 `--server` 就对不上协议，而对不上时 rsync 报的是别的错。
+ *
+ * @param become 远端提权方式（@dp/ports）。`undefined` 或 `type: 'none'` 表示不提权
+ * @returns 逐项转义过的提权前缀；**不提权时返回 undefined**，让调用方根本不加这个
+ *   选项 —— 加一个空值会让 rsync 去执行一个空命令
  */
 export function buildRsyncPath(become: TransferRequest['become']): string | undefined {
   if (become === undefined || become.type === 'none') return undefined
@@ -52,6 +66,12 @@ export function buildRsyncPath(become: TransferRequest['become']): string | unde
  *  - `--itemize-changes`：让输出可解析，而不是靠人看 `sending incremental file list`
  *  - `--human-readable=0`：机器读，人格式的 "1.23K" 要反解
  *  - `--out-format=%i %n`：逐行可解析；不指定时 rsync 对 0 字节文件会整行省略
+ *
+ * @param req 传输声明。清单为空直接拒绝 —— 空清单会让"部署成功"变成一句无法证伪的话
+ * @param options rsync 路径、rsh、目标标识，以及是否额外保留属主
+ * @returns 可直接 spawn 的 argv，不经 shell
+ * @throws DpError DP.SOURCE.EMPTY（清单为空）、DP.CONFIG.INVALID（目标标识为空串）；
+ *   rsh 含空白时由 `rshValueForRsync` 抛
  */
 export function buildRsyncArgv(
   req: TransferRequest,
@@ -92,13 +112,22 @@ export function buildRsyncArgv(
 // ------------------------------------------------------------
 
 /**
- * rsync 的退出码分类。
+ * 退出码 → 「这次传输算不算成」的判定表。
  *
  * **23/24 绝不能「静默」当成功**：它们表示"部分文件在传输过程中变了或消失了"。
  * 所以这里 `ok: true` 但 `partial: true`，由 `runRsync` 把它翻成一条 warning ——
  * 直接判失败会让「源目录里有个临时文件被清掉」这种无害抖动也把部署打断，
  * 而完全不报则会让部署看起来绿、目标上的文件其实是缺的（最难查的一类事故）。
- * 255 是 ssh 层失败（rsync 自己给不出更细的码），要带上 ssh 的原话。
+ *
+ * 255 必须**再往下细分**（认证 / 主机密钥 / 连接）：rsync 对 ssh 层的失败一律只给 255，
+ * 而这三类的处置完全不是一回事 —— 认证失败要去看 identityFile 与 authorized_keys，
+ * 主机密钥不匹配要人确认目标机身份（永不自动放行），连接失败才去查端口与防火墙。
+ * 合成一个「ssh 失败」就等于把用户扔进三种排查里随机挑一个，平均要试三次。
+ *
+ * @param code rsync 自己的退出码，原值传进来（不归一化）
+ * @param stderr 原始 stderr。里面的路径与用户会在进 message 前被脱敏
+ * @returns `ok` 是否算成功、`partial` 是否只是部分成功（23/24）、失败时 `error` 带可执行的 hint。
+ *   **不抛错**：判定与处置分开，让调用方能先记日志再决定
  */
 export function classifyRsyncExit(
   code: number,
@@ -178,6 +207,13 @@ function redactString(text: string): string {
 // 输出解析
 // ------------------------------------------------------------
 
+/**
+ * 只有**真能从输出里读出来**的字段才放在这里 —— 读不出来的字段一律留空而不是填 0，
+ * 因为 0 会被上层当成「确实传了 0 个」，而那是和「没读出来」相反的一个结论。
+ *
+ * `--stats` 给得出文件数与字节数，但给不出「哪些文件失败了」这类结论；
+ * 缺的这种就不硬造一个字段，报告里还有退出码可以判定成败。
+ */
 export interface RsyncStats {
   readonly filesTransferred: number
   readonly bytes?: number
@@ -186,10 +222,17 @@ export interface RsyncStats {
 }
 
 /**
- * 解析 rsync 的机器可读输出。
+ * 从 rsync 的 stdout 里读统计。
  *
- * 优先用 `--stats` 的汇总行（权威），拿不到再退到 itemize 行计数 —— 汇总行
- * 在老版本 rsync 上格式可能变，届时至少不崩。
+ * 优先读 `--stats` 的汇总行而不是自己数 itemize 行：汇总行是 rsync 自己算的权威数字，
+ * 而逐行数 `%i` 行会把目录项与 `*deleting` 项也算进去 —— 两边口径不同，
+ * 「我传了几个文件」就会因读法不同而变。
+ *
+ * 汇总行读不到时**退回 0 而不抛错**：统计数字读不出来不该让一次已经成功的传输失败，
+ * 它只是少了一个数字，而报告里还有退出码可以判定成败。
+ *
+ * @param stdout rsync 的完整 stdout（含 `--stats` 段与 itemize 行）
+ * @returns 文件数与字节数（读不出字节数时不带这个键），以及被判定为「源与目标不一致」的条目
  */
 export function parseRsyncOutput(stdout: string): RsyncStats {
   const filesMatch = /Number of regular files transferred:\s*([\d,]+)/.exec(stdout)
@@ -230,7 +273,19 @@ export interface RunRsyncOptions {
   readonly dryRun?: boolean
 }
 
-/** 起 rsync 并把退出码翻译成结果。23/24 走 warning，不静默当成功。 */
+/**
+ * 起 rsync 并把退出码翻译成结果。23/24 走 warning，不静默当成功。
+ *
+ * 这里是**唯一**把 `classifyRsyncExit` 的结论变成 throw 的地方：判定与抛错分开，
+ * 是为了让退出码分类可以脱离子进程被逐条断言，而执行层只管「该不该抛」。
+ *
+ * @param argv `buildRsyncArgv` 的产出，不经 shell
+ * @param options 超时 / spawn 注入 / dryRun。dryRun 下 `filesTransferred` 恒为 0：
+ *   一个从清单推出来的数字会让人以为真的搬了东西
+ * @returns rsync 路径的传输结果，外加 `partial`（部分传输）。`command` 是脱敏后的 argv
+ * @throws DpError 由 `classifyRsyncExit` 判定出的那个码（认证 / 主机密钥 / 连接 / 权限 / 缺工具 /
+ *   验证失败）；超时与 prompt 由 `runProcess` 抛
+ */
 export async function runRsync(
   argv: readonly string[],
   options: RunRsyncOptions = {},

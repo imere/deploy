@@ -11,6 +11,13 @@ import { join } from 'node:path'
 import { DpError, type Runner } from '@dp/ports'
 import type { TransferRequest, TransferResult } from './types.js'
 
+/**
+ * 本机复制的两类计数。
+ *
+ * 分开而不是合成一个「条目数」：目录是我们**建出来**的，文件是**写了内容**的，
+ * 两者的失败方式不同。合成一个数之后，「建了 200 个目录却一个文件都没写进去」
+ * 看起来和「传了 200 个文件」一模一样。
+ */
 export interface CopyLocalResult {
   readonly files: number
   readonly dirs: number
@@ -18,6 +25,23 @@ export interface CopyLocalResult {
 
 const rel = (root: string, relativePath: string): string => join(root, ...relativePath.split('/'))
 
+/**
+ * 本机复制：**不起任何子进程，也不碰网络**。
+ *
+ * 逐条经 `Runner` 写而不是 `cp -r`：本机目标与远端目标要共用同一套「写文件」的语义，
+ * 各走一条路的话，「本机成功、远端失败」的差异里有一半是两套实现本身的差异，
+ * 排障时根本分不清。
+ *
+ * 目录按**条目的祖先链**建，不按文件名猜：靠「名字里有没有点」判断目录，会把
+ * `README`、`Makefile` 这类无扩展名的文件建成目录，而真正的父目录反而没建，
+ * 随后 writeFile 直接 ENOENT。判断「哪些是目录」不该靠文件名。
+ *
+ * @param req 传输声明。`entries` 为空直接报 DP.SOURCE.EMPTY —— 空清单会让
+ *   「部署成功」变成一句无法证伪的话
+ * @param runner 落盘通道，由调用方注入（本包零依赖 @dp/local，只认 ports 的 Runner 接口）
+ * @returns 复制结果。`command` 是一行**给人看的说明**，不是 argv —— 本机没有 argv
+ * @throws DpError DP.SOURCE.EMPTY；写失败由注入的 Runner 抛（DP.PATH.NOT_WRITABLE）
+ */
 export async function copyLocal(
   req: TransferRequest,
   runner: Runner,

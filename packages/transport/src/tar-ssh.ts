@@ -18,6 +18,13 @@ import { buildRshArgv, rshValueForRsync } from './rsh.js'
 import type { TransferRequest, TransferResult, SpawnImpl } from './types.js'
 import type { RshOptions } from './rsh.js'
 
+/**
+ * tar-ssh 两侧的构造输入。
+ *
+ * `become` 只作用于**远端解包端**：本机 tar 就在本机跑，给它套提权包装既没用，
+ * 还会改变「本机到底执行了什么」这件事。放在这里而不是让两侧各从请求里读一次，
+ * 是为了让「提权落在哪半边」只有一个地方说了算。
+ */
 export interface TarArgvOptions {
   readonly localTarPath: string
   readonly rsh: RshOptions
@@ -26,6 +33,13 @@ export interface TarArgvOptions {
   readonly become?: TransferRequest['become']
 }
 
+/**
+ * 两侧的 argv 必须**成对**返回，而不是两个各自独立的返回值。
+ *
+ * 成对而不是分开：任一半单独执行都不成立 —— 本机端产出的归档流
+ * 没人接，远端端的 stdin 没人喂。分开传就会出现「只起了一半」的调用，而这种调用
+ * 不报错，只是默默挂着。
+ */
 export interface TarArgvPair {
   /** 本机打包端 */
   readonly local: readonly string[]
@@ -39,6 +53,12 @@ export interface TarArgvPair {
  * `--` 之后才是文件清单：tar 会把以 `-` 开头的文件名当选项解析（铁律 2，
  * 歧义靠拒绝）。`--no-same-owner` 是**故意的**：非 root 解包时保留 owner 会失败，
  * 而且提权解包时保留 owner 也不是我们要的语义。
+ *
+ * @param req 传输声明。清单为空直接拒绝：空的归档流在两端都「成功」，
+ *   而那会让「部署成功」变成一句无法证伪的话
+ * @param options 本机 tar 路径、rsh、目标标识，以及远端解包的提权方式
+ * @returns 两侧 argv。`--` 之后才是文件清单，之后追加的任何东西都不会被当成选项
+ * @throws DpError DP.SOURCE.EMPTY（清单为空）
  */
 export function buildTarArgv(req: TransferRequest, options: TarArgvOptions): TarArgvPair {
   if (req.entries.length === 0) {
@@ -71,7 +91,16 @@ export function buildTarArgv(req: TransferRequest, options: TarArgvOptions): Tar
   return { local, remote }
 }
 
-/** 提权包装后的远端命令串，**只用于日志与结果展示**，不进 argv */
+/**
+ * 远端解包命令拼成一行，**只用于日志与结果展示**。
+ *
+ * 绝不拿它去 spawn：拼成串就意味着要靠一次拆分才能变回 argv，而拆分的规则两边
+ * 未必一致（引号、空白、转义）。展示用的字符串与执行用的 argv 必须是两份东西，
+ * 让同一份既展示又执行是这类包装最经典的出错口。
+ *
+ * @param argv 远端解包端的一整条 argv（含 ssh 选项与提权包装）
+ * @returns 逐项转义后拼成的一行命令，供人读；不是可执行输入
+ */
 export function remoteExtractCommand(argv: readonly string[]): string {
   return argv.map(quoteArg).join(' ')
 }
@@ -87,6 +116,13 @@ export interface RunTarSshOptions {
  *
  * 任一端失败都杀掉另一端 —— 远端 tar 挂了却让本机 tar 继续往管道写，
  * 结果是一个永远不消费的孤儿进程（Windows 上更明显，native.ts 注释里记过）。
+ *
+ * @param pair `buildTarArgv` 给出的两侧 argv
+ * @param options 超时 / spawn 注入 / dryRun
+ * @returns tar-ssh 路径的传输结果。`filesTransferred` 是**我们打包的条目数**，
+ *   不是「对面收到了几个」—— 归档流没有回执，报成后者就是谎报
+ * @throws DpError DP.VERIFY.FAILED（本机打包失败）、DP.SSH.CONNECT_FAILED（远端 255）、
+ *   DP.SSH.TOOL_MISSING（远端 127，目标机没有 tar）、DP.PATH.NOT_WRITABLE（远端解包失败）
  */
 export async function runTarSsh(
   pair: TarArgvPair,

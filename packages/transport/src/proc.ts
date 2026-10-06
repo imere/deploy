@@ -18,9 +18,30 @@ import { DpError } from '@dp/ports'
 import { detectPrompt, killProcessTree } from '@dp/ssh'
 import type { SpawnImpl, SpawnedProcess } from './types.js'
 
+/**
+ * 传输子进程的兜底超时（毫秒）。
+ *
+ * 为什么必须有一个缺省值：rsync 连一台不可达的主机时不会自己退出，而是一个
+ * 永远不返回的进程。没有兜底就是一次永不结束的部署 —— 在 CI 里表现为永久挂起，
+ * 比失败难查得多。
+ *
+ * 为什么是 120 秒而不是更短：这里跑的是**整个构建产物**的传输，慢链路上几十秒
+ * 很正常。定得太短会把「正常但慢」判成超时，用户只能不断把它调大 —— 那等于把
+ * 兜底交回给用户，兜底就不存在了。（探测类命令是另一个量级，见 @dp/local 那份缺省。）
+ */
 export const DEFAULT_TIMEOUT_MS = 120_000
 const DEFAULT_MAX_OUTPUT = 8 * 1024 * 1024
 
+/**
+ * 起子进程的可选项。
+ *
+ * 刻意**没有** `shell` 开关：本包只 `spawn(exe, argv[])`，经过 shell 就等于把
+ * rsync/scp 的 argv 重新拼成一行命令。一个只能取 false 的选项不需要存在。
+ *
+ * 每一项缺省都对应一个本包能自己定的选择（超时走 `DEFAULT_TIMEOUT_MS`、
+ * spawn 走系统实现、输出上限走 8 MiB），**没有一项的缺省是「不限」**：
+ * `maxOutputBytes` 不传也要守住 8 MiB，否则一个死循环打日志的远端命令会把内存吃干。
+ */
 export interface RunProcessOptions {
   readonly timeoutMs?: number
   readonly env?: Readonly<Record<string, string | undefined>>
@@ -40,6 +61,17 @@ export interface RunProcessResult {
   readonly killed: boolean
 }
 
+/**
+ * 真实的 spawn —— 生产侧的实现，测试用 fake 顶替。
+ *
+ * `shell` 在这里硬写 false 而**不读**传入的 options：`SpawnOptions` 留着
+ * `shell?: false` 只是为了让 fake 与真实实现共用一个签名，真实实现不接受打开它。
+ *
+ * @param file 可执行文件。可以是绝对路径（来自 `facts.tools`，如 rsync/scp）
+ * @param args 参数数组，逐项传递，不拼成一行
+ * @param options 只有 cwd / env / stdio / detached 会真的透传；`shell` 恒为 false
+ * @returns 子进程句柄，按 `SpawnedProcess` 收窄 —— 只暴露本包用得到的那几个成员
+ */
 export const realSpawn: SpawnImpl = (file, args, options) =>
   nodeSpawn(file, args as string[], {
     ...(options as Record<string, unknown>),
@@ -52,6 +84,15 @@ export const realSpawn: SpawnImpl = (file, args, options) =>
  *
  * 注意 `spawn` 的 `error`（ENOENT 等）**先于** `close` 到达，所以 `settled`
  * 守卫必须同时挡住两条路径，否则会出现"已 reject 又 resolve"的悬空。
+ *
+ * @param argv 可执行文件 + 参数。空数组直接在起步前报错，不落到 spawn
+ * @param options 超时 / env / spawn 注入 / stdin；`label` 决定超时消息里显示的名字
+ *   （spawn 手里那个可能是绝对路径，人读不出是哪个工具）
+ * @returns 退出码、stdout/stderr，以及 `killed`（区分「自己退的」与「被我们杀的」）。
+ *   退出码**原样保留**，不归一化：信号杀死按 128+信号号，压成 1 会抹掉「是谁杀的」
+ * @throws DpError DP.CONFIG.INVALID（argv 为空 / spawn 同步抛错）、DP.TIMEOUT.EXEC（超时，
+ *   已杀进程树）、DP.INTERACTIVE_PROMPT_DETECTED（输出里嗅到 prompt，已杀进程）、
+ *   DP.SSH.TOOL_MISSING（ENOENT：可执行文件不存在，通常说明 facts 已陈旧）
  */
 export function runProcess(
   argv: readonly string[],
@@ -178,7 +219,17 @@ export function runProcess(
   })
 }
 
-/** stderr → 可进 message 的一句话。沿用 @dp/ssh 的取法：首行、截断。 */
+/**
+ * stderr → 可以进 message 的一句话。
+ *
+ * 只取**首行非空**并截断：这句要进 `DpError.message`，而 message 会被日志与 JSON
+ * 报告整条带走。整段 stderr 进去会淹没同行的其它字段，而真正的失败原因几乎总在第一行。
+ * 取不到时返回空串而不是编一个「未知」—— 占位词会让上层以为手里有证据。
+ *
+ * @param stderr 子进程的原始 stderr。含远端路径与用户，进 message 前应先过 `@dp/log` 的脱敏
+ * @param max 截断长度（字符数）。默认 300 是「够看清一条 ssh 报错」的量级
+ * @returns 首行非空内容（超长则截断加省略号）；没有任何内容时为空串
+ */
 export function summarizeFailure(stderr: string, max = 300): string {
   const first = stderr
     .split(/\r?\n/)

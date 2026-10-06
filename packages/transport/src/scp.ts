@@ -15,6 +15,13 @@ import { buildRshArgv, rshValueForRsync } from './rsh.js'
 import type { TransferRequest, TransferResult, SpawnImpl } from './types.js'
 import type { RshOptions } from './rsh.js'
 
+/**
+ * scp 侧构造 argv 的输入。
+ *
+ * 形状与 rsync 那套**刻意保持一致**（本机可执行文件路径 + 同一份 rsh + 目标标识）：
+ * 两种传输在同一条偏好链上，调用方换一条路时不该重新学一套字段 —— 字段形状一变，
+ * 「换传输方式」就变成一次需要改调用点的迁移。
+ */
 export interface ScpArgvOptions {
   /** 本机 scp 绝对路径（facts.tools.scp） */
   readonly scpPath: string
@@ -23,6 +30,23 @@ export interface ScpArgvOptions {
   readonly remoteTarget: string
 }
 
+/**
+ * scp 的完整 argv。**纯函数**。
+ *
+ * `-O` 写死而不是留默认值：OpenSSH 9+ 的 scp 默认改走 sftp 协议，老目标机只认传统
+ * SCP 协议。不写死的话，同一份配置会随**本机** scp 的版本不同而连出不同的结果，
+ * 而版本恰恰是没人去看的东西。
+ *
+ * `deleteExtraneous` 与 `become` 在这里**抛错而不是静默忽略**：scp 协议既没有
+ * 「删多余文件」也没有「包装远端命令」的位置。静默忽略的后果是用户以为远端被清干净了、
+ * 以为提权生效了，而两者都没发生 —— 报告说做了、实际没做，是最难发现的一类错。
+ *
+ * @param req 传输声明
+ * @param options scp 路径、rsh 选项与目标标识
+ * @returns 可直接 spawn 的 argv
+ * @throws DpError DP.SOURCE.EMPTY（清单为空）、DP.PREF.UNSUPPORTED（请求了 --delete，
+ *   或请求了远端提权 —— 后者在 rsync 上有 `--rsync-path` 可以落，scp 没有）
+ */
 export function buildScpArgv(req: TransferRequest, options: ScpArgvOptions): readonly string[] {
   if (req.entries.length === 0) {
     throw new DpError('DP.SOURCE.EMPTY', '源清单为空，拒绝传输', {
@@ -67,6 +91,21 @@ export interface RunScpOptions {
   readonly expectedEntries?: number
 }
 
+/**
+ * 起 scp 并把退出码翻译成结果：255 单独认成 **ssh 层**失败而不混进「scp 失败」。
+ *
+ * 之所以要分这一层：scp 把 ssh 的错误原样冒上来，
+ * 都归到「传输失败」会让人去查目标目录权限，而实际是连都没连上 —— 排障方向直接错，
+ * 且这两类的处置完全不相干。
+ *
+ * @param argv `buildScpArgv` 的产出
+ * @param options 超时 / spawn 注入 / dryRun。`expectedEntries` 是文件数的**唯一来源**：
+ *   scp 成功时不输出任何统计，从 argv 反推条目数是猜，而猜出来的文件数会让人以为
+ *   scp 做了它没做的事
+ * @returns scp 路径的传输结果。dryRun 下 `filesTransferred` 恒为 0
+ * @throws DpError DP.SSH.CONNECT_FAILED（255）、DP.PATH.NOT_WRITABLE（目标不可写 /
+ *   找不到）、DP.VERIFY.FAILED（其它非 0 退出码）；超时与 prompt 由 `runProcess` 抛
+ */
 export async function runScp(
   argv: readonly string[],
   options: RunScpOptions = {},
