@@ -31,6 +31,13 @@ export interface RenderContext {
  */
 export type Usage = 'text' | 'path' | 'shell' | 'conf'
 
+/**
+ * 单次渲染的选项。
+ *
+ * path 与 usage 都在这里而不在 `RenderContext`：它们描述的是**这一次调用**
+ * 发生在配置的哪个位置、产出物要去哪，而不是这次部署的环境。放进 context
+ * 的后果是同一个 ctx 渲染多处时，后一处的 path 会覆盖前一处的定位信息。
+ */
 export interface RenderOptions {
   /** 出错时定位到具体配置项，如 'projects.web.target.confd' */
   readonly path?: string

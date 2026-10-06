@@ -54,6 +54,15 @@ const ENV_KEYS = [
   'Path',
 ] as const
 
+/**
+ * 采集一份环境变量**快照**。
+ *
+ * 只取白名单里的键：facts 会进 plan 与报告，把整个 process.env 原样带出去等于
+ * 把凭据写进日志。白名单同时是「哪些变量真的参与路径推导」的答案 ——
+ * 外面那些变量对部署没影响，带进来只是噪音与风险。
+ *
+ * @returns 不可变副本，键固定为 PATH 加白名单各项（不存在的键为 undefined 而非缺省 '')
+ */
 export function snapshotEnv(): Readonly<Record<string, string | undefined>> {
   const out: Record<string, string | undefined> = { PATH: process.env.PATH ?? process.env.Path }
   for (const k of ENV_KEYS) out[k] = process.env[k]
@@ -63,6 +72,13 @@ export function snapshotEnv(): Readonly<Record<string, string | undefined>> {
 /** 探测文件的删除动作。抽成参数是为了让「删不掉」这条路径可测 —— 真机器上要靠权限异常才碰得到。 */
 export type ProbeRemove = (path: string) => Promise<unknown>
 
+/**
+ * 一次可写性实测的结果。
+ *
+ * `leftovers` 单列而不是直接丢弃：判定（建出来了没有）与清理（删掉了没有）
+ * 是两件独立的事，把它们合成一个布尔，症状要么是把明明可写的目录报死，
+ * 要么是残留悄悄攒了一堆而无人知晓。
+ */
 export interface WritableProbe {
   readonly canWrite: Readonly<Record<string, boolean>>
   /** 建成功、两次删除都没成功回收的探测文件。非空即表示目标目录里有 dp 留下的垃圾 */
@@ -95,6 +111,13 @@ async function removeOnceWithRetry(path: string, remove: ProbeRemove): Promise<b
  * 后面删不掉只说明清理失败（占用 / ACL / 锁），拿它改写判定会把明明可写的目录报成
  * 不可写。清理失败也不吞掉 —— 路径进 `leftovers` 交出去，否则残留会悄悄攒成
  * 一堆、然后把所有候选目录拖成不可写，而没有任何线索指得到它。
+ * @param paths 待实测的路径，通常是候选目录。**必须传**而不是内部取默认：
+ *   「探哪些目录」是部署布局的推导结果，探测层自己决定候选就等于把推导复制一份，
+ *   两份候选不一致时同一份配置会在本机与远端得出不同的结论
+ * @param options 目前只有 remove（注入删除动作）；生产用 fs.rm，测试注入必定失败的版本
+ * @returns 每个输入路径一条结论（key 与入参一一对应），外加清理失败的残留路径。
+ *   路径互相独立，一个失败不影响其余
+ * @throws 理论上不抛：建文件失败按「不可写」记录而不是中断
  */
 export async function probeWritable(
   paths: readonly string[],
@@ -211,6 +234,13 @@ async function probeSudoAllowlist(): Promise<readonly string[]> {
   }
 }
 
+/**
+ * 探测参数。全可选，且**缺省值就是「按平台该探的那一套」**。
+ *
+ * 三项各自都有存在理由，没有一项是为了凑测试接口：
+ * 探哪些路径由调用方给（见 probeWritable），工具清单同理 —— 探测层不该替部署
+ * 决定「需要哪些工具」，那是 target 的事。
+ */
 export interface ProbeOptions {
   /** 需要实测写权限的路径（通常是发布目录候选展开后的结果） */
   readonly writeProbePaths?: readonly string[]
@@ -235,6 +265,18 @@ const TOOLS_TO_PROBE = [
   'git',
 ] as const
 
+/**
+ * 本机事实探测的入口。产出的 `Facts` 是纯数据，**不缓存** ——
+ * 部署途中权限可能变（提权后、写满磁盘后），拿一份十分钟前的结论去决定
+ * 当前能不能写，恰好是这类工具最要避免的那种自信。
+ *
+ * 代价明确记在这里：每条能力都是一次真实的系统调用或子进程（bind 一个端口、
+ * 建一批临时文件再删），所以调用方**按需探一次并把结果传下去**，不要在循环里调。
+ *
+ * @param options 见 ProbeOptions；不传即按平台取默认候选与默认工具表
+ * @returns 目标机事实。值全部是实测结果，`'unknown'` / `'none'` 表示探过但结论为否，
+ *   不表示没探 —— 上层靠这个区分「确认不可用」与「还没查」
+ */
 export async function probeLocalFacts(options: ProbeOptions = {}): Promise<Facts> {
   const env = snapshotEnv()
   const home = osHomedir()

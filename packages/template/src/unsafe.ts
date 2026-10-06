@@ -123,6 +123,15 @@ function assertPathRules(value: string, path: string | undefined): void {
  *
  * 渲染路径上只校验**被替换进去的那个值**，不校验整份模板 —— 模板自身的多行结构
  * 是作者写的、是被允许的；危险的是注入进来的内容。
+  *
+  * 严格程度按 usage 分档（见 Usage），因为同一个字符在两处后果不同：
+  * shell 档的换行能把一条参数拆成两条指令，text 档的换行只是普通文本。
+  * 一律用最严的档位会把所有多行 conf 全部拒掉。
+  *
+  * @param value 刚解析出来的变量值，**不是**整份模板
+  * @param usage 该值最终会落在哪，决定挡哪些字符
+  * @param path 配置路径，仅用于错误消息定位
+  * @throws DpError `DP.TPL.UNSAFE_VALUE`，hint 指出这个字符在这个位置具体会做什么
  */
 export function assertSafe(value: string, usage: Usage, path?: string): void {
   const bad = firstControlChar(value, usage)

@@ -28,6 +28,18 @@ function toDpError(err: unknown, path: string): DpError {
   return new DpError('DP.PATH.NOT_WRITABLE', `${path}：${(err as Error).message}`, { cause: err })
 }
 
+/**
+ * 把端口契约落到本机文件系统与子进程上；除了透传进来的 facts，不持有任何跨调用的状态。
+ *
+ * 刻意**不做缓存与失效**：Runner 是能力与形状的适配器，不是状态的持有者。
+ * 一旦在这里缓存 stat 或文件内容，探测结论与实际文件之间就会隔一层不可见的时差 ——
+ * 而部署中途替换版本目录正是最容易踩到它的场景。
+ *
+ * @param facts 由 probeLocalFacts 实测得来。这里只做透传不校验：
+ *   Runner 无法重新核实一份 facts（那就等于把探测重做一遍），而目标层需要原样
+ *   拿着它做决策
+ * @returns 实现 ports.Runner 的对象，所有方法直接落到本机文件系统与子进程
+ */
 export function createLocalRunner(facts: Facts): Runner {
   const id = `local:${facts.host}`
 

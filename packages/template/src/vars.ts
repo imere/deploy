@@ -18,6 +18,11 @@
 import { DpError } from '@dp/ports'
 import type { RenderContext } from './context.js'
 
+/**
+ * 一个变量引用。**保留原文**而不只留变量名：报错与 `--dry-run` 展示要的是
+ * 用户写下的那段（`${env.FOO}`），只给 `env.FOO` 会让人对着错误消息
+ * 猜自己写在哪个位置。
+ */
 export interface VarRef {
   /** 原文，含 `${}`，用于报错定位与 --dry-run 展示 */
   readonly raw: string
@@ -32,6 +37,11 @@ export type Segment =
   | { readonly kind: 'text'; readonly value: string }
   | { readonly kind: 'var'; readonly ref: VarRef }
 
+/**
+ * 扫描结果。语法错误**不挂在变量上**而是单列一串：
+ * 未闭合的引用根本没有「变量名」可挂，而把它混进 vars 会让调用方
+ * 以为「有 var 记录就说明这一处语法是好的」。
+ */
 export interface ScanResult {
   readonly segments: readonly Segment[]
   /** 扫描阶段的语法错误（如未闭合）。渲染前就会命中，所以不是逐变量挂到 var 上 */
@@ -54,6 +64,12 @@ function contextAt(input: string, index: number): string {
  * 切分 `input`。
  *
  * 只做词法，不做语义：未知变量、缺值都留给 `resolveVar`，因为那需要 ctx。
+  *
+  * 三条保命规则：`$` 后不是 `{` 一律原样保留（nginx 的 `$host` 走这条）、
+  * `$$` 是转义（输出字面量且不报错）、未闭合就报错并附上下文片段。
+  *
+  * @param input 待切分的原文
+  * @returns 片段序列、语法错误串、以及按出现顺序排列的变量列表（含转义的那些）
  */
 export function scan(input: string): ScanResult {
   const segments: Segment[] = []
@@ -155,7 +171,13 @@ export function scan(input: string): ScanResult {
   return { segments, syntaxErrors, vars }
 }
 
-/** 静态扫描：列出所有 `${...}`，供 plan 期预览「将要替换什么」 */
+/**
+ * 只要变量列表的薄封装。plan 期预览「将要替换什么」用 ——
+ * 它不做语义判定，所以**不认识 ctx 的配置也能调**。
+ *
+ * @param input 待扫描的原文
+ * @returns 按出现顺序排列的变量引用，含转义的那些
+ */
 export function collectVars(input: string): readonly VarRef[] {
   return scan(input).vars
 }
@@ -287,7 +309,17 @@ export function resolveVar(name: string, ctx: RenderContext, options?: { path?: 
   return fail(unknownVar(name, ctx, extraKeys))
 }
 
-/** 只校验不渲染。plan 期用：把「会出什么问题」提前到不碰目标机的时候说清 */
+/**
+ * 只校验不渲染：把「会出什么问题」提前到不碰目标机的时候说清。
+ *
+ * 返回错误列表而不是抛第一个错：plan 阶段一次报全部，用户改一轮就够了；
+ * 抛第一个的形状会让「改一个报一个」变成三轮往返。
+ *
+ * @param input 待校验的原文
+ * @param ctx 变量来源，只读
+ * @returns 全部错误的列表，顺序是先语法后按出现顺序；**转义的引用被跳过** ——
+ *   用户写 `$${foo}` 的意思正是「我要这个字面量」
+ */
 export function validateVars(input: string, ctx: RenderContext): readonly DpError[] {
   const { syntaxErrors, vars } = scan(input)
   const errors: DpError[] = [...syntaxErrors]
