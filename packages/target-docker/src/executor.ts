@@ -32,10 +32,26 @@ const DEFAULT_TIMEOUT_MS = 300_000
 /** 错误信息里保留多少 docker 输出。整段塞进去会刷屏，并把真正有用的那几行挤走 */
 const OUTPUT_LIMIT = 2000
 
+/**
+ * 执行器的四个阶段，与 `target.ts` 的四个 plan 方法**一一对应**。
+ *
+ * 用联合类型而不是 string：四者的失败后续完全不同（activate 失败交给 healing、
+ * verify 失败交给上层判要不要回滚），松散的字符串会让分派写成一串 if，
+ * 漏掉一种就静默掉进默认分支。
+ */
 export type DockerPhase = 'install' | 'activate' | 'verify' | 'rollback'
 
+/**
+ * 执行器的输入。
+ *
+ * 刻意接的是 `ctx + config` 而不是调用方算好的 `Step[]`：计划由 target.ts 重算，
+ * 「执行用的是哪份计划」就只有这一个答案。改成接外部步骤，「报告跑的是 A、真跑的是 B」
+ * 这种最难复现的事故就有了入口。
+ */
 export interface DockerExecInput {
+  /** 目标机的执行入口。全部 IO 走它 —— 本包自己不起子进程、不读 process.env */
   readonly runner: Runner
+  /** 本次部署的身份：host / root / releaseId / 上一版。root 已按实测能力选定，不是配置原样 */
   readonly ctx: TargetContext
   readonly config: DockerTargetConfig
   /** 逐步回调，供 CLI 打实时日志 */
@@ -49,9 +65,23 @@ export interface DockerExecInput {
   readonly dryRun?: boolean
 }
 
+/**
+ * 一步的执行痕迹。
+ *
+ * 计划里有这一步，结果里就必然有它的一条记录（成功、跳过或失败）—— 少一条说明
+ * 那一步被静默跳过了，而这是「部署完全成功」的报告里唯一查不出来的事故，
+ * 所以 `result()` 会专门核一遍 id 集合。
+ */
 export interface DockerStepTrace {
+  /** 步骤 id，取自 target.ts 的 plan；CLI 按它把实时日志与最终报告对上 */
   readonly id: string
+  /**
+   * 所属阶段，取自 @dp/ports 的 StepKind。它**不等于** DockerPhase：install 那两步的 kind
+   * 是 `prepare`（只做 stat，不动机器），而 phase 记的是「这次调用跑的是哪一段」。
+   * 上层要回答「哪一步会在机器上留下作用」看 kind，要回答「挂在哪一段」看 phase。
+   */
   readonly kind: Step['kind']
+  /** false 表示在这一步上中止 —— 后面的步骤不会再有痕迹 */
   readonly ok: boolean
   /**
    * 该步骤**在机器上没有留下作用**：dryRun 下没执行，或本来就没动手。
@@ -64,12 +94,24 @@ export interface DockerStepTrace {
   readonly skipped: boolean
 }
 
+/**
+ * 执行成功的产物。
+ *
+ * `ok` 是字面量 `true` 而不是布尔：失败走 throw，返回值里没有「失败」这一态，
+ * 于是「忘了判 ok 就去读服务状态」在类型层面就不成立。
+ */
 export interface DockerExecResult {
+  /** 恒为 true。存在的意义是让调用方能 narrowing —— 见上面那条 */
   readonly ok: true
+  /** 本次调用跑的是哪一段 */
   readonly phase: DockerPhase
+  /** 目标机标识，直接取 ctx.host —— 报告要能区分多机部署里每一台的结论 */
   readonly host: string
+  /** 本次操作对应的版本。回滚时它是**当前版本**，compose 则取自上一版 release 目录 */
   readonly releaseId: string
+  /** 本次没有产生任何目标机作用（`dryRun: true` 时恒为 true）。报告按它决定要不要标注「预演」 */
   readonly dryRun: boolean
+  /** 逐步痕迹。计划里的每一步都有记录，顺序即执行顺序 */
   readonly steps: readonly DockerStepTrace[]
   /** verify / rollback 复验到的服务状态。install / activate 没有：它们不读 ps */
   readonly services?: readonly ComposePsEntry[]
@@ -359,6 +401,13 @@ class Session {
  * 搬运是 @dp/transport 的职责，这里重造一套就等于有了两条上传路径，而「文件到底传上去
  * 没有」会开始有两个答案。存在与否一律走 stat：`readFile` 在不存在时是抛错的，把
  * 「读不了」（EACCES、路径被换成目录）当成「不存在」会直接放行一次注定失败的部署。
+ *
+ * @param input runner / ctx / config。**ctx.releaseId 就是 compose 要从中读取的那个版本**：
+ *   `dp apply` 把这一段排在传输之后，所以这里 stat 的时候文件本就该在位了 ——
+ *   顺序反过来（照抄 nginx 的 install → deploy）会让这一步永远失败或什么也没证明
+ * @returns install 的结论。它不带 services：这一步读的是盘上的 compose 文件，不是容器状态
+ * @throws DpError DP.DOCKER.FILE_MISSING（compose 文件或 envFile 没随 release 上传），
+ *   或 DP.DOCKER.PLAN_MISMATCH（计划与执行器不同步，属代码错误）
  */
 export async function installDocker(input: DockerExecInput): Promise<DockerExecResult> {
   const session = new Session(input, 'install')
@@ -421,6 +470,13 @@ function upHealing(ctx: TargetContext, base: readonly string[]): readonly string
  * 不自动 `up` 上一版：那是 `dp rollback` 的职责。执行器自动回滚会把「失败」与
  * 「已回滚」两个语义混进同一个结果，上层无法区分，也就无法决定要不要再回滚一次。
  * 所以这里抛错，把该跑的命令写进 healing，由人决定。
+ *
+ * @param input runner / ctx / config。dryRun 时不 pull 也不 up，两条步骤都记 skipped ——
+ *   它们在机器上确实什么都没留下
+ * @returns activate 的结论。它同样不带 services：容器起没起来由 verify 那条 compose ps 说，
+ *   activate 不读 ps，`up --wait` 的返回值也区分不了「等到健康」和「超时放弃」
+ * @throws DpError DP.DOCKER.PULL_FAILED（镜像没拉到，运行中的容器没被动过）或
+ *   DP.ACTIVATE.START_FAILED（up 失败；盘上/容器状态要自己看 ps 才知道）
  */
 export async function activateDocker(input: DockerExecInput): Promise<DockerExecResult> {
   const session = new Session(input, 'activate')
@@ -534,6 +590,23 @@ async function readPs(session: Session, step: Step): Promise<ReturnType<typeof p
   }
 }
 
+/**
+ * verify：`compose ps --format json` → 解析 → 断言。
+ *
+ * 为什么 verify 要自己再跑一次 ps，而不是复用 activate 那次 up：
+ * `up --wait` 只在 wait 打开时才等到健康，关闭时 `up` 返回只说明容器被创建了 ——
+ * 若验收跟着 up 走，同一份配置在 wait 开关之间会有一半情形根本没验收。
+ * 走 ps 这一条，两种配置下的判据是同一套字符串比较。
+ *
+ * 不通过**不回滚**：版本好不好 vs 该不该退回去，是上层 `dp apply` 的事，
+ * 这里只保证结论是真的（读不出结论就抛 PS_PARSE_FAILED，绝不判通过）。
+ *
+ * @param input runner / ctx / config。**dryRun 下 ps 照样真跑**：它是只读的，
+ *   给出的服务状态是真的，所以那一步记 ran 而不是 skipped
+ * @returns 结论与读到的全部服务条目（`services`），供报告与后续的 healing 命令使用
+ * @throws DpError DP.DOCKER.PS_PARSE_FAILED（读不出服务状态，有两种成因：命令没跑成、
+ *   或输出读不懂）或 DP.VERIFY.FAILED（有结论但不达标）
+ */
 export async function verifyDocker(input: DockerExecInput): Promise<DockerExecResult> {
   const session = new Session(input, 'verify')
   const plan = dockerTarget.planVerify(session.ctx, session.config)
@@ -580,6 +653,20 @@ export async function verifyDocker(input: DockerExecInput): Promise<DockerExecRe
 // ④ rollback：上一版重新 up（不 pull）→ 复验
 // ------------------------------------------------------------
 
+/**
+ * rollback：按**上一版 release 目录里的 compose** 重新 up（不 pull），再复验一遍。
+ *
+ * 不 pull 是刻意的：浮动 tag 再拉一次会把「上一版」换成现在仓库里的新镜像，
+ * 那就不是回滚而是换了个版本重新上线，而报告仍然显示回滚成功。
+ *
+ * @param input runner / ctx / config。**ctx.previousReleaseId 必须是真正的上一版**：
+ *   static 的回滚语义是「从 current 退到 previous」，那份 ctx 里的 previousReleaseId
+ *   对 docker 而言可能是当前版本 —— 直接传下来会让执行器拿当前版本的 compose 再 up 一次
+ * @returns 结论与复验读到的服务条目
+ * @throws DpError DP.DOCKER.NO_PREVIOUS（首次部署，由 planRollback 在配置期判定），
+ *   DP.ACTIVATE.START_FAILED（上一版的 compose 自己起不来），或 DP.VERIFY.FAILED
+ *   （回滚已执行但上一版也没起来 —— 这时机器上跑的是上一版，需要人工介入）
+ */
 export async function rollbackDocker(input: DockerExecInput): Promise<DockerExecResult> {
   const session = new Session(input, 'rollback')
   // planRollback 在 previousReleaseId 缺失时直接抛 NO_PREVIOUS：
@@ -651,6 +738,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
  *
  * 执行器失败时保证挂上它；调用方拿到别的东西说明错误不是本包抛的 ——
  * 那就该当成「没有可用的失败现场」，而不是把读不出来的字段当成空数组。
+ *
+ * @param value 通常就是 `DpError.cause`。它的形状不属于本包的对外契约，
+ *   所以只判字段在不在，不进一步校验取值
+ * @returns true 表示可以按 DockerExecFailure 逐字段读（phase / step / steps / healing）
  */
 export function isDockerExecFailure(value: unknown): value is DockerExecFailure {
   const record = asRecord(value)

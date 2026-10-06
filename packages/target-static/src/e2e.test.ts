@@ -10,6 +10,7 @@ import { after, before, describe, it } from 'node:test'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DpError } from '@dp/ports'
 import type { Capabilities, Facts, TargetContext } from '@dp/ports'
 import { createLocalRunner, listSourceEntries, normalizeSourceSpec } from '@dp/local'
 import { deploy, rollback } from './index.js'
@@ -82,7 +83,15 @@ describe('端到端 · 本机发布', () => {
   })
 
   it('尾斜杠写法被明确拒绝，而不是猜一个默认含义', () => {
-    assert.throws(() => normalizeSourceSpec('./dist/', sourceRoot), /不能以路径分隔符结尾/)
+    assert.throws(
+      () => normalizeSourceSpec('./dist/', sourceRoot),
+      (e: unknown) => {
+        assert.ok(e instanceof DpError, `不是 DpError：${String(e)}`)
+        assert.equal(e.code, 'DP.CONFIG.INVALID')
+        assert.match(e.message, /不能以路径分隔符结尾/)
+        return true
+      },
+    )
   })
 
   it('两次发布 + current 切换 + 回滚，全部落在真实磁盘上', async () => {

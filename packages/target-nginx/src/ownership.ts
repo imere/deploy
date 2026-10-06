@@ -28,11 +28,25 @@ function isMarkerComment(line: string): boolean {
   return line.trimStart().startsWith('#') && line.includes(MARKER_TEXT)
 }
 
-/** 内容里是否带标记。空文件返回 false —— 它不可能是 dp 写的 */
+/**
+ * 内容里是否带标记。空文件返回 false —— 它不可能是 dp 写的。
+ *
+ * @param content 目标机上那份 conf 的完整内容。读不到就让它抛错，**不要**拿空串顶替
+ *   ——「读不了」被当成「不存在」，后面就直接是一次覆盖
+ * @returns true 只说明「头部注释自称由 dp 管理」，不说明内容真是 dp 写的；
+ *   所以即便为 true，覆盖前仍要备份
+ */
 export function isManaged(content: string): boolean {
   return content.split(/\r?\n/).slice(0, SCAN_LINES).some(isMarkerComment)
 }
 
+/**
+ * 覆盖判定的结论。三种取值都是**正常结果**、不是异常。
+ *
+ * 做成返回值而不是直接抛错，是因为 `dp plan` 与 `--dry-run` 都要把它当数据读：
+ * 一个只为真实部署存在的 throw，会让这两个出口看不到「这个文件不是你的」这条信息，
+ * 用户只能在真正开始覆盖的那一刻才第一次听说它。
+ */
 export interface OverwriteDecision {
   readonly action: 'create' | 'replace' | 'abort'
   /** 为什么。三种取值都有 */
@@ -41,6 +55,12 @@ export interface OverwriteDecision {
   readonly backup: boolean
 }
 
+/**
+ * 判定的可调项。**默认不 force**。
+ *
+ * 默认取「拒绝」而不是「覆盖」：同名未标记的 conf 绝大多数是用户自己写的，
+ * 而误判成 dp 的代价是静默删掉别人没有打算删的配置 —— 这类损失没有任何报错能补救。
+ */
 export interface OverwriteOptions {
   readonly force?: boolean
   /** 报错时定位到配置项 */
@@ -52,6 +72,10 @@ export interface OverwriteOptions {
  *
  * `force` 只影响「能不能覆盖」，不影响「覆不备份」：强制覆盖同样是在覆盖
  * 一个可能含无价配置的文件，备份是唯一的后悔药。
+ *
+ * @param existing 目标机上现有 conf 的内容。**只有 `null` 算不存在**，空串算「存在且为空」
+ * @param options force 与出错时的配置项路径；省略即按最保守的一档判定
+ * @returns 动作、是否需要备份，以及一句能直接给用户看的理由
  */
 export function decideOverwrite(existing: string | null, options?: OverwriteOptions): OverwriteDecision {
   if (existing === null) return { action: 'create', backup: false, reason: '目标文件不存在' }
@@ -74,6 +98,11 @@ const PRESERVE_HINT =
 
 /**
  * 判定并抛错。plan 期用：不能覆盖时必须在**还没碰目标机**的时候说清。
+ *
+ * @param existing 目标机上现有 conf 的内容；`null` 表示文件不存在
+ * @param options force 与配置项路径，透传给判定并写进 `DpError`
+ * @returns 判定为 create / replace 时的结论
+ * @throws DpError `DP.NGX.NOT_MANAGED` —— 目标文件存在、不带 managed 标记、也没 force
  */
 export function assertOverwritable(existing: string | null, options?: OverwriteOptions): OverwriteDecision {
   const decision = decideOverwrite(existing, options)

@@ -435,6 +435,17 @@ function assertNoDuplicateLocations(block: ServerBlock, ctx: RenderContext, base
  *
  * 标记放在文件头而不是每个 server 块里：所有权保护判的是「这个文件是不是 dp 的」，
  * 一份文件里放几个 server 不影响这个判断。
+ *
+ * 「逐字相同」不是洁癖，是 `verify` 的判据。渲染里混进时间戳或遍历顺序，
+ * verify 就会把「这个文件没人动过」报成不一致 —— 而一个每次都出现的假告警，
+ * 很快就让人养成不再看 verify 结论的习惯，那时它就再也拦不住真正的漂移了。
+ *
+ * @param server 一个或多个 server 块；多块共用一份 conf，域名冲突在渲染期就报，
+ *   不会留到 `nginx -t` 才发现
+ * @param ctx 变量取值表（`${release.current}` 等）。由调用方注入，本包不读 process.env
+ * @param options 错误定位用的基准配置路径。缺省不影响结果，但报错时少一层「在哪个字段上」
+ * @returns 完整 conf 文本，以换行结尾，可直接写入
+ * @throws DpError 值非法、server 块为空、server_name 或 location 重复定义
  */
 export function renderConf(
   server: ServerBlock | readonly ServerBlock[],
@@ -468,9 +479,22 @@ export function renderConf(
 /**
  * 影子主配置 —— `nginx -t -c <它>` 的输入。
  *
+ * 它存在的全部意义是**不拿生产 conf 做实验**：候选文件要在真正被换上去之前
+ * 先让 nginx 解析一遍。跳过这一步直接换，一次坏 conf 的代价就从一个
+ * 报错的部署变成一次已经发生的用户可见故障。
+ *
  * `includes` 必须是**排除掉待替换文件之后**的真实 confd 清单：候选文件与旧文件
  * 同时被 include 会得到两份抢同一端口/域名的 server，`nginx -t` 必然报冲突，
- * 于是「替换」永远过不了第一步校验。列目录是 IO，由执行器（下一轮）算出后传进来。
+ * 于是「替换」永远过不了第一步校验。列目录是 IO，由执行器算出后传进来。
+ *
+ * 刻意不照抄生产主配置（mime.types、默认 server、日志格式一概不管）：
+ * 校验范围收在「新文件本身能否被解析」上，多 include 一样东西就多一类
+ * 与本次改动无关的失败，而它们会盖掉真正的错误信息。
+ *
+ * @param options `includes` 是排除目标文件、影子目录与中间产物后的 confd 清单，
+ *   `candidate` 是候选 conf 的绝对路径，`path` 只用于错误定位
+ * @returns 影子主配置文本，供 `nginx -t -c` 解析
+ * @throws DpError include 路径含空白或 `;` `{` `}` —— 逐行进主配置，这些字符会破坏结构
  */
 export function renderShadowMainConf(options: {
   readonly includes: readonly string[]

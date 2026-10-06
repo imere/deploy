@@ -20,6 +20,14 @@ import type { RenderContext } from '@dp/template'
  */
 export type DockerMode = 'remote-cli' | (string & {})
 
+/**
+ * 用户手写的一半：用哪些 compose 文件、项目叫什么、要不要 pull / 等 healthy。
+ *
+ * 每个字段都有一道对应的校验写在 compose.ts 里：它们直接变成远端 argv 的元素
+ * 或容器名/网络名的前缀，而那个位置的报错来自 compose 自己，不会指回哪一行配置。
+ * `files` 非空且不重复、`envFile` 相对 release 目录这类约束必须在 plan 期挡掉 ——
+ * 到了 up 失败的时候，「文件不存在」和「文件根本没上传」长得一模一样。
+ */
 export interface DockerCompose {
   /**
    * compose 文件，**相对 release 目录**的路径，按给定顺序生效。
@@ -51,7 +59,18 @@ export interface DockerHealthcheck {
   readonly expectStates?: readonly string[]
 }
 
+/**
+ * docker 目标要的东西，按「谁提供」分成两半：用户写的配置 vs 上层注入的依赖。
+ *
+ * `mode` / `compose` 是用户写的，`render` 是上层注入的 —— 分界必须清楚：
+ * 本包零 IO，不读 process.env、不探测目标机，否则 plan() 就不再是纯函数，
+ * 「没有任何机器也能断言 Step[]」这条随之失效。
+ */
 export interface DockerTargetConfig {
+  /**
+   * 部署模式。本轮只有 `remote-cli` 跑得通，其余取值由 assertMode 在 plan 期显式拒绝 ——
+   * 静默降级会让用户以为镜像构建过了，而真正的失败要等很久才以「tag 不存在」的形式冒出来。
+   */
   readonly mode: DockerMode
   readonly compose: DockerCompose
   /**

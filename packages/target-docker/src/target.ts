@@ -25,6 +25,17 @@ function upUndo(ctx: TargetContext): string {
     : `重新 up 上一版的 compose 文件：${releaseDir(ctx, ctx.previousReleaseId)}`
 }
 
+/**
+ * docker 目标（remote-cli）的 Target 实现 —— 只算计划，不碰机器。
+ *
+ * 四个方法都是纯函数：吃 ctx 与 config，吐 Step[]。每个方法各自调一次
+ * `resolveCompose` 而不是让调用方把解析结果传进来 —— 上层可以只调 `planVerify`
+ * 打印一段验收计划，而不必先知道「必须先算 compose」这条内部顺序。
+ *
+ * **`dp apply` 里本包的顺序是 deploy → install → activate，与 nginx 相反**：
+ * compose 文件随 release 上传，而 install 做的只是 stat 确认 —— 排在传输之前，
+ * 它要么永远失败（查一个还没传上来的文件），要么什么也没证明（stat 到上一轮留下的旧文件）。
+ */
 export const dockerTarget: Target<DockerTargetConfig> = {
   type: 'docker',
 
