@@ -13,7 +13,9 @@ jobs:
   verify:
     name: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 给到 30 而不是"看起来够"的 20：CI 首次跑没有实测基线，而超时截断出来的失败
+    # 是"没跑完"，既不是质量信号也没有诊断价值 —— 这一步的代价只是多等几分钟。
+    timeout-minutes: 30
     steps:
     - name: Checkout repository
       uses: actions/checkout@v7
