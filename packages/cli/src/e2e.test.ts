@@ -10,8 +10,18 @@ import { EXIT_CONFIG, EXIT_OK, EXIT_USAGE } from './output.js'
 
 const BIN = resolvePath(fileURLToPath(import.meta.url), '..', 'bin.js')
 
-/** 子进程兜底：铁律 0 —— 挂起 = 失败 */
-const CHILD_TIMEOUT_MS = 60_000
+/**
+ * 子进程兜底：铁律 0 —— 挂起 = 失败。
+ *
+ * 阈值取 5 分钟而不是「看起来够用」的 1 分钟，依据是实测的波动幅度：
+ * 同一条命令手动跑 1.1s，但在全量测试里（覆盖率插桩 + 多文件并行）实测 60–65s，
+ * 慢 50 倍以上；把测试并发从 8 降到 2 也一样慢，说明这不是争抢而是本机进程创建的性质。
+ * 于是 60s 恰好卡在阈值上，隔一次红一次 —— 那不是命令超时，是阈值在掷硬币。
+ *
+ * 放宽不等于放弃检测：真挂起是**永久**等待，5 分钟一样抓得到，
+ * 而它只在真挂起时才付出等待。真要收紧，先去把本机那 50 倍搞清楚。
+ */
+const CHILD_TIMEOUT_MS = 300_000
 
 interface Run {
   readonly code: number
