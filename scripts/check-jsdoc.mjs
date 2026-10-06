@@ -32,6 +32,74 @@ const IDENT_CHAR = /[\w$]/
  * @returns 与 src 等长的字符串：注释与字符串内部被空格替换，换行保留。
  * 这样后续所有正则都只在**真实代码**上匹配，注释里的函数声明不会再被当成声明。
  */
+/**
+ * 从 open 处的引号起把整段字面量遮罩掉，返回结束后的下标。
+ *
+ * 模板串必须穿透 `${}`：插值里是代码，里面还能再套引号与模板串。不穿透的后果实测过一次 ——
+ * 一个拼接 shell 引号的模板里出现了同种反引号，模板被判成提前结束，从那一行往后几十行
+ * 代码全被当成字符串吃掉，那批导出在门禁眼里根本不存在（报「导出找不到定义」）。
+ * 这是漏报，比误报难发现得多：脚本只是安静地看不见它们。
+ *
+ * 已知局限：插值里的块注释不单独处理（那种写法极罕见），按普通字符遮罩。
+ */
+function maskString(src, open, out) {
+  const quote = src[open]
+  // 空栈 = 在字符串里；栈顶 'code' = 在 `${}` 插值里，按代码规则扫
+  const stack = []
+  let braceDepth = 0
+  let i = open
+  out[i] = ' '
+  i += 1
+  while (i < src.length) {
+    const c = src[i]
+    if (c === '\\') {
+      out[i] = ' '
+      if (src[i + 1] !== '\n') out[i + 1] = ' '
+      i += 2
+      continue
+    }
+    if (stack.length === 0) {
+      if (c === quote) {
+        out[i] = ' '
+        return i + 1
+      }
+      if (quote === '`' && c === '$' && src[i + 1] === '{') {
+        out[i] = ' '
+        out[i + 1] = ' '
+        i += 2
+        stack.push('code')
+        braceDepth = 1
+        continue
+      }
+      if (c !== '\n') out[i] = ' '
+      i += 1
+      continue
+    }
+    if (c === '{') braceDepth += 1
+    else if (c === '}') {
+      braceDepth -= 1
+      if (braceDepth === 0) {
+        out[i] = ' '
+        stack.pop()
+        i += 1
+        continue
+      }
+    } else if (c === "'" || c === '"' || c === '`') {
+      i = maskString(src, i, out)
+      continue
+    } else if (src.slice(i, i + 2) === '//') {
+      while (i < src.length && src[i] !== '\n') {
+        out[i] = ' '
+        i += 1
+      }
+      continue
+    }
+    if (c !== '\n') out[i] = ' '
+    i += 1
+  }
+  return i
+}
+
 function mask(src, stringsToo = true) {
   const out = src.split('')
   let i = 0
@@ -55,23 +123,7 @@ function mask(src, stringsToo = true) {
       continue
     }
     if (stringsToo && (c === "'" || c === '"' || c === '`')) {
-      out[i] = ' '
-      i += 1
-      while (i < n) {
-        if (src[i] === '\\') {
-          out[i] = ' '
-          if (src[i + 1] !== '\n') out[i + 1] = ' '
-          i += 2
-          continue
-        }
-        if (src[i] === c) break
-        if (src[i] !== '\n') out[i] = ' '
-        i += 1
-      }
-      if (i < n) {
-        out[i] = ' '
-        i += 1
-      }
+      i = maskString(src, i, out)
       continue
     }
     if (c === '/' && (prev === '' || PREV_SIGNIFICANT.test(prev))) {
@@ -364,6 +416,20 @@ function findParamsOpen(masked, afterName) {
 function arrowParams(masked, declEnd) {
   const arrow = masked.indexOf('=>', declEnd)
   if (arrow === -1) return null
+  // 等号与箭头之间只能是形参：`(...)` 或单个标识符（前面可挂 `async` 与泛型）。
+  // 不能只看等号右边第一个字符 —— 字符串已被遮罩成空格，看过去看到的是字符串**后面**
+  // 的内容，常量照样能蒙混过关。实测：`const HINT = '...'` 后面跟一个带箭头的函数时，
+  // 中间那截骨架长得像 `exportfunctionsummarize...(stderr:string){...`，
+  // 于是门禁要求一个字符串常量写 `@param` 与 `@returns`。
+  const body = masked
+    .slice(declEnd + 1, arrow)
+    .replace(/\s+/g, '')
+    .replace(/^async/, '')
+    .replace(/^<[^<>]*>/, '')
+  if (body === '') return null
+  const isIdent = /^[A-Za-z_$][\w$]*$/.test(body)
+  const isParen = body.startsWith('(') && body.endsWith(')')
+  if (!isIdent && !isParen) return null
   // 箭头前不该有分号或语句结束符，否则那是别的表达式里的箭头
   const between = masked.slice(declEnd, arrow)
   if (/[;}]/.test(between)) return null
@@ -435,11 +501,25 @@ function loadFile(file) {
 
 const RE_EXPORT_ALL = /(?:^|\n)\s*export\s+\*\s+(?:as\s+[A-Za-z_$][\w$]*\s+)?from\s*['"]([^'"]+)['"]/g
 const RE_EXPORT_LIST = /(?:^|\n)\s*export\s+(?:type\s+)?\{([\s\S]*?)\}\s*from\s*['"]([^'"]+)['"]/g
-const RE_LOCAL_LIST = /(?:^|\n)\s*export\s+(?:type\s+)?\{([\s\S]*?)\}\s*(?:;|$)/g
+// 末尾不能只认 `;` 与字符串结尾：没有 m 标志时 `$` 只匹配全文末尾，
+// 而文件中间的 `export type { X }` 后面跟的是换行 —— 加上 `(?=\n)` 才够得着。
+const RE_LOCAL_LIST = /(?:^|\n)\s*export\s+(?:type\s+)?\{([\s\S]*?)\}\s*(?:;|(?=\n)|$)/g
+// 本地再导出的名字往往是从别处 import 进来的，要顺着 import 才能追到真声明所在的文件
+const RE_IMPORT_NAMED = /(?:^|\n)\s*import\s+(?:type\s+)?\{([\s\S]*?)\}\s*from\s*['"]([^'"]+)['"]/g
 const RE_EXPORT_DECL = /(?:^|\n)\s*export\s+(?:declare\s+)?(?:async\s+)?(?:function|const|class|interface|type|let|var)\s+([A-Za-z_$][\w$]*)/g
 
 function resolveSpecifier(fromFile, spec) {
-  if (!spec.startsWith('.')) return null
+  if (!spec.startsWith('.')) {
+    // workspace 包名（`from '@dp/ports'`）也要能解析：只认相对说明符的话，
+    // 跨包再导出整条链会断在这里，表现为那些符号**根本没进检查**（漏报，且很安静）。
+    const m = /^(.*[/\\])packages[/\\]/.exec(fromFile.replace(/\\/g, '/'))
+    if (m && spec.startsWith('@dp/')) {
+      const name = spec.slice('@dp/'.length).replace(/\.js$/, '')
+      const p = join(m[1], 'packages', name, 'src', 'index.ts')
+      if (existsSync(p)) return p
+    }
+    return null
+  }
   // 源里写的是 ESM 的 .js 说明符（NodeNext 要求），落盘是 .ts —— 不换后缀
   // 会把「包之间互相再导出」整个判成找不到定义，表现是绝大多数符号根本没进检查。
   const bare = spec.replace(/\.js$/, '')
@@ -476,6 +556,43 @@ function collectExports(file, seen = new Set()) {
     }
   }
 
+  // 本地再导出（`export { a }` / `export type { T }`，不带 from）：名字可能就声明在本文件，
+  // 也可能是本文件 import 进来再转手导出 —— 后者必须顺着 import 追到源文件的声明，
+  // 否则会报「导出找不到定义」，而真实的声明明明就在另一个包里。
+  RE_LOCAL_LIST.lastIndex = 0
+  const localNames = []
+  while ((m = RE_LOCAL_LIST.exec(codeOnly)) !== null) {
+    for (const piece of m[1].split(',')) {
+      const t = piece.trim().replace(/^type\s+/, '')
+      if (t === '') continue
+      const parts = t.split(/\s+as\s+/)
+      const local = parts[0].trim()
+      if (local !== '') localNames.push({ local, exported: (parts[1] ?? parts[0]).trim() })
+    }
+  }
+  if (localNames.length > 0) {
+    const origins = new Map()
+    RE_IMPORT_NAMED.lastIndex = 0
+    while ((m = RE_IMPORT_NAMED.exec(codeOnly)) !== null) {
+      const target = resolveSpecifier(file, m[2])
+      if (!target) continue
+      for (const piece of m[1].split(',')) {
+        const t = piece.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0].trim()
+        if (t !== '') origins.set(t, target)
+      }
+    }
+    for (const { local, exported } of localNames) {
+      const origin = origins.get(local)
+      if (origin !== undefined) {
+        for (const e of collectExports(origin, seen)) {
+          if ((e.want ?? e.name) === local) out.push({ name: exported, want: e.want ?? e.name, file: e.file })
+        }
+      } else if (decls.has(local)) {
+        out.push({ name: exported, want: local, file })
+      }
+    }
+  }
+
   // 先把匹配收齐再递归：RE_* 是模块级 /g 正则，递归进入子文件会把它自己的
   // lastIndex 清零，循环中途被重置就会静默截断 —— 表现为「某个包一个符号都没查到」。
   RE_EXPORT_ALL.lastIndex = 0
@@ -497,7 +614,11 @@ function locate(entry, depth = 0) {
   const key = entry.want ?? entry.name
   if (decls.has(key)) return decls.get(key)
   if (depth > 2) return null
-  for (const e of collectExports(entry.file, new Set([entry.file]))) {
+  // seen 必须从空集合起：collectExports 开头就是 `seen.has(file) → 返回空`，
+  // 把起点自己预先塞进去等于让这一层追踪永远空转，表现为「导出找不到定义」——
+  // 而声明其实就在同目录的另一个文件里，只是本文件转手再导出了一次。
+  // 防环由 collectExports 内部的 seen.add 保证，不需要在这里预置。
+  for (const e of collectExports(entry.file, new Set())) {
     if (e.name !== key) continue
     const hit = locate({ ...e, want: e.want ?? e.name }, depth + 1)
     if (hit) return hit
