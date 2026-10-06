@@ -12,7 +12,7 @@
     "build": "tsc -b",
     "test": "tsc -b && node -e \"require('fs').mkdirSync('build/coverage',{recursive:true})\" && node --test --experimental-test-coverage --test-coverage-include=packages/*/build/**/*.js --test-reporter=spec --test-reporter-destination=stderr --test-reporter=lcov --test-reporter-destination=stdout \"packages/*/build/**/*.test.js\" > build/coverage/lcov.info",
     "verify": "pnpm build && pnpm test && pnpm run verify:gates",
-    "verify:gates": "node scripts/dead-code.mjs && node scripts/check-imports.mjs && node scripts/check-tests.mjs && node scripts/check-jsdoc.mjs && node scripts/check-coverage.mjs && node scripts/smoke.mjs",
+    "verify:gates": "node scripts/dead-code.mjs && node scripts/check-imports.mjs && node scripts/check-tests.mjs && node scripts/check-jsdoc.mjs && node scripts/check-coverage.mjs && node scripts/smoke.mjs && node scripts/accept-gates.mjs",
     "clean": "tsc -b --clean",
     "postinstall": "node scripts/link-workspace.mjs"
   },
