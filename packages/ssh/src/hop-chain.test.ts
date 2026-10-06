@@ -14,7 +14,7 @@ import { describe, it } from 'node:test'
 import { DpError } from '@dp/ports'
 import { planHopChain } from './hop-chain.js'
 import { openHopChain } from './ssh2-hops.js'
-import type { Ssh2ChannelLike, Ssh2ClientLike, Ssh2Load, Ssh2ModuleLike } from './ssh2.js'
+import type { Ssh2ChannelLike, Ssh2ClientLike, Ssh2Load, Ssh2ModuleLike } from './ssh2-module.js'
 import type { HopSpec, SshConnectionOptions } from './driver.js'
 
 // ------------------------------------------------------------

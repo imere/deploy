@@ -12,7 +12,6 @@
  * 报出来（没有 hint 的错误等于没报错）。
  */
 import { DpError, assertPortInRange, parseSshTarget, type KnownHostsMode as PortsKnownHostsMode } from '@dp/ports'
-import type { SshArgvOptions } from './argv.js'
 
 /**
  * 驱动的两种身份。**native-ssh 排第一**是硬排序而不是偏好（`DEFAULT_PREFERENCE`）：
@@ -330,5 +329,3 @@ export async function resolveDriver(
 
 /** 默认顺序：native 优先（唯一能抗量子），ssh2 兜底 */
 export const DEFAULT_PREFERENCE: readonly SshDriverKind[] = ['native-ssh', 'ssh2']
-
-export type { SshArgvOptions }

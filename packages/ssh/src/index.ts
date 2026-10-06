@@ -116,17 +116,17 @@ export {
   resolveTool,
 } from './native.js'
 
+export { createSsh2Driver, Ssh2Driver } from './ssh2.js'
+
 export {
   classifyConnectError,
-  createSsh2Driver,
   loadSsh2,
-  Ssh2Driver,
   type Ssh2ChannelLike,
   type Ssh2ClientLike,
   type Ssh2Load,
   type Ssh2ModuleLike,
   type Ssh2SftpLike,
-} from './ssh2.js'
+} from './ssh2-module.js'
 
 export {
   createSshRunner,

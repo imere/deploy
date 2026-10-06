@@ -19,14 +19,13 @@ import type {
   DriverAvailability,
   DriverExecResult,
   ExecRequest,
-  SshArgvOptions,
   SshConnectionOptions,
   SshDriver,
   SshDriverKind,
   Tunnel,
 } from './driver.js'
 import { DEFAULT_MAX_OUTPUT_BYTES, resolveTimeoutMs } from './driver.js'
-import { buildRshArgv, buildSshArgv, defaultPinPath, hostTarget } from './argv.js'
+import { buildRshArgv, buildSshArgv, defaultPinPath, hostTarget, type SshArgvOptions } from './argv.js'
 import { createAskpassHelper, type AskpassHelper } from './askpass.js'
 import { classifySshError, hostKeyHint, truncateOutput } from './parse.js'
 import { detectPrompt, promptHint } from './prompt.js'

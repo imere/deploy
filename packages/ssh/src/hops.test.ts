@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DpError } from '@dp/ports'
 import { Ssh2Driver } from './ssh2.js'
-import type { Ssh2ChannelLike, Ssh2ClientLike, Ssh2Load } from './ssh2.js'
+import type { Ssh2ChannelLike, Ssh2ClientLike, Ssh2Load } from './ssh2-module.js'
 import { validateHops, type SshConnectionOptions } from './driver.js'
 
 function options(hops: SshConnectionOptions['hops']): SshConnectionOptions {

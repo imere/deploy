@@ -13,7 +13,7 @@ import {
   type DriverFactory,
   type SshDriverKind,
 } from './driver.js'
-import { loadSsh2 } from './ssh2.js'
+import { loadSsh2 } from './ssh2-module.js'
 
 const CONN = { host: 'dp-target', auth: { type: 'agent' } } as const
 

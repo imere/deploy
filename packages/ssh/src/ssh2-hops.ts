@@ -18,7 +18,7 @@ import type { HopSpec, ResolvedSecrets, SshConnectionOptions } from './driver.js
 import { resolveTimeoutMs } from './driver.js'
 import { planHopChain, type HopChainStep } from './hop-chain.js'
 import { buildRemoteCommand } from './argv.js'
-import { classifyConnectError, loadSsh2, type Ssh2ChannelLike, type Ssh2ClientLike, type Ssh2Load } from './ssh2.js'
+import { classifyConnectError, loadSsh2, type Ssh2ChannelLike, type Ssh2ClientLike, type Ssh2Load } from './ssh2-module.js'
 
 export interface HopChainHandle {
   /** 建好的 client，按跳序。close 必须逆序 */
