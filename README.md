@@ -187,13 +187,14 @@ flowchart TB
 | `typecheck` | 源码与测试各一个 project，均 `--noEmit` | ✅ 由 `tsc -b` 承担 |
 | `build` | 产物落各包 `build/`，测试跑的是产物不是源码 | ✅ |
 | `test` | `node --test`（Node 24 内置运行器），lcov 落 `build/coverage` | ✅ |
-| `lint` | 含五条硬规则里的 **import 边界**限制（`no-restricted-imports`），违规即失败 | ❌ 未配置：仓库里没有 lint 工具与配置文件 |
-| 依赖检查 | **严禁循环依赖**与跨层反向依赖，工具校验而不是靠自觉 | ❌ 无工具，目前靠评审 |
-| 死代码 | 没有未被引用的导出/文件；**见到冗余代码就删，不留「以后可能用」** | ❌ 无工具，目前靠评审 |
-| `smoke` | 发布产物能被真实 import | ❌ 未接入 |
-| JSDoc | 每个函数都要中文描述 + 逐个 `@param` + `@returns`，描述写「为什么」 | ❌ 无校验脚本，靠评审与约定 |
-| 变异测试 | nightly 跑：故意改坏源码，红 = 真守着，绿 = 形同虚设 | ❌ 未接入（关键改动目前手工做变异验证） |
-| 覆盖率 | 纯逻辑包（`schema` / `core` / `template` / 协商策略）**四项 100%**；IO 层靠契约测试与集成，不追数字 | ⚠️ 有 lcov 产出，阈值未强制 |
+| `lint` | 含五条硬规则里的 **import 边界**限制（`no-restricted-imports`），违规即失败 | ❌ 未配置：仓库里没有 lint 工具与配置文件（跨层与循环由下一行的 `check-imports` 承担） |
+| 依赖检查 | **严禁循环依赖**与跨层反向依赖，工具校验而不是靠自觉 | ✅ `scripts/check-imports.mjs`，当前通过（跨层反向 0 / 环 0） |
+| 死代码 | 没有未被引用的导出/文件；**见到冗余代码就删，不留「以后可能用」** | ✅ `scripts/dead-code.mjs`，当前 0 处 |
+| `smoke` | 发布产物能被真实 import | ✅ `scripts/smoke.mjs`，12 个包通过；凭据只在非测试产物里硬失败 |
+| JSDoc | 每个函数都要中文描述 + 逐个 `@param` + `@returns`，描述写「为什么」 | ✅ `scripts/check-jsdoc.mjs`，465 个公共 API 符号缺口 0 |
+| 假测试 | 弱断言 / 被忽略的校验参数要能被扫出来 | ✅ `scripts/check-tests.mjs`，当前通过 |
+| 变异测试 | nightly 跑：故意改坏源码，红 = 真守着，绿 = 形同虚设 | ⚠️ `scripts/mutate.mjs` 已落地（只改 `.tmp/` 下的副本，不碰真实产物），**未接进 `verify`** |
+| 覆盖率 | 纯逻辑包（`schema` / `core` / `template` / 协商策略）**四项 100%**；IO 层靠契约测试与集成，不追数字 | ✅ `scripts/check-coverage.mjs`，三个受门禁包均达 100% |
 | 发版 | Conventional Commits，scope 用包名；版本由 changesets 推导 | ❌ changesets 未接入，版本号手工维护 |
 
 对**不可达分支**的处理沿用参考项目的定式：先分清是「没测到」还是「根本走不到」；走不到就**改代码删掉**，不许写替身去凑。

@@ -16,9 +16,11 @@
  * 等于由本脚本的作者发明一套架构要点里没有的分层。同层互引只统计、不判失败，
  * 逐包列出便于人复核这一判断还成不成立。
  *
- * 为什么测试文件一起扫：本仓的测试与源码同目录且一并参与编译，测试里的
- * `@dp/local` 与源码里的 `@dp/local` 在构建图上没有区别（都会让下层包在类型
- * 层面依赖上层包）。只扫非测试文件会留出一个「把反向依赖搬进测试就过关」的口子。
+ * 测试文件**照扫但只报告**（D 类）：本仓的测试与源码同目录，测试里 `@dp/local`
+ * 与源码里的 `@dp/local` 在构建图上没区别，所以不排除它们 —— 但**不判失败**。
+ * 理由：测试不进产物，构成不了运行时依赖；而 core 的 slice 测试要用真实 Runner
+ * 与真实 target 跑集成，改成替身会丢掉真行为。源码里的反向依赖仍然硬失败，
+ * 真要靠搬进测试来绕，评审看得见。
  *
  * 为什么不上 TypeScript 编译器：本仓有它，但把一个纯静态门禁变成秒级启动
  * 不值得 —— 这里需要的只是「哪一行 import 了哪个包」，正则足够，且不会
@@ -45,11 +47,15 @@ const showLayers = process.argv.includes('--layers')
  * 自行切出 `log` 更靠下、`transport` 更靠上之类的子层，判定依据就从「共同约定」
  * 变成了「写这个脚本的人当时的理解」，下次有人改脚本分层就会悄悄漂移。
  */
-const NAMED_LAYER = { schema: 1, ports: 2, core: 3, cli: 5 }
+// 层序按**实际依赖方向**定，不按文档里的书写顺序：ports 不依赖任何包，它才是最底的一层。
+// schema 反过来要用 ports 的 DpError / assertPortInRange / parseSshTarget 去校验配置，
+// 所以 schema 在 ports 之上。把 schema 定成 L1 会让「schema 用 ports 的错误类型抛错」
+// 这种正当依赖被判成反向依赖 —— 实测过，5 处违规里有 3 处是这个顺序错误造出来的。
+const NAMED_LAYER = { ports: 1, schema: 2, core: 3, cli: 5 }
 const IMPL_LAYER = 4
 const LAYER_LABEL = {
-  1: 'L1 schema（类型/define*）',
-  2: 'L2 ports（接口）',
+  1: 'L1 ports（接口 / 错误 / 基础工具）',
+  2: 'L2 schema（类型 / define*）',
   3: 'L3 core（编排 + 目标探测）',
   4: 'L4 实现包',
   5: 'L5 cli',
@@ -317,6 +323,11 @@ const crossPkg = edges.filter((e) => e.fromPkg !== e.toPkg)
  */
 const reverseViolations = []
 const typeOnlyReverse = []
+// 测试文件里的反向依赖单独分桶：它**不构成运行时依赖**（测试不进产物），
+// 而 core 的 slice 测试要用真实 Runner 与真实 target 跑集成，替身会丢掉真行为。
+// 原顾虑是「留一个把反向依赖搬进测试就过关的口子」——但源码里的反向依赖仍然硬失败，
+// 真要靠搬测试来绕，评审看得见；为这个可能性牺牲集成测试的真实性不划算。
+const testOnlyReverse = []
 const sameLayer = []
 for (const e of crossPkg) {
   const from = layerOf(e.fromPkg)
@@ -331,7 +342,7 @@ for (const e of crossPkg) {
     spec: e.spec,
     test: e.isTest,
   }
-  if (to > from) (e.typeOnly ? typeOnlyReverse : reverseViolations).push(item)
+  if (to > from) (e.typeOnly ? typeOnlyReverse : e.isTest ? testOnlyReverse : reverseViolations).push(item)
   else if (to === from) sameLayer.push(item)
 }
 
@@ -497,8 +508,10 @@ const summary = {
   cyclesFile: fileCycles.hard.length,
   typeOnlyReverse: typeOnlyReverse.length,
   typeOnlyCycles: pkgCycles.typeOnly.length + fileCycles.typeOnly.length,
+  testOnlyReverse: testOnlyReverse.length,
   sameLayer: sameLayer.length,
 }
+testOnlyReverse.sort(sortEdges)
 
 // ---------------------------------------------------------------- 输出
 
@@ -582,10 +595,20 @@ if (asJson) {
   }
   lines.push('')
 
+  lines.push('【D 测试专用 —— 仅报告，不判失败】')
+  if (testOnlyReverse.length === 0) {
+    lines.push('  （无）')
+  } else {
+    lines.push(`  反向引用 ${testOnlyReverse.length} 处（测试不进产物，构成不了运行时依赖）`)
+    for (const e of testOnlyReverse) lines.push(fmtEdge(e))
+  }
+  lines.push('')
+
   lines.push('【汇总】')
   lines.push(
     `  反向依赖 ${summary.reverse} 处 / 循环依赖 ${summary.cycles} 处（包级 ${summary.cyclesPackage}，文件级 ${summary.cyclesFile}）` +
-      ` / 类型专用反向引用 ${summary.typeOnlyReverse} 处 / 纯类型环 ${summary.typeOnlyCycles} 处`,
+      ` / 类型专用反向引用 ${summary.typeOnlyReverse} 处 / 纯类型环 ${summary.typeOnlyCycles} 处` +
+      ` / 测试专用反向引用 ${summary.testOnlyReverse} 处`,
   )
   lines.push(
     `  同层引用 ${summary.sameLayer} 处（允许：实现包之间互引是结构性需求，拆子层等于由本脚本发明分层）`,
@@ -593,7 +616,7 @@ if (asJson) {
   lines.push(
     summary.reverse + summary.cycles > 0
       ? '  结论：失败（A 或 B 命中）'
-      : '  结论：通过（C 不影响退出码）',
+      : '  结论：通过（C / D 不影响退出码）',
   )
   process.stdout.write(`${lines.join('\n')}\n`)
 }

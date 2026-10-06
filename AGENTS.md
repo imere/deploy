@@ -84,7 +84,11 @@ build/          覆盖率产物所在根目录（已 gitignore）
 
 ## 架构要点（改动前先读）
 
-- **分层**：`schema`（类型/define\*）→ `ports`（接口）→ `core`（编排 + 目标探测）→ 实现包 → `cli`
+- **分层**（箭头是**依赖方向**，左边被右边 import；只能往左 import，反向即违规）：
+  `ports`（接口 / 错误 / 基础工具）→ `schema`（类型 / define\*）→ `core`（编排 + 目标探测）→ 实现包 → `cli`。
+  顺序按**实际依赖**定：`ports` 不依赖任何包，所以它最左；`schema` 要拿 `ports` 的
+  `DpError` / `assertPortInRange` / `parseSshTarget` 去校验配置，站在它右边。
+  把 `schema` 当最底层是错的（门禁脚本踩过一次，凭空报出 3 处反向依赖）
 - **目标探测（`@dp/core/detect.ts`）**：源清单与 `package.json` 的 scripts **都由调用方注入**
   （它零 IO，否则 `makePlan()` 那套纯函数断言就不成立了）。仲裁比探测更保守：
   0 命中报错（列出它看到了哪些文件，不假装 static）、未实现的类型报错而不降级、
