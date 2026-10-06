@@ -225,17 +225,27 @@ function lineOf(src, index) {
   return line
 }
 
-/** 取出紧邻 `pos` 之前、允许中间有空白与 `export` 关键字的 JSDoc 块。 */
+/**
+ * 取出紧邻 `pos` 之前、允许中间有空白与 `export` 关键字的 JSDoc 块。
+ *
+ * 块起点不能取「`pos` 之前最后一个块起始标记」：注释正文里写 glob 或 Markdown 代码块时
+ * 常出现同样的字面量（下面用「起始标记」「结束标记」指代这两个三字符序列），
+ * 那会把块截在字面量处，后面的 `@param` 被静默丢掉。
+ * 可靠的判据是——块起点必然位于**上一个结束标记之后**；在那之后取第一个起始标记，
+ * 块内再多的字面量也骗不过去。块结束同理不靠搜索：`pos` 前那个结束标记就是它。
+ *
+ * 顺带一条给后来人：本文件自己的注释里也别写那两个字面量，否则注释提前闭合，
+ * 报错信息会指向下一行，看起来像那里出了问题（作者踩过一次）。
+ */
 function docBefore(src, pos) {
   let i = pos - 1
   while (i >= 0 && /\s/.test(src[i])) i -= 1
   if (i < 1 || src[i] !== '/' || src[i - 1] !== '*') return null
   if (i >= 2 && src[i - 2] === '*' && src[i - 3] !== '/') return null // /**/ 空块不算
-  const open = src.lastIndexOf('/**', i)
-  if (open === -1) return null
-  const end = src.indexOf('*/', open + 3)
-  if (end === -1 || end > i) return null
-  return { open, text: src.slice(open + 3, end) }
+  const prevEnd = src.lastIndexOf('*/', i - 2)
+  const open = src.indexOf('/**', prevEnd === -1 ? 0 : prevEnd + 2)
+  if (open === -1 || open > i - 3) return null
+  return { open, text: src.slice(open + 3, i - 1) }
 }
 
 /** 把 JSDoc 块拆成 { summary, params: [{ name, rest }], returns, tags }。 */
