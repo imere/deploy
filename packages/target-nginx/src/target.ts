@@ -144,6 +144,20 @@ export function renderFor(config: NginxTargetConfig): string {
 
 const READ_ONLY_UNDO = '无需补偿：只解析或只读，不改任何文件'
 
+/**
+ * nginx 目标的 plan 侧。**纯函数**：不碰 runner、不发命令、不写文件。
+ *
+ * 计划的产出有两个消费者，形状是被它们共同决定的：
+ *  一是给人看的步骤与 argv；执行器**逐字取用** `detail.argv`，不在自己这边再写一份 ——
+ *  两份 argv 各改各的，症状是「计划说校验影子主配置、真跑的是 `-t` 生产树」，
+ *  而那一步存在的全部意义就是在碰生产目录之前发现问题。
+ *  二是失败时的补偿动作：它必须与步骤一起定型，事后补的补偿必然是错的
+ *  （真的出问题的那一步往往正是当时没想到需要补偿的那一步）。
+ *
+ * 四个 plan 的分界不容改：**install 全程不碰生产目录，activate 才动它**。
+ * 两者合成一个之后就没有「装好了但还没切」这个状态了，
+ * 用户也就失去了「先验后切」这个选项。
+ */
 export const nginxTarget: Target<NginxTargetConfig> = {
   type: 'nginx',
 

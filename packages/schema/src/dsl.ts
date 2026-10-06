@@ -23,7 +23,13 @@ import { DpError } from '@dp/ports'
  * 还会把「本仓实际产出什么形状」这件事埋进一份外部声明里。
  */
 export interface JsonSchemaNode {
-  /** 原子类型名。数组形态留给将来表达"或"关系，目前没有产出方 */
+  /**
+   * 原子类型名。
+   *
+   * 联合写成数组形态（JSON Schema 允许）而不是 anyOf：编辑器只认 type，
+   * 拆成 anyOf 之后悬浮提示里就看不到可选类型了。数组形态目前没有产出方，
+   * 留着是为了将来加联合时不必改类型。
+   */
   type?: string | string[]
   /**
    * 对象字段 → 该字段的 schema。只描述"有哪些字段"，
@@ -348,8 +354,6 @@ export function obj<S extends Shape>(
  *
  * @param value 每个值服从的 schema
  * @param description 给用户看的说明
- * @param TIn 类型参数（非形参）：值的输入形态，必须与 TOut 分开写，理由见上
- * @param IsOptional 类型参数：值 schema 是否可选，透传而不重新推导
  * @returns 键自由、值逐个归一化的 schema
  */
 export function record<TOut, TIn, IsOptional extends boolean>(
@@ -391,8 +395,6 @@ export function record<TOut, TIn, IsOptional extends boolean>(
  * 「用户明确没配」与「用了系统默认」，而这两者在报告与排查里是两件事。
  *
  * @param schema 被修饰的 schema
- * @param TIn 类型参数（非形参）：输入形态，透传
- * @param IsOpt 类型参数：原 schema 是否可选，透传；本函数把结果的可选位改成 true
  * @returns 同型但 isOptional 为 true 的 schema
  */
 export function opt<TOut, TIn, IsOpt extends boolean>(
@@ -417,8 +419,6 @@ export function opt<TOut, TIn, IsOpt extends boolean>(
  *
  * @param schema 被修饰的 schema
  * @param fallback 省略时使用的值
- * @param TIn 类型参数（非形参）：输入形态，透传
- * @param IsOpt 类型参数：原 schema 是否可选，透传
  * @returns 同型但 acceptsUndefined 为 true、isOptional 为 false 的 schema
  */
 export function withDefault<TOut, TIn, IsOpt extends boolean>(
@@ -437,7 +437,22 @@ export function withDefault<TOut, TIn, IsOpt extends boolean>(
   } as unknown as Schema<TOut, TIn | undefined, false>
 }
 
-/** 额外的语义约束（schema 结构之外的规则），失败同样报 CONFIG_INVALID + path */
+/**
+ * 给 schema 挂一条**结构之外**的规则。
+ *
+ * 为什么不开成「校验器数组」：多条规则并行时，错误消息该报哪一条取决于注册顺序，
+ * 而顺序一改，用户昨天看到的报错今天就换了措辞。串行链在第一条就抛出，位置稳定。
+ *
+ * check 拿到的是**已归一化**的值，不是用户原文：所以它能判「归一化后自相矛盾」
+ * （两处端口不一致），但判不了「用户本意是哪个」—— 那需要原文，schema 层拿不到。
+ * 想报错信息带上用户原话，check 只能自己在闭包里记一份。
+ *
+ * @param schema 被修饰的 schema，形状与类型参数原样透传
+ * @param check 拿到归一化后的值与配置路径；抛错即终止，**不返回值**是刻意的 ——
+ *   允许返回新值就等于有了第二条归一化路径，withDefault 之外不该再有一个
+ * @returns 同型 schema，parse 时在原 parse 之后串上 check
+ * @throws DpError check 主动抛出的错误，code 与 path 原样透出
+ */
 export function constrained<TOut, TIn, IsOpt extends boolean>(
   schema: Schema<TOut, TIn, IsOpt>,
   check: (value: TOut, path: string) => void,
@@ -464,6 +479,18 @@ export type PrefInput<T extends string> = T | readonly T[] | 'auto'
  *   ['rsync','tar-ssh']  → 原样
  *
  * 链内项若都不被支持 → 由 core 报 `DP.PREF.UNSUPPORTED`，列出整条链与每项的失败原因。
+ *
+ * 为什么 `'auto'` 在这里就展开成默认链、而不是留到运行时才决定：
+ * plan 期要能**在不碰目标机**的前提下打印出「将按什么顺序尝试」，而链长是那份
+ * 计划的一部分。留到执行期再展开，plan 与真跑就可能是两条不同的链 ——
+ * 这是本仓反复出现的故障形状（计划一套、执行另一套）。
+ *
+ * @param allowed 允许的取值全集；链里有不在其中的项即报 CONFIG_INVALID 并指明下标
+ * @param defaultChain 写 'auto' 或省略时展开成的链。**不校验**它是否 ⊆ allowed ——
+ *   它是实现给的常量，且这些默认值本身就是「实测过能跑」的顺序
+ * @param description 供编辑器提示与 JSON Schema 用的说明；不写则该字段在编辑器里没有解释
+ * @returns 输出恒为非空数组的 schema —— 空链在这里就报错而不是放行，
+ *   因为空链在下游等同于「没有候选」，而那不是一个能给出建议的失败
  */
 export function prefChain<T extends string>(
   allowed: readonly T[],

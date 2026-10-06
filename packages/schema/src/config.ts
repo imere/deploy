@@ -177,6 +177,15 @@ export const hopSchema = constrained(
   },
 )
 
+/**
+ * 一台目标机。连接方式三选一：ssh（单跳）/ hops（多跳）/ local（本机）。
+ *
+ * 为什么不提供「都写」的合并语义：两条连接路径同时存在时，没有任何规则能说清
+ * 该走哪条，而走错的后果是部署到了另一台机器上 —— 报错比连错便宜得多。
+ *
+ * `layout` 是显式选择而不是配置项：auto 之外三个值决定发布根落在哪，
+ * 而那是「用户想让服务出现在哪」的决定，不是能力探测能替用户做的。
+ */
 export const hostSchema = constrained(
   obj(
     {
@@ -209,6 +218,14 @@ export const hostSchema = constrained(
 // 目标
 // ============================================================
 
+/**
+ * 目标类型全集。**全仓只有这一份**。
+ *
+ * 与 `@dp/core` 探测层的候选表刻意不同：那里只有**已实现执行器**的类型
+ * （systemd / process 还没有），而这里必须列全，否则用户写了个合法的
+ * systemd 目标却在 schema 层被拒 —— 那时报错指向配置，而问题在能力缺失。
+ * 两层各写一份的漂移风险由探测层那份显式声明不等来接。
+ */
 export const TARGET_KINDS = ['static', 'nginx', 'docker', 'systemd', 'process'] as const
 
 /**
@@ -285,6 +302,13 @@ const reloadSchema = unionOf<readonly string[], readonly string[], false, false>
   { schema: literal(false), matches: isFalse, shape: 'false（由外部机制重载）' },
 )
 
+/**
+ * nginx 目标。**只管形状与类型**，语义判定全部留给 `@dp/target-nginx`。
+ *
+ * 唯一在这里就拒的是 reload 里的空串：纯类型层看不出来（`['']` 完全合法），
+ * 而空参数会让目标机的 execve 失败、报错还与真正的问题无关。配置加载就拒
+ * 比等到真部署时再拒便宜 —— 后者已经动过生产路径了。
+ */
 export const nginxSchema = obj(
   {
     server: unionOf(
@@ -350,6 +374,13 @@ const dockerHealthcheckSchema = obj(
   'docker 健康检查。它的有无决定哪些服务算数',
 )
 
+/**
+ * docker 目标。**只管形状与类型**，语义判定全部留给 `@dp/target-docker`。
+ *
+ * 与 nginx 段同一条纪律：compose.files 的路径合法性、projectName 的字符集、
+ * `files: []` 这些都归执行器判，schema 层重复一遍的结果是「CLI 说合法、
+ * 执行时报错」。只有空串元素在这里拒，理由与 reload 那条一致。
+ */
 export const dockerSchema = obj(
   {
     mode: withDefault(oneOf(['remote-cli'] as const), 'remote-cli'),
@@ -368,6 +399,13 @@ export const dockerSchema = obj(
  */
 export const DEFAULT_TARGET_PICK = 'auto'
 
+/**
+ * 部署目标。type 收窄了 `nginx` / `docker` 两段与 type 的一致性 ——
+ * 写 `type: 'nginx'` 却给了 docker 段，在这一层就能拒。
+ *
+ * confd 刻意**不是**这里的必填项：它是实测能力的结论（同 platform 下
+ * 多个候选目录可能只有一个可写），让用户填等于把探测结果提前猜死。
+ */
 export const targetSchema = obj(
   {
     type: prefChain(TARGET_KINDS, ['static'] as const, '目标类型，也可以是偏好链'),
@@ -394,6 +432,14 @@ export const targetSchema = obj(
  */
 export const DEFAULT_KEEP = 5
 
+/**
+ * 发布布局。root 缺省时由能力推导，不要求用户给绝对路径 ——
+ * 同一份配置要能在开发机与目标机上都成立。
+ *
+ * dirMode / fileMode 用字符串（'0750'）而不是数字：配置文件的数字字面量
+ * 会被读成十进制，写 `0750` 的用户以为自己在写八进制，而结果是权限错到
+ * 服务起不来才暴露。字符串形态让「这是八进制」这件事显式化。
+ */
 export const releaseSchema = obj(
   {
     root: opt(str('发布根目录。不写则由能力推导')),
@@ -410,6 +456,16 @@ export const releaseSchema = obj(
   '发布布局',
 )
 
+/**
+ * 两阶段激活。默认 trial→promote：先起新版本、验过再切流量。
+ *
+ * 为什么不默认 direct：新版本在验过之前就接流量的失败模式是「用户看到的是
+ * 半死的服务」，而那种现场没法在事后还原。默认走慢的那条，是为了让默认
+ * 配置下永远不出现不可诊断的故障。
+ *
+ * trialTimeout / promoteWindow 是**时长字符串**（'10m'）而不是秒数：
+ * 配置是人写的，`'10m'` 与 `600` 的意图差别在读的人心里，不在机器里。
+ */
 export const activationSchema = obj(
   {
     mode: withDefault(oneOf(['trial-promote', 'direct'] as const), 'trial-promote'),
@@ -428,6 +484,16 @@ export const activationSchema = obj(
 // 项目与配置根
 // ============================================================
 
+/**
+ * 健康检查。**它的有无**决定 autoPromote 能否生效：没有 healthcheck 时
+ * `when-healthcheck-passes` 退化为 never，而不是「没人检查就当通过」。
+ *
+ * 默认的那次是「直接通过」还是「真的通过」决定语义，所以退化方向只能是
+ * 保守的一侧 —— 自动放行一个没验过的版本，等于把 trial 阶段的意义拿掉。
+ *
+ * fileExists 是 static 目标的主要手段：它不需要起进程、不碰 shell，
+ * 是唯一在只有文件权限的目标机上也能跑的检查。
+ */
 export const healthcheckSchema = obj(
   {
     command: opt(str('执行的命令，退出码 0 视为健康')),
@@ -450,6 +516,11 @@ export const healthcheckSchema = obj(
   '健康检查。它的有无决定 autoPromote 能否生效',
 )
 
+/**
+ * 一个可部署的项目。source 必填而 target 缺省：
+ * 目标可以完全由探测得出（零配置路径的前提），源不行 ——
+ * 「部署什么」是用户的事，「部署到哪、怎么部署」大多可以问机器。
+ */
 export const projectSchema = obj(
   {
     source: sourceSchema,
@@ -470,6 +541,13 @@ export const projectSchema = obj(
   '一个可部署的项目',
 )
 
+/**
+ * 配置根。`defaults` 与 `profiles` 是同一组段的两种复用方式，
+ * 优先级由 `@dp/core` 合成阶段定，schema 层不判先后 ——
+ * 合并语义只有一处，判两次的结果是两边对同一份配置给出不同答案。
+ *
+ * projects 必填：空配置没有任何可部署对象，报错比展开成「0 个项目」有用。
+ */
 export const configSchema = obj(
   {
     defaults: opt(
@@ -501,44 +579,177 @@ export const configSchema = obj(
 // define* —— 每段一个，便于分段复用与类型提示
 // ============================================================
 
+/** 归一化后的配置。默认值已填齐 —— 下游不必再判「用户写没写」 */
 export type Config = Infer<typeof configSchema>
+/**
+ * 用户可写的配置形态。可省字段在这里仍是可选的，偏好链可以写单值。
+ *
+ * Config / Input 分成两个类型而不是一个：前者是「拿到的」，后者是「写下的」。
+ * 合成一个的结果是默认值既看起来可省又必填，IDE 提示会自相矛盾。
+ */
 export type ConfigInput = InputOf<typeof configSchema>
+/** 归一化后的一台主机，ssh / hops / local 三选一已成立 */
 export type HostConfig = Infer<typeof hostSchema>
+/** 主机段的可写形态，ssh / hops 可以省略（local 目标除外） */
 export type HostInput = InputOf<typeof hostSchema>
+/** 归一化后的项目段 */
 export type ProjectConfig = Infer<typeof projectSchema>
+/** 项目段的可写形态 */
 export type ProjectInput = InputOf<typeof projectSchema>
+/** 归一化后的源段。root 不以分隔符结尾这件事已在 parse 时定死 */
 export type SourceConfig = Infer<typeof sourceSchema>
+/** 归一化后的发布段，keep 一定有值 */
 export type ReleaseConfig = Infer<typeof releaseSchema>
+/** 归一化后的目标段，type 恒为数组 */
 export type TargetConfig = Infer<typeof targetSchema>
+/** 归一化后的 nginx 段，server 恒为数组 */
 export type NginxConfig = Infer<typeof nginxSchema>
+/** nginx 段的可写形态，server 可写单对象或数组 */
 export type NginxInput = InputOf<typeof nginxSchema>
+/** 归一化后的 docker 段 */
 export type DockerConfig = Infer<typeof dockerSchema>
+/** docker 段的可写形态 */
 export type DockerInput = InputOf<typeof dockerSchema>
+/** 归一化后的传输段，strategy 为非空的偏好链数组 */
 export type TransportConfig = Infer<typeof transportSchema>
+/** 归一化后的激活段。trialTimeout / promoteWindow 仍是时长字符串 */
 export type ActivationConfig = Infer<typeof activationSchema>
+/** 归一化后的健康检查段，timeoutMs / intervalMs 一定有值 */
 export type HealthcheckConfig = Infer<typeof healthcheckSchema>
+/** 归一化后的提权段，type 一定有值（缺省 'none'，不是 undefined） */
 export type BecomeConfig = Infer<typeof becomeSchema>
 
+/**
+ * 校验并归一化整份配置。
+ *
+ * 为什么不直接给用户 `Config` 类型：类型只在编译期存在，而配置文件是
+ * 运行时的 JSON/JS 对象 —— 必填检查、默认值填充、偏好链展开都得真的跑一遍。
+ * define* 存在的意义就是让「声明的形状」与「实际校验」是同一份 schema。
+ *
+ * @param c 用户写的配置，字段可省、偏好链可写单值
+ * @returns 归一化后的配置：默认值已填、偏好链已是数组
+ * @throws DpError 带配置路径的校验错误，如 `projects.web.source.root`
+ */
 export const defineConfig = (c: ConfigInput): Config => configSchema.parse(c, 'config')
+/**
+ * 归一化一段主机定义。
+ *
+ * 分段独立出口是为了让同一台主机能被多个项目引用而只写一次 ——
+ * `defineHost` 的结果可以直接填进 `defaults.hosts`，不需要为它单独造一个函数。
+ *
+ * @param c 主机段原文，ssh / hops / local 三选一
+ * @returns 归一化后的主机：hops 非空或不存在，二者必居其一
+ * @throws DpError ssh 与 hops 同时给出，或端口不在 1–65535
+ */
 export const defineHost = (c: HostInput): HostConfig => hostSchema.parse(c, 'host')
+/**
+ * 归一化一个项目段。与 defineConfig 走的是同一份 schema，
+ * 只是错误路径前缀不同（`project.*` vs `projects.<name>.*`）。
+ *
+ * @param c 项目段原文
+ * @returns 归一化后的项目段
+ * @throws DpError 带 `project.` 前缀路径的校验错误
+ */
 export const defineProject = (c: ProjectInput): ProjectConfig => projectSchema.parse(c, 'project')
+/**
+ * 归一化源路径段。
+ *
+ * `./dist` 与 `./dist/**` 必须无歧义，而 `./dist/` 两者都像 ——
+ * 所以以分隔符结尾直接报错，不猜。猜错的后果是传了目录本身却当成内容
+ * （部署出空目录）或反过来（把目标目录整个删掉），后者不可逆。
+ *
+ * @param c 源段原文
+ * @returns 归一化后的源段
+ * @throws DpError root 以分隔符结尾，或以 `../` 开头（会逃出项目目录）
+ */
 export const defineSource = (c: InputOf<typeof sourceSchema>): SourceConfig =>
   sourceSchema.parse(c, 'source')
+/**
+ * 归一化发布布局段。keep 的缺省在这一层就填上，
+ * 下游读到的必是有效数字而不是「可能没有」。
+ *
+ * @param c 发布段原文
+ * @returns 归一化后的发布段，keep 一定有值
+ * @throws DpError keep 非正整数
+ */
 export const defineRelease = (c: InputOf<typeof releaseSchema>): ReleaseConfig =>
   releaseSchema.parse(c, 'release')
+/**
+ * 归一化目标段。type 的单值 / 数组写法在这里统一成数组，
+ * pick 缺省时填 `DEFAULT_TARGET_PICK`。
+ *
+ * @param c 目标段原文
+ * @returns 归一化后的目标段，type 为偏好链数组
+ * @throws DpError type 不在 `TARGET_KINDS` 内，或 nginx / docker 段与 type 不一致
+ */
 export const defineTarget = (c: InputOf<typeof targetSchema>): TargetConfig =>
   targetSchema.parse(c, 'target')
+/**
+ * 归一化 nginx 段。server 的「单对象 / 对象数组」两种写法在这里分派，
+ * 下游拿到的永远是数组 —— 分派逻辑只写一份。
+ *
+ * @param c nginx 段原文
+ * @returns 归一化后的 nginx 段
+ * @throws DpError reload 的 argv 里有空串元素
+ */
 export const defineNginx = (c: NginxInput): NginxConfig => nginxSchema.parse(c, 'nginx')
+/**
+ * 归一化 docker 段。
+ *
+ * @param c docker 段原文
+ * @returns 归一化后的 docker 段
+ * @throws DpError compose.files 的元素里有空串（空路径在目标机上报的错指向那个空路径）
+ */
 export const defineDocker = (c: DockerInput): DockerConfig => dockerSchema.parse(c, 'docker')
+/**
+ * 归一化传输段。strategy 缺省或写 `auto` 时展开成 `DEFAULT_TRANSPORT_CHAIN`，
+ * 链全失败由 core 报 `DP.PREF.UNSUPPORTED`。
+ *
+ * @param c 传输段原文
+ * @returns 归一化后的传输段，strategy 为非空数组
+ * @throws DpError 链里有不在 `TRANSPORT_KINDS` 中的项，或链为空
+ */
 export const defineTransport = (c: InputOf<typeof transportSchema>): TransportConfig =>
   transportSchema.parse(c, 'transport')
+/**
+ * 归一化激活段。默认 trial→promote + `when-healthcheck-passes`。
+ *
+ * @param c 激活段原文
+ * @returns 归一化后的激活段，时长仍是字符串（解析在消费层做一次）
+ * @throws DpError mode / autoPromote 取值非法
+ */
 export const defineActivation = (c: InputOf<typeof activationSchema>): ActivationConfig =>
   activationSchema.parse(c, 'activation')
+/**
+ * 归一化健康检查段。timeoutMs / intervalMs 的缺省在这一层填上，
+ * 轮询的「等多久、查一次」不被两处各写一份。
+ *
+ * @param c 健康检查段原文
+ * @returns 归一化后的健康检查段
+ * @throws DpError http 段缺 path，或 tcp 段缺 port
+ */
 export const defineHealthcheck = (c: InputOf<typeof healthcheckSchema>): HealthcheckConfig =>
   healthcheckSchema.parse(c, 'healthcheck')
+/**
+ * 归一化提权段。缺省是 `type: 'none'` 而不是「没配提权」——
+ * 不提权是一等合法配置（容器里的普通用户），把它表示成 undefined
+ * 会让每个消费点都要写一次「没配 = 不提权」的分支，而漏一处就等于
+ * 对着普通用户去跑 sudo。
+ *
+ * @param c 提权段原文
+ * @returns 归一化后的提权段
+ * @throws DpError type / method 取值非法
+ */
 export const defineBecome = (c: InputOf<typeof becomeSchema>): BecomeConfig =>
   becomeSchema.parse(c, 'become')
 
-/** 导出 JSON Schema，供编辑器提示 / 校验使用 */
+/**
+ * 导出 JSON Schema，供编辑器悬浮提示 / 外部校验工具使用。
+ *
+ * 刻意**不用于**运行时校验：它只是本包 `obj()` 结构的另一个投影，
+ * 而投影与 parse 判定分家之后，两边会各自演化。真正做校验的只有 `parse`。
+ *
+ * @returns 配置根对应的 JSON Schema 节点树；required 由各段的 isOptional 反推
+ */
 export const configJsonSchema = (): ReturnType<typeof configSchema.toJsonSchema> =>
   configSchema.toJsonSchema()
