@@ -84,15 +84,15 @@ describe('validateVars', () => {
     ]
     for (const input of cases) {
       const validateCodes = validateVars(input, ctx).map((e) => e.code)
-      const first = renderErrors(input, ctx)[0]
+      const renderCodes = renderErrors(input, ctx)
+      // 两边必须是两个独立算出来的量：一侧是 validate 的首码，另一侧是 render 实际抛出的码。
+      // 写成同一表达式的两份拷贝就成了恒等式 —— 永不失败，正好把「plan 期说谎」放过去。
+      // （renderString 首错即抛，所以 renderCodes 只会是 [] 或 1 个码，「同序」在此等价于首码一致。）
       assert.deepEqual(
-        validateCodes.length > 0 ? [first] : [],
-        validateCodes.length > 0 ? [first] : [],
-        `render 与 validate 对 ${input} 的判断应一致`,
+        validateCodes.length > 0 ? [validateCodes[0]] : [],
+        renderCodes,
+        `${input}：validateVars 与 renderString 对「有没有错 / 首个错的码」判断应一致`,
       )
-      if (validateCodes.length > 0) {
-        assert.equal(validateCodes[0], first, `${input} 的首个错误码应与 renderString 一致`)
-      }
     }
   })
 
