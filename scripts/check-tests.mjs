@@ -18,6 +18,7 @@
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isTautology } from './check-tests-rules.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const PKGS = join(ROOT, 'packages')
@@ -364,19 +365,13 @@ for (const file of testFiles) {
       const lhs = snippet(body, spans[0][0], spans[0][1])
       const rhs = snippet(body, spans[1][0], spans[1][1])
 
-      /* --- 恒等断言：两个实参归一化后逐字符相同 —— 永不失败 ---
+      /* --- 恒等断言：两个实参是同一份表达式的拷贝 —— 永不失败 ---
          与零断言同级判 P0：一个永远不失败的断言，提供的保障与没有断言相同，
          但它绿着，还会让「这条已经被验证过了」的错觉留在文件里。
-         归一化**只抹空白**：抹字面量会把「结构相同、值不同」的两个实参误判成恒等。
-         比较用未遮罩的原文 —— 遮罩会把字符串内容抹平，`f('a')` 与 `f('b')` 会被判成一样。
-
-         **只认不含函数调用的实参。** 带调用的实参会被求值两次，实现不确定时两边完全可以不等 ——
-         本仓 `packages/log` 的确定性用例就写成了 `assert.equal(formatRecord(rec, f), formatRecord(rec, f))`，
-         那正是它要验的东西（两次格式化必须一致）。把这类算成恒等，就是拿形状当语义。
-         宁可漏掉「两边都调同一个纯函数」这种只能靠人看的情况，也不能把确定性测试判成假测试。 */
-      const squash = (s) => s.replace(/\s+/g, '')
-      const hasCall = (s) => /[\w$)\]]\s*\(/.test(s)
-      if (squash(lhs) !== '' && squash(lhs) === squash(rhs) && !hasCall(lhs)) {
+         判定连同它的三条边界（只抹空白 / 含调用不算 / 空串不算）都在
+         `check-tests-rules.mjs` 里，那边有回归测试 —— 判据自己没有测试时，
+         判据被改坏不会有任何东西变红。 */
+      if (isTautology(lhs, rhs)) {
         add(P0, 'P0', fileRel, bodyLineOf(a.index), name,
           `assert.${a[1]}(${lhs.trim()}, ${rhs.trim()})：两个实参是同一表达式的拷贝，永不失败 —— 想比的是哪两个量，就各算一次`)
       }
