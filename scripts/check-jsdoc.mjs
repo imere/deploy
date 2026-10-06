@@ -752,7 +752,12 @@ function memberDocBefore(decl, memberName) {
   const body = masked.slice(braceOf + 1, close)
   const m = re.exec(body)
   if (!m) return null
-  const abs = braceOf + 1 + m.index + m[0].length - memberName.length
+  // 成员名的真实起点要直接找，不能用 `m[0].length - memberName.length` 反推：
+  // 正则尾部的 `[?:]` 也算进了 `m[0]`，减出来的位置会偏进名字内部（实测落在 `type` 的 `y` 上），
+  // 往回找注释必然落空 —— 表现为「成员缺 JSDoc」，而注释就在那一行的正上方。
+  const nameAt = body.indexOf(memberName, m.index)
+  if (nameAt === -1) return null
+  const abs = braceOf + 1 + nameAt
   const doc = docBefore(src, abs)
   if (!doc) return null
   const parsed = parseDoc(doc.text)
