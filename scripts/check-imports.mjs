@@ -33,42 +33,29 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve as resolvePath, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  IMPL_LAYER,
+  LAYER_LABEL,
+  analyzeCycles,
+  classifyCrossLayer,
+  clauseIsTypeOnly,
+  findStatements,
+  isTestFile,
+  layerOf,
+  makeAdj,
+  prepare,
+  splitPackageSpec,
+} from './check-imports-rules.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const asJson = process.argv.includes('--json')
 const showLayers = process.argv.includes('--layers')
-
-/**
- * 层级表。
- *
- * 为什么只有这四层是点名的：架构要点给的顺序是
- * `schema`（类型/define*）→ `ports`（接口）→ `core`（编排 + 目标探测）→ 实现包 → `cli`，
- * 除这五个名字外再没有更细的层。其余包一律落在「实现包」层 —— 若由本脚本
- * 自行切出 `log` 更靠下、`transport` 更靠上之类的子层，判定依据就从「共同约定」
- * 变成了「写这个脚本的人当时的理解」，下次有人改脚本分层就会悄悄漂移。
- */
-// 层序按**实际依赖方向**定，不按文档里的书写顺序：ports 不依赖任何包，它才是最底的一层。
-// schema 反过来要用 ports 的 DpError / assertPortInRange / parseSshTarget 去校验配置，
-// 所以 schema 在 ports 之上。把 schema 定成 L1 会让「schema 用 ports 的错误类型抛错」
-// 这种正当依赖被判成反向依赖 —— 实测过，5 处违规里有 3 处是这个顺序错误造出来的。
-const NAMED_LAYER = { ports: 1, schema: 2, core: 3, cli: 5 }
-const IMPL_LAYER = 4
-const LAYER_LABEL = {
-  1: 'L1 ports（接口 / 错误 / 基础工具）',
-  2: 'L2 schema（类型 / define*）',
-  3: 'L3 core（编排 + 目标探测）',
-  4: 'L4 实现包',
-  5: 'L5 cli',
-}
 
 const packagesDir = join(root, 'packages')
 const SKIP_DIRS = new Set(['node_modules', 'build', 'dist', 'coverage', '.git', '.tmp'])
 
 const toPosix = (p) => p.split(sep).join('/')
 const toRel = (p) => toPosix(relative(root, p))
-const shortName = (pkg) => pkg.replace(/^@dp\//, '')
-const layerOf = (pkg) => NAMED_LAYER[shortName(pkg)] ?? IMPL_LAYER
-const isTestFile = (file) => file.endsWith('.test.ts')
 
 /**
  * 包名以 package.json 的声明为准，目录名只作为兜底。
@@ -113,111 +100,6 @@ function walk(dir, out = []) {
   return out
 }
 
-/**
- * 两份视图：注释里的 `import x from 'y'` 与字符串里的同样不是依赖，
- * 但说明符本身活在字符串里，删掉就抽不出来。因此保留一份「注释抹平、字符串留下」
- * 的文本用于抽语句，再配一张「该偏移是否落在字符串内」的掩码剔除误命中。
- * 抹平而非删除，是为了让偏移与行号仍然对得上。
- */
-function prepare(src) {
-  const out = new Array(src.length)
-  const inStr = new Uint8Array(src.length)
-  let i = 0
-  while (i < src.length) {
-    const c = src[i]
-
-    if (c === '/' && src[i + 1] === '/') {
-      while (i < src.length && src[i] !== '\n') {
-        out[i] = ' '
-        i += 1
-      }
-      continue
-    }
-
-    if (c === '/' && src[i + 1] === '*') {
-      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
-        out[i] = src[i] === '\n' ? '\n' : ' '
-        i += 1
-      }
-      out[i] = ' '
-      if (i + 1 < src.length) out[i + 1] = ' '
-      i += 2
-      continue
-    }
-
-    if (c === '"' || c === "'" || c === '`') {
-      const quote = c
-      out[i] = c
-      inStr[i] = 1
-      i += 1
-      while (i < src.length) {
-        if (src[i] === '\\') {
-          out[i] = src[i]
-          inStr[i] = 1
-          if (i + 1 < src.length) {
-            out[i + 1] = src[i + 1] === '\n' ? '\n' : src[i + 1]
-            inStr[i + 1] = 1
-          }
-          i += 2
-          continue
-        }
-        if (src[i] === quote) {
-          out[i] = src[i]
-          inStr[i] = 1
-          i += 1
-          break
-        }
-        // 模板串可以跨行；普通引号里的换行说明是未闭合的扫尾，到此为止
-        if (src[i] === '\n' && quote !== '`') break
-        out[i] = src[i] === '\n' ? '\n' : src[i]
-        inStr[i] = 1
-        i += 1
-      }
-      continue
-    }
-
-    out[i] = c
-    i += 1
-  }
-  return { text: out.join(''), inStr }
-}
-
-/**
- * import / re-export 语句。
- *
- * 为什么要求关键字顶行（`^[ \t]*` + m 标志）：`import` 出现在行中间的只剩
- * 字符串与正则两种可能，两者都已由掩码或位置排除，顶行约束能一次性挡掉
- * 这类误命中，比事后猜「这个 import 是不是真的」稳。
- *
- * 为什么子句里禁止再出现 import / export：语句跨行时非贪婪匹配会顺着换行
- * 吃到下一条语句，把 `export const a = 1` 和随后的 `import b from './c'`
- * 拼成一条假的 re-export 边。
- */
-const NO_KEYWORD = String.raw`(?:(?!\bimport\b|\bexport\b)[^;'"])*?`
-const RE_STATIC = new RegExp(String.raw`^[ \t]*import\b(${NO_KEYWORD})\s*from\s*(['"])([^'"]+)\2`, 'gm')
-const RE_BARE = /^[ \t]*import\s*(['"])([^'"]+)\1/gm
-const RE_DYNAMIC = /(?<![\w$.])import\s*\(\s*(['"])([^'"]+)\1\s*\)/g
-const RE_REEXPORT = new RegExp(String.raw`^[ \t]*export\b(${NO_KEYWORD})\s*from\s*(['"])([^'"]+)\2`, 'gm')
-
-/**
- * 类型专用判定。
- *
- * 为什么混合子句（`import { type A, B }`）算值依赖：B 会被真的求值并绑定，
- * 编译后这条边仍然存在 —— 只要有任何一个成员不是 type，就不能按类型边放行。
- */
-function clauseIsTypeOnly(clause) {
-  if (/^\s*type\b/.test(clause)) return true
-  const open = clause.indexOf('{')
-  const close = clause.lastIndexOf('}')
-  if (open === -1 || close === -1) return false
-  const members = clause
-    .slice(open + 1, close)
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-  if (members.length === 0) return false
-  return members.every((m) => /^type\s+[\w$]/.test(m))
-}
 
 /** 说明符 → 仓库内文件。`./x.js` 要同时试 `.ts`（本仓 TS 的 ESM 写法）。 */
 function resolveRelative(fromFile, spec) {
@@ -240,11 +122,9 @@ function resolveRelative(fromFile, spec) {
 
 /** 裸包名 → 包入口文件（`@dp/x`、`@dp/x/sub`）。null 表示仓外依赖。 */
 function resolvePackage(spec) {
-  const parts = spec.split('/')
-  // scope 里带斜杠（`@dp/ports`），包名得按两段取；否则裸名按一段取
-  const pkg = (spec.startsWith('@') ? [parts.slice(0, 2).join('/')] : [parts[0]]).find((n) => dirByPkg.has(n))
+  // 包名怎么切是纯判定（在 splitPackageSpec 里），这里只负责去盘上确认文件存在
+  const { pkg, rest } = splitPackageSpec(spec, dirByPkg)
   if (!pkg) return { pkg: null, file: null }
-  const rest = spec.slice(pkg.length).replace(/^\//, '')
   const dir = join(packagesDir, dirByPkg.get(pkg))
   const tries = [join(dir, 'src', 'index.ts')]
   if (rest) {
@@ -307,10 +187,7 @@ for (const file of srcFiles) {
     })
   }
 
-  for (const m of text.matchAll(RE_STATIC)) push(m[3], m.index, m[1])
-  for (const m of text.matchAll(RE_BARE)) push(m[2], m.index, '')
-  for (const m of text.matchAll(RE_DYNAMIC)) push(m[2], m.index, '')
-  for (const m of text.matchAll(RE_REEXPORT)) push(m[3], m.index, m[1])
+  for (const s of findStatements(text, inStr)) push(s.spec, s.offset, s.clause)
 }
 
 const crossPkg = edges.filter((e) => e.fromPkg !== e.toPkg)
@@ -320,31 +197,15 @@ const crossPkg = edges.filter((e) => e.fromPkg !== e.toPkg)
 /**
  * 判据：一个包只能 import **比它更低**的层。同层放行（理由见文件头）。
  * 反向且是值依赖 → 硬失败；反向但整条语句是 `import type` → 进 C。
+ *
+ * 测试文件里的反向依赖单独分桶：它**不构成运行时依赖**（测试不进产物），
+ * 而 core 的 slice 测试要用真实 Runner 与真实 target 跑集成，替身会丢掉真行为。
+ * 原顾虑是「留一个把反向依赖搬进测试就过关的口子」——但源码里的反向依赖仍然硬失败，
+ * 真要靠搬测试来绕，评审看得见；为这个可能性牺牲集成测试的真实性不划算。
  */
-const reverseViolations = []
-const typeOnlyReverse = []
-// 测试文件里的反向依赖单独分桶：它**不构成运行时依赖**（测试不进产物），
-// 而 core 的 slice 测试要用真实 Runner 与真实 target 跑集成，替身会丢掉真行为。
-// 原顾虑是「留一个把反向依赖搬进测试就过关的口子」——但源码里的反向依赖仍然硬失败，
-// 真要靠搬测试来绕，评审看得见；为这个可能性牺牲集成测试的真实性不划算。
-const testOnlyReverse = []
-const sameLayer = []
-for (const e of crossPkg) {
-  const from = layerOf(e.fromPkg)
-  const to = layerOf(e.toPkg)
-  const item = {
-    from: e.fromPkg,
-    to: e.toPkg,
-    fromLayer: from,
-    toLayer: to,
-    file: toRel(e.fromFile),
-    line: e.line,
-    spec: e.spec,
-    test: e.isTest,
-  }
-  if (to > from) (e.typeOnly ? typeOnlyReverse : e.isTest ? testOnlyReverse : reverseViolations).push(item)
-  else if (to === from) sameLayer.push(item)
-}
+const { reverse: reverseViolations, typeOnlyReverse, testOnlyReverse, sameLayer } = classifyCrossLayer(
+  crossPkg.map((e) => ({ ...e, file: toRel(e.fromFile) })),
+)
 
 const sortEdges = (a, b) =>
   a.from.localeCompare(b.from) || a.to.localeCompare(b.to) || a.file.localeCompare(b.file) || a.line - b.line
@@ -354,111 +215,6 @@ sameLayer.sort(sortEdges)
 
 // ---------------------------------------------------------------- B：环
 
-/**
- * Tarjan 求强连通分量。
- *
- * 为什么用 SCC 而不是枚举所有简单环：环的数量在最坏情况下是指数级的，
- * 而「这几个节点互相可达」已经足以定位问题 —— 修好一个 SCC 需要的是
- * 知道**参与环的节点集合**，不是把每条排列都列出来。
- */
-function tarjan(keys, adj) {
-  const index = new Map()
-  const low = new Map()
-  const onStack = new Set()
-  const stack = []
-  const out = []
-  let counter = 0
-
-  const visit = (v) => {
-    index.set(v, counter)
-    low.set(v, counter)
-    counter += 1
-    stack.push(v)
-    onStack.add(v)
-    for (const w of adj.get(v) ?? []) {
-      if (!index.has(w)) {
-        visit(w)
-        low.set(v, Math.min(low.get(v), low.get(w)))
-      } else if (onStack.has(w)) {
-        low.set(v, Math.min(low.get(v), index.get(w)))
-      }
-    }
-    if (low.get(v) === index.get(v)) {
-      const comp = []
-      let w
-      do {
-        w = stack.pop()
-        onStack.delete(w)
-        comp.push(w)
-      } while (w !== v)
-      out.push(comp)
-    }
-  }
-
-  for (const k of keys) if (!index.has(k)) visit(k)
-  return out
-}
-
-/** 在 SCC 内找一条回到起点的路径 —— SCC 强连通，这样的路径必然存在。 */
-function findCycle(start, members, adj) {
-  const path = []
-  const seen = new Set()
-  const dfs = (v) => {
-    path.push(v)
-    seen.add(v)
-    for (const w of adj.get(v) ?? []) {
-      if (!members.has(w)) continue
-      if (w === start) return true
-      if (seen.has(w)) continue
-      if (dfs(w)) return true
-    }
-    path.pop()
-    seen.delete(v)
-    return false
-  }
-  return dfs(start) ? [...path, start] : null
-}
-
-/**
- * 先在**全图**上找 SCC，再在每个分量内部按**值边**重新求一次 SCC。
- *
- * 为什么要两步：只跑全图会把「A 值依赖 B、B 类型依赖 A」判成运行时环
- * （其实没有）；只跑值边又会漏掉纯类型环。两步的分工是 —— 全图负责
- * 「这些节点缠在一起」，值边负责「其中有没有真的会在运行时转不起来的圈」。
- */
-function analyzeCycles(keys, adjAll, adjValue) {
-  const hard = []
-  const typeOnly = []
-  for (const comp of tarjan(keys, adjAll)) {
-    if (comp.length < 2) continue
-    const members = new Set(comp)
-    const inner = new Map(
-      comp.map((k) => [k, new Set([...(adjValue.get(k) ?? [])].filter((x) => members.has(x)))]),
-    )
-    const valueCycles = tarjan([...members], inner).filter((c) => c.length > 1)
-    if (valueCycles.length > 0) {
-      for (const c of valueCycles) {
-        const set = new Set(c)
-        hard.push({ members: [...c].sort(), cycle: findCycle(c[0], set, adjValue) })
-      }
-    } else {
-      typeOnly.push({ members: [...comp].sort(), cycle: findCycle(comp[0], members, adjAll) })
-    }
-  }
-  const norm = (x) => x.members.join('|')
-  hard.sort((a, b) => norm(a).localeCompare(norm(b)))
-  typeOnly.sort((a, b) => norm(a).localeCompare(norm(b)))
-  return { hard, typeOnly }
-}
-
-const makeAdj = (keys, pairs) => {
-  const adj = new Map(keys.map((k) => [k, new Set()]))
-  for (const { from, to } of pairs) {
-    if (from === to) continue
-    adj.get(from)?.add(to)
-  }
-  return adj
-}
 
 const pkgKeys = [...dirByPkg.keys()].sort()
 const pkgPairs = crossPkg.map((e) => ({ from: e.fromPkg, to: e.toPkg }))
@@ -515,8 +271,13 @@ testOnlyReverse.sort(sortEdges)
 
 // ---------------------------------------------------------------- 输出
 
+// 层号没有对应标签时不许崩：崩出来的报错落在这一行的 `.slice` 上，
+// 看的人只会看到 TypeError，真正的「层号不在已定义层里」被完全盖住。
+// 退回打印层号本身 —— 报告里出现一个裸数字，比一次崩溃好定位得多。
+const layerLabel = (n) => LAYER_LABEL[n] ?? `层${n}`
+
 const fmtEdge = (e) =>
-  `  ${e.from} → ${e.to}  ${LAYER_LABEL[e.fromLayer].slice(0, 2)} → ${LAYER_LABEL[e.toLayer].slice(0, 2)}` +
+  `  ${e.from} → ${e.to}  ${layerLabel(e.fromLayer).slice(0, 2)} → ${layerLabel(e.toLayer).slice(0, 2)}` +
   ` —— ${e.file}:${e.line}${e.test ? '（测试）' : ''}  ${e.spec}`
 
 if (asJson) {

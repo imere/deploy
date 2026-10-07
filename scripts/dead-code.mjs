@@ -20,8 +20,19 @@
  * 这里的判断只需要「去注释去字符串后的标识符计数」，手写扫描足够。
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative, dirname, resolve as resolvePath, sep } from 'node:path'
+import { join, relative, dirname, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import {
+  collectDeclarations,
+  collectSpecifiers,
+  countRefs,
+  isPkgEntry,
+  isTestFile,
+  scan,
+  specifierCandidates,
+  starReach,
+} from './dead-code-rules.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const asJson = process.argv.includes('--json')
@@ -29,13 +40,19 @@ const asJson = process.argv.includes('--json')
 /** 建产物与依赖目录：里面的 .d.ts 是编译输出，不是源码。 */
 const SKIP_DIRS = new Set(['node_modules', 'build', 'dist', 'coverage', '.git', '.tmp'])
 
-/** 由 `node --test` 按文件名发现执行，不靠 import，结构上必然无仓内引用方。 */
-const isTestFile = (rel) => rel.endsWith('.test.ts')
-
-/** 包入口：对外 API 表面，仓内无引用不等于外部无引用。 */
-const isPkgEntry = (rel) => /(^|[\\/])src[\\/]index\.ts$/.test(rel)
-
 const toRel = (p) => relative(root, p).split('\\').join('/')
+
+/** 候选顺序由纯规则给出，这里只判命中 —— 文件系统不参与规则本身。 */
+function resolveSpecifier(fromFile, spec) {
+  for (const t of specifierCandidates(root, fromFile, spec)) {
+    try {
+      if (statSync(t).isFile()) return t
+    } catch {
+      /* 候选不存在，试下一个 */
+    }
+  }
+  return null
+}
 
 function walk(dir, out = []) {
   let entries
@@ -55,285 +72,6 @@ function walk(dir, out = []) {
     }
   }
   return out
-}
-
-/**
- * 扫描器。`keepStrings` 决定字面量内容是留是抹 —— 两种用途各要一份。
- *
- * 模板串要区别对待：`${...}` 里是真代码（两种视图都留），其余是字面量。
- * 这是本脚本最容易出错的地方，所以写成显式的帧栈而不是逐状态猜测。
- */
-function scan(src, keepStrings) {
-  let out = ''
-  let i = 0
-  const stack = [{ type: 'code', braces: 0 }]
-  let lastSig = ''
-  let lastWord = ''
-
-  /** 除号还是正则起始：靠前一个有效字符判断，看不准就当除号（少剥一层，偏向漏报）。 */
-  const regexAllowed = () => {
-    if (lastSig === '') return true
-    if ('(,=:[!&|?{};+-*%<>~^'.includes(lastSig)) return true
-    return [
-      'return', 'typeof', 'case', 'in', 'of', 'new', 'delete', 'void',
-      'do', 'else', 'yield', 'await', 'instanceof',
-    ].includes(lastWord)
-  }
-
-  const literal = (c) => {
-    if (keepStrings) out += c
-    else out += c === '\n' ? '\n' : ' '
-  }
-
-  while (i < src.length) {
-    const frame = stack[stack.length - 1]
-    const c = src[i]
-
-    if (frame.type === 'tpl') {
-      if (c === '\\') {
-        out += keepStrings ? src.slice(i, i + 2) : (src[i + 1] === '\n' ? ' \n' : '  ')
-        i += 2
-        continue
-      }
-      if (c === '`') {
-        out += keepStrings ? '`' : ' '
-        i += 1
-        stack.pop()
-        lastSig = '`'
-        lastWord = ''
-        continue
-      }
-      if (c === '$' && src[i + 1] === '{') {
-        out += '${'
-        i += 2
-        stack.push({ type: 'code', braces: 0 })
-        continue
-      }
-      literal(c)
-      i += 1
-      continue
-    }
-
-    if (c === '/' && src[i + 1] === '/') {
-      while (i < src.length && src[i] !== '\n') {
-        out += ' '
-        i += 1
-      }
-      continue
-    }
-
-    if (c === '/' && src[i + 1] === '*') {
-      out += '  '
-      i += 2
-      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
-        out += src[i] === '\n' ? '\n' : ' '
-        i += 1
-      }
-      out += '  '
-      i += 2
-      continue
-    }
-
-    if (c === '"' || c === "'") {
-      literal(c)
-      i += 1
-      while (i < src.length) {
-        if (src[i] === '\\') {
-          out += keepStrings ? src.slice(i, i + 2) : (src[i + 1] === '\n' ? ' \n' : '  ')
-          i += 2
-          continue
-        }
-        if (src[i] === c) {
-          literal(c)
-          i += 1
-          break
-        }
-        if (src[i] === '\n') break
-        literal(src[i])
-        i += 1
-      }
-      lastSig = '"'
-      lastWord = ''
-      continue
-    }
-
-    if (c === '`') {
-      literal('`')
-      i += 1
-      stack.push({ type: 'tpl' })
-      lastSig = '`'
-      lastWord = ''
-      continue
-    }
-
-    if (c === '/' && regexAllowed()) {
-      let j = i + 1
-      let inClass = false
-      let ok = false
-      while (j < src.length && src[j] !== '\n') {
-        if (src[j] === '\\') {
-          j += 2
-          continue
-        }
-        if (src[j] === '[') inClass = true
-        else if (src[j] === ']') inClass = false
-        else if (src[j] === '/' && !inClass) {
-          ok = true
-          break
-        }
-        j += 1
-      }
-      if (ok) {
-        const tail = /^[a-z]*/.exec(src.slice(j + 1))?.[0] ?? ''
-        out += keepStrings ? src.slice(i, j + 1 + tail.length) : ' '.repeat(j - i + 1 + tail.length)
-        i = j + 1 + tail.length
-        lastSig = '/'
-        lastWord = ''
-        continue
-      }
-    }
-
-    if (c === '{') frame.braces += 1
-    if (c === '}') {
-      if (frame.braces === 0 && stack.length > 1) {
-        out += keepStrings ? '}' : ' '
-        i += 1
-        stack.pop()
-        continue
-      }
-      frame.braces -= 1
-    }
-
-    out += c
-    if (/\S/.test(c)) {
-      lastSig = c
-      lastWord = /[\w$]/.test(c) ? lastWord + c : ''
-    } else if (!/[\w$]/.test(c)) {
-      lastWord = ''
-    }
-    i += 1
-  }
-
-  return out
-}
-
-/** 偏移 → 行号（1 起）。 */
-function makeLineAt(text) {
-  const starts = [0]
-  for (let i = 0; i < text.length; i += 1) if (text[i] === '\n') starts.push(i + 1)
-  return (offset) => {
-    let lo = 0
-    let hi = starts.length - 1
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1
-      if (starts[mid] <= offset) lo = mid
-      else hi = mid - 1
-    }
-    return lo + 1
-  }
-}
-
-/** 收集 `export` 声明。输入是去字符串视图 —— 声明不在字面量里。 */
-function collectDeclarations(code) {
-  const lineAt = makeLineAt(code)
-  const decls = new Map()
-  const uncertain = []
-
-  const re = /(?<![\w$.])export\s+(?:declare\s+)?(?:abstract\s+)?(?:(async)\s+)?(function|class|const|let|var|interface|type|enum|namespace)\s+(\*?\s*[A-Za-z_$][\w$]*)/g
-  for (const m of code.matchAll(re)) {
-    const kind = m[2]
-    const raw = m[3].replace('*', '').trim()
-    const offset = m.index + m[0].lastIndexOf(raw)
-    if (decls.has(raw)) continue
-    decls.set(raw, { name: raw, kind, offset, line: lineAt(offset) })
-    // 多声明符 `export const a = 1, b = 2` 只认得到第一个，剩下的不猜
-    if (/^\s*,\s*[A-Za-z_$][\w$]*\s*(:|=|,)/.test(code.slice(offset + raw.length))) {
-      uncertain.push({ name: raw, line: lineAt(offset), reason: '多声明符导出只解析出第一个名字，其余未计入' })
-    }
-  }
-
-  for (const m of code.matchAll(/(?<![\w$.])export\s+(?:default\b)/g)) {
-    uncertain.push({ name: null, line: lineAt(m.index), reason: '存在 export default，按约定不查' })
-  }
-  for (const m of code.matchAll(/(?<![\w$.])export\s*(?:declare\s+)?(?:async\s+)?(?:function\s*|class\s*|const\s*|let\s*|var\s*)?\{/g)) {
-    const after = code.slice(m.index + m[0].length, m.index + m[0].length + 2)
-    if (after.startsWith('{')) {
-      uncertain.push({ name: null, line: lineAt(m.index), reason: '解构导出，无法静态列出名字' })
-    }
-  }
-
-  return { decls, uncertain }
-}
-
-/** 收集 import / export-from 的说明符。输入是去注释视图 —— 说明符是字符串，不能抹。 */
-function collectSpecifiers(code) {
-  const lineAt = makeLineAt(code)
-  const edges = []
-  const forwards = []
-  const dynamic = []
-
-  // import 之后到下一个分号/换行起的新 import 之前，才算同一条语句
-  for (const m of code.matchAll(/(?<![\w$.])import\b/g)) {
-    const window = code.slice(m.index, m.index + 400)
-    const stop = window.slice(1).search(/;|(?<![\w$.])import\b/)
-    const stmt = stop === -1 ? window : window.slice(0, stop + 1)
-    if (/^\s*import\s*['"]/.test(stmt)) {
-      const lit = /^\s*import\s*(['"])([^'"]+)\1/.exec(stmt)
-      if (lit) edges.push({ spec: lit[2], line: lineAt(m.index), kind: 'static' })
-      continue
-    }
-    const from = /\bfrom\s*(['"])([^'"]+)\1/.exec(stmt)
-    if (from) edges.push({ spec: from[2], line: lineAt(m.index), kind: 'static' })
-    else if (/\(\s*$/.test(stmt)) {
-      // import ( 不是静态 import，交给下面的动态分支
-    }
-  }
-
-  for (const m of code.matchAll(/(?<![\w$.])import\s*\(\s*([^()]*?)\s*\)/g)) {
-    const arg = m[1].trim()
-    const lit = /^(['"])([^'"]+)\1$/.exec(arg)
-    if (lit) edges.push({ spec: lit[2], line: lineAt(m.index), kind: 'dynamic' })
-    else dynamic.push({ raw: arg.slice(0, 60), line: lineAt(m.index) })
-  }
-
-  for (const m of code.matchAll(/(?<![\w$.])export\s*\*\s*from\s*(['"])([^'"]+)\1/g)) {
-    forwards.push({ spec: m[2], line: lineAt(m.index), star: true })
-  }
-  for (const m of code.matchAll(/(?<![\w$.])export\s*(?:type\s*)?\{[^}]*\}\s*from\s*(['"])([^'"]+)\1/g)) {
-    forwards.push({ spec: m[2], line: lineAt(m.index), star: false })
-  }
-
-  return { edges, forwards, dynamic }
-}
-
-/** 相对说明符 → 仓库内绝对路径。`./x.js` 要同时试 `.ts`（TS 的 ESM 写法）。 */
-function resolveSpecifier(fromFile, spec) {  if (spec.startsWith('.')) {
-    const base = resolvePath(dirname(fromFile), spec)
-    const tries = [base]
-    if (base.endsWith('.js')) tries.push(base.slice(0, -3) + '.ts')
-    if (base.endsWith('.mjs')) tries.push(base.slice(0, -4) + '.mts')
-    if (!/\.[cm]?[jt]sx?$/.test(base)) {
-      tries.push(`${base}.ts`, join(base, 'index.ts'), `${base}.mjs`, join(base, 'index.mjs'))
-    }
-    for (const t of tries) {
-      try {
-        if (statSync(t).isFile()) return t
-      } catch {
-        /* 候选不存在，试下一个 */
-      }
-    }
-    return null
-  }
-  const dp = /^@dp\/([^/]+)$/.exec(spec)
-  if (dp) {
-    const cand = join(root, 'packages', dp[1], 'src', 'index.ts')
-    try {
-      if (statSync(cand).isFile()) return cand
-    } catch {
-      /* 包不存在 */
-    }
-  }
-  return null
 }
 
 // ---------------------------------------------------------------- 扫描
@@ -447,37 +185,18 @@ for (const f of allFiles) {
   }
 }
 
-const starReach = new Map(allFiles.map((f) => [f.path, new Set()]))
-for (let round = 0; round <= allFiles.length; round += 1) {
-  let dirty = false
-  for (const f of allFiles) {
-    for (const t of starTargets.get(f.path)) {
-      if (starReach.get(f.path).has(t)) continue
-      starReach.get(f.path).add(t)
-      dirty = true
-      for (const t2 of starReach.get(t)) starReach.get(f.path).add(t2)
-    }
-  }
-  if (!dirty) break
-}
+const reach = starReach(allFiles.map((f) => f.path), starTargets)
 
 const starredBy = new Map(allFiles.map((f) => [f.path, new Set()]))
 for (const f of allFiles) {
-  for (const t of starReach.get(f.path)) starredBy.get(t).add(f.path)
+  for (const t of reach.get(f.path)) starredBy.get(t).add(f.path)
 }
 
 const suspicious = []
 const confirmed = []
 
-const countRefs = (file, name, skipOffset) => {
-  const re = new RegExp(`(?<![\\w$])${name}(?![\\w$])`, 'g')
-  let count = 0
-  for (const m of file.code.matchAll(re)) {
-    if (skipOffset != null && m.index >= skipOffset && m.index < skipOffset + name.length) continue
-    count += 1
-  }
-  return count
-}
+/** 引用计数走 code 视图，声明处那次不算引用。 */
+const countIn = (file, name, skipOffset) => countRefs(file.code, name, skipOffset)
 
 for (const f of scopeFiles) {
   for (const u of f.uncertain) {
@@ -500,13 +219,13 @@ for (const f of scopeFiles) {
     let testRefs = 0
     for (const g of allFiles) {
       if (g === f) continue
-      const n = countRefs(g, name, null)
+      const n = countIn(g, name, null)
       if (n === 0) continue
       if (g.isTest) testRefs += n
       else prodRefs += n
     }
     // 声明所在文件内部的使用也算引用，声明处本身不算
-    const selfRefs = countRefs(f, name, decl.offset)
+    const selfRefs = countIn(f, name, decl.offset)
     if (f.isTest) testRefs += selfRefs
     else prodRefs += selfRefs
     // 星号转发是本仓唯一的公开路径，也算引用
