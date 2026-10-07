@@ -25,8 +25,10 @@ pnpm build             # tsc -b，产物 packages/<pkg>/build
 pnpm test              # 构建 + node --test + 覆盖率 → build/coverage/lcov.info
 pnpm run test:scripts  # 门禁脚本自己的测试（scripts/*.test.mjs）—— 判据被改坏要有东西变红
 pnpm verify            # build + test + test:scripts + 六项静态门禁（verify:gates）
-                       # 第七项 verify:selfcheck（门禁自检）单独跑：它要派生子进程，
                        # Windows 上经 pnpm 链条派会 EBUSY，直接 node 该脚本则正常
+                       # 变异测试同理且更慢：pnpm run verify:mutation 只改 .tmp 副本，
+                       # 本机实测每个变异都要删一次临时目录 —— 而本机 node 的删除被
+                       # safe-delete 垫片的批量守卫拦死，跑不了几个就会断。交给 CI 周跑。
 pnpm clean             # tsc -b --clean
 ```
 

@@ -1,0 +1,66 @@
+name: 变异测试
+
+# 为什么不在主 CI 里跑，也不放进 pnpm verify：
+#   1. 它靠派生子进程跑「改坏一份副本 → 跑该包测试」，而 Windows 上经 pnpm 链条派子进程
+#      恒 EBUSY（与 verify:selfcheck 同源），放进本地 verify 会让那条命令恒红在最后一项；
+#   2. 它比其余七项慢一个量级 —— 每个变异都要整包跑一遍测试，PR 上跑不划算。
+#
+# 为什么用定时而不是只在 PR 上跑：它验的是「测试有没有守住源码」，这是个慢变量 ——
+# 一次 PR 引入的未守住代码不会让覆盖率之类的快信号变红，但会在周跑里暴露。
+# 同时留 workflow_dispatch：改了测试或实现想立刻看一眼，不必等下周一。
+#
+# 阈值说明：`--fail-over 20` 是脚本自带的默认值，本仓**尚未有全量实测基线** ——
+# 本机跑不了（见 mutation.yml 里 Mutate 步骤的注释），CI 首跑之前没有数据。
+# 所以第一次 red 要先 triage 而不是先调阈值：输出里会列每个存活变异的
+# `文件:行号`，那才是「哪段实现改坏了测试没反应」的可执行清单。
+# 范围限定在受 100% 覆盖率门禁的三个纯逻辑包（与覆盖率门禁同一个理由：
+# 纯逻辑吃数字，IO 层靠契约测试与集成，不追数字）。
+on:
+  schedule:
+    # 周一 03:17 UTC。避开整点 —— 整点是 GitHub 调度的拥挤时段，排队会让周跑本身变慢。
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    name: mutation
+    runs-on: ubuntu-latest
+    # 45 分钟是「没有 CI 实测基线时宁可给多」的取值：本机实测 4 个变异 48 秒
+    # （而本机 node 启动比 runner 慢一个量级），24 个变异的量级在几分钟。
+    # 超时截断出来的失败是「没跑完」，既不是质量信号也没有诊断价值。
+    timeout-minutes: 45
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+
+    - name: Setup Node
+      uses: actions/setup-node@v7
+      with:
+        node-version-file: .nvmrc
+
+    - name: Install pnpm
+      run: |
+        npm install -g pnpm@12.6.0
+        pnpm --version
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+
+    # 变异打在**构建产物**上，所以必须先有 build。这里不跑 pnpm test：
+    # 只需要产物，跑测试只是把同样的时间花两遍。
+    - name: Build
+      run: pnpm build
+
+    # 本机（Windows + WorkBuddy 的 safe-delete 垫片）跑不了 mutate.mjs：
+    # 脚本每个变异都要建/删一次 .tmp/mutate 副本，而垫片对本机 node 的 rmSync
+    # 有批量删除守卫，跑几个变异就会抛 BULK_GUARD_ERROR 中断 —— 这不是脚本的问题，
+    # 所以不为它改脚本，而是让它在没有垫片的 runner 上跑。runner 上没有那个限制。
+    #
+    # 存活率超过阈值即失败。存活 = 把实现改坏了测试却还绿 = 假测试的藏身处。
+    # 脚本只改 .tmp/mutate 下的副本，并在跑之前之后对 packages/*/build 做文件数+字节数快照，
+    # 不一致就判红线被踩（退出非 0）—— 所以这里不需要额外的「确认没污染产物」步骤。
+    - name: Mutate
+      run: pnpm run verify:mutation
