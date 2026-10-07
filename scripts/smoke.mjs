@@ -15,30 +15,13 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
+import { describeError, isGateFailure, pkgOf, resolveEntry, scanArtifact } from './smoke-rules.mjs'
+
 const root = fileURLToPath(new URL('..', import.meta.url))
 const packagesDir = join(root, 'packages')
 
 const IMPORT_TIMEOUT_MS = 20_000
 const TOTAL_TIMEOUT_MS = 180_000
-
-/**
- * 本机绝对路径。产物里出现它**通常**意味着构建把开发机环境编进去了 ——
- * 「通常」两个字是有代价的，代价见下面扫描段的说明：这一类只报不判。
- *
- * 前置断言 (?<![A-Za-z0-9_]) 是必须的：没有它 `https://` 里的 `s:/` 会被当成
- * 盘符路径，于是每个带 URL 的产物都误报 —— 误报的检查等于没有检查。
- */
-const ABS_PATH_PATTERNS = [
-  { kind: 'win-drive', re: /(?<![A-Za-z0-9_])[A-Za-z]:[\\/]/g },
-  { kind: 'unix-home', re: /\/(?:home|Users)\/[A-Za-z0-9._-]+\//g },
-]
-
-/** 高置信凭据前缀。只认前缀 + 足够长的尾巴，避免把散文里的这些词当命中。 */
-const SECRET_PATTERNS = [
-  { kind: 'github-pat', re: /github_pat_[A-Za-z0-9_]{16,}/g },
-  { kind: 'github-classic', re: /ghp_[A-Za-z0-9]{20,}/g },
-  { kind: 'aws-access-key-id', re: /AKIA[0-9A-Z]{16}/g },
-]
 
 const args = new Set(process.argv.slice(2))
 const jsonMode = args.has('--json')
@@ -82,34 +65,6 @@ function listJsFiles(dir) {
     else if (e.isFile() && e.name.endsWith('.js')) found.push(p)
   }
   return found
-}
-
-/**
- * 从 manifest 解出入口，优先级 exports > main。
- *
- * 为什么优先 exports：exports 才是解析期真正生效的那份，main 只在无 exports 时兜底。
- * 硬编码 `build/index.js` 等于把「入口叫什么」在两处各写一遍 —— 改名时 smoke
- * 还在测一个已经不存在的文件，或者反过来漏测新入口。
- */
-function resolveEntry(manifest) {
-  const exp = manifest.exports
-  if (typeof exp === 'string') return exp
-  if (exp && typeof exp === 'object' && !Array.isArray(exp)) {
-    const dot = exp['.']
-    if (typeof dot === 'string') return dot
-    if (dot && typeof dot === 'object') {
-      if (typeof dot.default === 'string') return dot.default
-      if (typeof dot.import === 'string') return dot.import
-    }
-  }
-  if (typeof manifest.main === 'string') return manifest.main
-  return null
-}
-
-function describeError(err) {
-  const code = err && typeof err === 'object' && 'code' in err ? err.code : null
-  const msg = err instanceof Error ? err.message : String(err)
-  return code ? `${code}: ${msg}` : msg
 }
 
 /**
@@ -205,8 +160,6 @@ for (const name of listPackageDirs()) {
 // ── 检查 4–5：产物内容扫描 ──────────────────────────────────────────────────
 // 两类扫描、两种判据。凭据是硬判据，绝对路径不是 —— 不是因为它不重要，
 // 而是因为判据本身在静态上不成立。
-const isTestArtifact = (file) => file.endsWith('.test.js')
-
 const secretHits = [] // 命中即失败
 const absPathHits = [] // 只报告，永不影响判失败
 const unreadable = [] // 只报告（与改动前一致：不参与判失败）
@@ -225,34 +178,19 @@ for (const name of listPackageDirs()) {
       continue
     }
 
-    // 测试产物不是发布产物。它们的字符串字面量里天然躺着脱敏 token 与示例路径
-    // （凭据脱敏要的就是「长得像真 token 的假 token」），判它等于判夹具本身有罪。
-    if (isTestArtifact(file)) continue
+    const scan = scanArtifact({ file, text })
+    if (scan.skipped) continue
     secretScannedFiles += 1
-
-    const lines = text.split('\n')
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i]
-      for (const { kind, re } of SECRET_PATTERNS) {
-        re.lastIndex = 0
-        for (const m of line.matchAll(re)) {
-          secretHits.push({ kind: 'secret', pattern: kind, file: rel, line: i + 1, detail: m[0] })
-        }
-      }
-      for (const { kind, re } of ABS_PATH_PATTERNS) {
-        re.lastIndex = 0
-        for (const m of line.matchAll(re)) {
-          absPathHits.push({ kind: 'abs-path', pattern: kind, file: rel, line: i + 1, detail: m[0] })
-        }
-      }
-    }
+    secretHits.push(...scan.secretHits)
+    absPathHits.push(...scan.absPathHits)
   }
 }
 
-// 凭据回灌到包维度：包「失败」必须对应会判死的东西。绝对路径不回灌 ——
+// 命中回灌到包维度：包「失败」必须对应会判死的东西。绝对路径不回灌 ——
 // 让只报信号的一类参与失败判定，会出现「包红了但没有任何可执行的修法」。
-const pkgOf = (rel) => rel.split(/[\\/]/)[1]
-for (const hit of secretHits) {
+// 读盘失败排在命中判定之前，所以不可读的产物不进这里，也一样不影响判失败。
+const gateFailures = [...secretHits, ...absPathHits].filter((hit) => isGateFailure(hit) === 'fail')
+for (const hit of gateFailures) {
   const owner = packageResults.find((p) => p.name === pkgOf(hit.file))
   if (owner) owner.problems.push(hit)
 }
