@@ -15,7 +15,7 @@
     "verify": "pnpm build && pnpm test && pnpm run test:scripts && pnpm run verify:gates",
     "verify:gates": "node scripts/dead-code.mjs && node scripts/check-imports.mjs && node scripts/check-tests.mjs && node scripts/check-jsdoc.mjs && node scripts/check-coverage.mjs && node scripts/smoke.mjs",
     "verify:selfcheck": "node scripts/accept-gates.mjs",
-    "verify:mutation": "node scripts/mutate.mjs --package schema --max 20 --fail-over 20 && node scripts/mutate.mjs --package core --max 20 --fail-over 20 && node scripts/mutate.mjs --package template --max 20 --fail-over 20",
+    "verify:mutation": "node scripts/mutate.mjs --package schema --max 20 --fail-over 5 && node scripts/mutate.mjs --package core --max 20 --fail-over 5 && node scripts/mutate.mjs --package template --max 20 --fail-over 5",
     "clean": "tsc -b --clean",
     "postinstall": "node scripts/link-workspace.mjs"
   },
