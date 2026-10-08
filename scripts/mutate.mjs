@@ -21,12 +21,14 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync,
 import { dirname, join, resolve as resolvePath, relative, sep } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { classifyOutcome, matchExemption, pkgOfArtifactPath, unusedExemptions, validateExemptions } from './mutate-rules.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const PKGS_ROOT = join(root, 'packages')
 const TMP = join(root, '.tmp', 'mutate')
 const TMP_PKGS = join(TMP, 'packages')
 const CHECK_DIR = join(TMP, '.check')
+const EXEMPT_FILE = join(root, 'scripts', 'mutate-exempt.json')
 
 const TEST_TIMEOUT_MS = 120_000
 const CHECK_TIMEOUT_MS = 15_000
@@ -67,7 +69,7 @@ function writeInside(abs, data) {
 // ---------------------------------------------------------------- 参数
 
 function parseArgs(argv) {
-  const opts = { pkg: null, max: DEFAULT_MAX, json: false, failOver: DEFAULT_FAIL_OVER }
+  const opts = { pkg: null, max: DEFAULT_MAX, json: false, failOver: DEFAULT_FAIL_OVER, exempt: true }
   const value = (i, name) => {
     const v = argv[i + 1]
     if (v === undefined) throw new Error(`缺少 ${name} 的参数值`)
@@ -84,6 +86,9 @@ function parseArgs(argv) {
       continue
     }
     if (a === '--json') { opts.json = true; continue }
+    // 不看豁免清单地跑一遍：清单是对代码的判断，不是对被豁免者的免检证件。
+    // 想复核「某处的杀不死」到底成不成立时用它，得到的是没减过的原始数字。
+    if (a === '--no-exempt') { opts.exempt = false; continue }
     if (a === '--fail-over') {
       const n = Number(value(i, a))
       if (!Number.isFinite(n) || n < 0 || n > 100) throw new Error('--fail-over 需要 0~100 的百分数')
@@ -91,7 +96,7 @@ function parseArgs(argv) {
       i += 1
       continue
     }
-    throw new Error(`未知参数：${a}（可用：--package / --max / --json / --fail-over）`)
+    throw new Error(`未知参数：${a}（可用：--package / --max / --json / --fail-over / --no-exempt）`)
   }
   return opts
 }
@@ -389,6 +394,35 @@ function collectCandidates(pkg, file, rel) {
 
 const applyMutation = (src, m) => `${src.slice(0, m.start)}${m.text}${src.slice(m.end)}`
 
+// ---------------------------------------------------------------- 豁免清单
+
+/**
+ * 读入 `scripts/mutate-exempt.json`（等价变异名单）。
+ *
+ * 格式不对时**整体停手**而不是跳过：跳过意味着那一批等价变异重新回到存活分子里，
+ * 每周报告会一直顶在阈值边缘，而看报告的人并不知道清单压根没读进去 ——
+ * 那比清单写错更难发现。
+ *
+ * @param {boolean} enabled `--no-exempt` 会给 false
+ * @returns {object[] | null} 校验通过的条目；格式不对或未启用时为空数组；不可用返回 null
+ */
+function loadExemptions(enabled) {
+  if (!enabled || !existsSync(EXEMPT_FILE)) return []
+  let parsed
+  try {
+    parsed = JSON.parse(readFileSync(EXEMPT_FILE, 'utf8'))
+  } catch (e) {
+    err(`[mutate] 豁免清单不是合法 JSON：${EXEMPT_FILE}（${e.message}）`)
+    return null
+  }
+  const v = validateExemptions(parsed)
+  if (!v.ok) {
+    for (const p of v.problems) err(`[mutate] 豁免清单：${p}`)
+    return null
+  }
+  return v.entries
+}
+
 // ---------------------------------------------------------------- 主流程
 
 function main() {
@@ -410,12 +444,20 @@ function main() {
     return { exitCode: 2 }
   }
 
+  const exemptions = loadExemptions(opts.exempt)
+  // null = 清单读不出来或格式不对，此时 loadExemptions 已经把原因打出来了。不停手的话
+  // 那一批等价变异会静默回到存活分子里，报告看起来「变差了」而原因没人知道。
+  if (exemptions === null) return { exitCode: 2 }
+
   const targets = opts.pkg ? [opts.pkg] : allPkgs
   const before = fingerprint(allPkgs)
   const beforeMeasure = measure(before)
   let exitCode = 0
   const survivors = []
   const invalid = []
+  const exempted = [] // 命中豁免且仍绿：登记时的判断今天依然成立
+  const stale = [] // 命中豁免却被杀：清单的理由已经过期
+  const usedKeys = new Set()
   let killed = 0
 
   prepareWorkspace(allPkgs, new Set(targets))
@@ -495,24 +537,66 @@ function main() {
         // 无论测试跑成什么样都要还原副本 —— 逐个还原让「残留变异」从一开始就不存在
         writeInside(m.file, original)
       }
-      if (res.ok === true) {
+      // `file` 是给 matchExemption 看的（清单记的是产物相对路径），`rel`/`kind`
+      // 是给报告看的 —— 两边都从同一个 m 取，不会再出现「清单写对了却一次都没匹配上」
+      const mutation = { file: m.rel, pkg: m.pkg, rel: m.rel, line: m.line, kind: m.kind, label: m.label }
+      const ex = matchExemption(exemptions, mutation)
+      if (ex) usedKeys.add(ex.key)
+      const verdict = classifyOutcome(res, ex)
+      if (verdict.bucket === 'survived') {
         survivors.push(m)
         if (!opts.json) out(`  [存活] ${m.rel}:${m.line}  ${m.kind} ${m.label}`)
+      } else if (verdict.bucket === 'exempted') {
+        // 登记在案的等价变异：登记时的判断是「改了也看不出来」，今天也确实没人看出来
+        exempted.push({ ...mutation, reason: ex.reason })
+        if (!opts.json) out(`  [豁免] ${m.rel}:${m.line}  ${m.kind} ${m.label}`)
       } else {
         killed += 1
+        if (verdict.stale) stale.push(mutation)
         if (res.reason === 'timeout') timedOutPkgs.add(m.pkg)
-        if (!opts.json) out(`  [杀死] ${m.rel}:${m.line}  ${m.kind} ${m.label}${res.reason === 'timeout' ? '（测试超时）' : ''}`)
+        if (!opts.json) {
+          const note = verdict.stale
+            ? '（登记为杀不死，如今却被杀 → 清单过期）'
+            : res.reason === 'timeout'
+              ? '（测试超时）'
+              : ''
+          out(`  [杀死] ${m.rel}:${m.line}  ${m.kind} ${m.label}${note}`)
+        }
       }
     }
 
     const decided = killed + survivors.length
     const rate = decided === 0 ? 0 : (survivors.length / decided) * 100
+    // 「清单里的条目一次都没命中」与「命中了却被杀」要说成两件事：前者多半是产物行号变了，
+    // 后者是清单在替一处已经被守住的代码说话。同一处若两种情形都成立，只报后者 —— 它更紧迫。
+    //
+    // 只对本轮参与的**那些包**清单条目做「没用上」的统计：清单是全仓共享的，跑 core 时
+    // 属于 schema 的那几条自然匹配不到，报出来会让人以为它们失效了。
+    const staleKeys = new Set(stale.map((m) => `${m.rel}:${m.line} ${m.label}`))
+    const relevant = exemptions.filter((e) => targets.includes(pkgOfArtifactPath(e.file)))
+    const idle = unusedExemptions(relevant, usedKeys).filter((e) => !staleKeys.has(`${e.file}:${e.line} ${e.label}`))
 
     if (opts.json) {
+      // 豁免 / 过期 / 落空与存活一起输出：只给存活数字的报告会被读成「测试写得好」，
+      // 而真实原因可能是清单在替一处已经守不住的代码说话。
       out(JSON.stringify({
-        summary: { total: decided, killed, survived: survivors.length, rate: Number(rate.toFixed(1)), failOver: opts.failOver, candidates: pool, planned: plan.length },
+        summary: {
+          total: decided,
+          killed,
+          survived: survivors.length,
+          rate: Number(rate.toFixed(1)),
+          failOver: opts.failOver,
+          candidates: pool,
+          planned: plan.length,
+          exempted: exempted.length,
+          stale: stale.length,
+          idle: idle.length,
+        },
         survivors: survivors.map((m) => ({ file: m.rel, line: m.line, kind: m.kind, label: m.label })),
         invalid: invalid.map((m) => ({ file: m.rel, line: m.line, kind: m.kind, label: m.label, note: m.note })),
+        exempted: exempted.map((m) => ({ file: m.rel, line: m.line, label: m.label })),
+        stale: stale.map((m) => ({ file: m.rel, line: m.line, label: m.label })),
+        idle: idle.map((e) => ({ file: e.file, line: e.line, label: e.label })),
       }, null, 2))
     } else {
       out('')
@@ -524,12 +608,33 @@ function main() {
         out(`未计入 ${invalid.length} 个（变异没生效 / 语法不成立，不代表测试有问题）：`)
         for (const m of invalid) out(`  ${m.rel}:${m.line}  ${m.kind} ${m.label} —— ${m.note}`)
       }
+      // 豁免 / 过期 / 落空这三件事必须出现在同一份报告里：它们解释的是「为什么这个数字
+      // 是这样」，缺了它们的人会把「少了两个存活」当成测试写得好。
+      if (exempted.length > 0) {
+        out('')
+        out(`豁免 ${exempted.length} 个（登记在案的等价变异 —— 改了行为完全相同，见 scripts/mutate-exempt.json 的理由）：`)
+        for (const m of exempted) out(`  ${m.rel}:${m.line}  ${m.kind} ${m.label}`)
+      }
+      if (stale.length > 0) {
+        out('')
+        out(`清单过期 ${stale.length} 处：登记时说杀不死，这一轮却被杀了 —— 更新或删掉 scripts/mutate-exempt.json 里对应条目：`)
+        for (const m of stale) out(`  ${m.rel}:${m.line}  ${m.kind} ${m.label}`)
+      }
+      if (idle.length > 0) {
+        out('')
+        out(`清单里有 ${idle.length} 条一次都没匹配上（多半是产物行号变了，该处已回到统计里）：`)
+        for (const e of idle) out(`  ${e.file}:${e.line} ${e.label}`)
+      }
       out('')
       out(`变异 ${decided} 个：杀死 ${killed} / 存活 ${survivors.length}（存活率 ${rate.toFixed(1)}%）`)
       out(`另有 ${invalid.length} 个无效变异未计入`)
     }
 
     if (rate > opts.failOver) exitCode = 1
+    // 清单过期也算红：条目留着不会让存活率失真（它仍计为杀死），但会让清单慢慢烂掉 ——
+    // 下一次有人照着清单去判断「这处本来就该豁免」时，读到的就是过期结论。周跑一次，
+    // 删条目的成本远低于排查一份没人维护的清单。
+    if (stale.length > 0) exitCode = 1
     return { exitCode }
   } finally {
     cleanupTmp()

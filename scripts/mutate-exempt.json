@@ -1,0 +1,14 @@
+[
+  {
+    "file": "packages/schema/build/config.js",
+    "line": 199,
+    "label": "`<` → `<=`",
+    "reason": "reloadSchema 的空串巡检 `for (let i = 0; i < value.length; i += 1)`：换成 `<=` 后多跑一轮，`value[i]` 取到 `undefined`，与 `''` 不等于是跳过；循环体之外没有任何代码再读 `i`，因此对所有输入输出逐字相同 —— 这是等价变异，不是测试缺口。"
+  },
+  {
+    "file": "packages/schema/build/config.js",
+    "line": 239,
+    "label": "`<` → `<=`",
+    "reason": "composeFilesSchema 的空串巡检，与上面同文件第 199 行同一个循环形态、同一条推理：越界那一轮只读到 `undefined` 且比较为假，循环结束后 `i` 不再被使用，行为不变 —— 等价变异。"
+  }
+]
