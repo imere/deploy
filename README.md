@@ -202,7 +202,8 @@ CI 只跑这一条 `pnpm verify`，不挑着跑。下面这张表是这套门禁
 | JSDoc | 每个函数都要中文描述 + 逐个 `@param` + `@returns`，描述写「为什么」 | ✅ `scripts/check-jsdoc.mjs`，465 个公共 API 符号缺口 0 |
 | 假测试 | 弱断言 / 被忽略的校验参数要能被扫出来；**恒等断言**（两个实参是同一表达式的拷贝、永不失败）与零断言同级判 P0 | ✅ `scripts/check-tests.mjs`，当前 P0 致命 0 |
 | 门禁自检 | 给每个门禁注入一次它理应抓到的违规，对照必须绿、注入必须红 —— 否则「全绿」可能是它根本抓不到东西 | ✅ `scripts/accept-gates.mjs`，9 组注入全过（只改 `.tmp/gate-mut/` 下的副本）；**单独一步跑**，不在 `pnpm verify` 里 —— 它靠派生子进程跑副本里的六个门禁，而 Windows 上经 pnpm 链条派子进程会 EBUSY（直接 `node scripts/accept-gates.mjs` 没问题）。留在 `verify` 里会让本地那条命令恒红在最后一项，而一个需要人判断「这次红是不是环境」的门禁就已经不是门禁了。Linux runner 无此限制，CI 照跑 |
-| 变异测试 | 故意改坏源码，红 = 真守着，绿 = 形同虚设 —— 验的是「测试有没有守住源码」，与上一行验的「门禁有没有守住仓库」不是一回事，两者都要有 | ✅ `scripts/mutate.mjs` + `pnpm run verify:mutation`，**周跑**（`.github/workflows/mutation.yml`，周一 03:17 UTC）并支持手动触发；只改 `.tmp/mutate/` 下的副本，跑前后对 `packages/*/build` 做文件数+字节数快照，不一致即判红线被踩。范围与覆盖率门禁同口径：只卡受 100% 门槛的三个纯逻辑包。阈值用脚本默认的 20%，**尚无全量实测基线**（本机跑不了，见下），CI 首跑若红先 triage 存活清单而不是先调阈值 |
+| 变异测试 | 故意改坏源码，红 = 真守着，绿 = 形同虚设 —— 验的是「测试有没有守住源码」，与上一行验的「门禁有没有守住仓库」不是一回事，两者都要有 | ✅ `scripts/mutate.mjs` + `pnpm run verify:mutation`，**周跑**（`.github/workflows/mutation.yml`，周一 03:17 UTC）并支持手动触发；只改 `.tmp/mutate/` 下的副本，跑前后对 `packages/*/build` 做文件数+字节数快照，不一致即判红线被踩。范围与覆盖率门禁同口径：只卡受 100% 门槛的三个纯逻辑包。**首份实测基线：三包各 20 个变异，存活 0**（schema 另有 2 个等价变异豁免），阈值据此收到 5%。抽样是确定的（产物文件排序 + 包间轮转），同一份源码每轮取到同一批，所以这个数字可复现 |
+| 等价变异豁免 | 有些变异改了行为完全相同（典型：越界那一轮读到的值没人再用），永远杀不死，硬留着只会让阈值长期顶在边缘。这类要**登记而不是放水** | ✅ `scripts/mutate-exempt.json`，逐条写 `file` / `line` / `label` / `reason`，缺 reason 或形状不对就整体停手（不静默跳过）。豁免命中的条目哪天被杀了会报「清单过期」并让这一步失败 —— 清单是「这处杀不死」的唯一授权来源，不能自己烂掉 |
 | 覆盖率 | 纯逻辑包（`schema` / `core` / `template`）**三项 100%**；IO 层靠契约测试与集成，不追数字 | ✅ `scripts/check-coverage.mjs`，三个受门禁包均达 100% |
 | 发版 | Conventional Commits，scope 用包名；版本由 changesets 推导 | ❌ changesets 未接入，版本号手工维护 |
 

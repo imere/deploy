@@ -26,9 +26,11 @@ pnpm test              # 构建 + node --test + 覆盖率 → build/coverage/lco
 pnpm run test:scripts  # 门禁脚本自己的测试（scripts/*.test.mjs）—— 判据被改坏要有东西变红
 pnpm verify            # build + test + test:scripts + 六项静态门禁（verify:gates）
                        # Windows 上经 pnpm 链条派会 EBUSY，直接 node 该脚本则正常
-                       # 变异测试同理且更慢：pnpm run verify:mutation 只改 .tmp 副本，
-                       # 本机实测每个变异都要删一次临时目录 —— 而本机 node 的删除被
-                       # safe-delete 垫片的批量守卫拦死，跑不了几个就会断。交给 CI 周跑。
+                       # 变异测试更慢（每个变异都要整包跑一遍测试）：pnpm run verify:mutation
+                       # 本机可以跑，但要先关掉删除垫片（CODEBUDDY_SAFE_DELETE_ENABLED=0）
+                       # —— 每个变异都要删一次 .tmp/mutate 副本，垫片的批量删除守卫
+                       # 会在跑十几个时中断它。派生子进程在本机会随负载间歇 EBUSY，
+                       # 降负载重试通常就好。常规验证交给 CI 周跑。
 pnpm clean             # tsc -b --clean
 ```
 
