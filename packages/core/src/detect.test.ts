@@ -151,6 +151,27 @@ test('0 命中：源清单为空时说清楚是空的', () => {
   assert.match(e.hint ?? '', /源清单为空/)
 })
 
+// 这两条是 `auto` 之外唯一能抓住它的入口，别改成 'auto'：
+// 仲裁函数按 `candidates.length === 0` 先兜一道，删掉这道守卫后 `auto` 那侧还有
+// `top === undefined` 替它抛同一个错，于是变异测试看不出差别 —— 只有 `fail`
+// 会一路走到「N 个目标类型同时命中」那条分支，说出「0 个候选同时命中」这种话。
+// （这个差别当初就是靠变异测试发现的：那一版它活下来了。）
+test('0 命中 · pick=fail：报的是「探测不到类型」，不是「0 个同时命中」', () => {
+  const e = err(() => resolveTargetKind({ entries: [] }, 'fail'))
+  assert.equal(e.code, 'DP.CONFIG.INVALID')
+  assert.match(e.message, /探测不到目标类型/)
+  assert.match(e.hint ?? '', /源清单为空/)
+  assert.doesNotMatch(e.message, /同时命中/)
+})
+
+test('0 命中 · pick=fail：有清单但一个都不认得时同样走「探测不到」，并列出看到的文件', () => {
+  const e = err(() => resolveTargetKind({ entries: ['README.md', 'CHANGELOG.md'] }, 'fail'))
+  assert.match(e.message, /探测不到目标类型/)
+  // 报出来的是归一化后的文件名，排查的人要能对着它改 exclude 或写 target.type
+  assert.match(e.hint ?? '', /README\.md、CHANGELOG\.md/)
+  assert.doesNotMatch(e.message, /同时命中/)
+})
+
 test('1 命中：直接用它，reason 是能指导下一步的一行', () => {
   const r = resolveTargetKind({ entries: ['docker-compose.yml'] }, 'auto')
   assert.equal(r.kind, 'docker')
@@ -244,4 +265,104 @@ test('每个候选的证据都非空（空证据的候选不许存在）', () =>
 test('证据去重且有序：同一文件重复出现不会把证据列表撑长', () => {
   const c = one(['docker-compose.yml', 'docker-compose.yml', 'Dockerfile'])
   assert.deepEqual(c.evidence, ['Dockerfile', 'docker-compose.yml'])
+})
+
+// ------------------------------------------------------------
+// 归一化边界
+// ------------------------------------------------------------
+
+test('空条目被跳过而不炸：`.` `/` `./` `\\` 归一化后没有段，不能当证据', () => {
+  // 这类条目来自 source 通配的边角。不跳过的话 basename 拿到 ''，
+  // 空名字会让 compose/Dockerfile 之类的判断拿到错误的输入
+  assert.deepEqual(kinds(['.', '/', '', './', '\\\\', '//']), [])
+  // 跳过是对的，但**不影响**旁边的真条目
+  assert.deepEqual(kinds(['.', './', 'docker-compose.yml', '//']), ['docker'])
+})
+
+test('compose 变体只认 `docker-compose.*`：`compose.prod.yml` 不是 compose', () => {
+  // 少一条 `compose` 前缀就是另一个项目的命名习惯，靠猜会把无关仓库拖进 docker 分支
+  assert.deepEqual(kinds(['compose.prod.yml']), [])
+  assert.deepEqual(kinds(['docker-compose.prod.yml']), ['docker'])
+})
+
+test('Dockerfile 大小写敏感，尾部点号不算后缀', () => {
+  assert.deepEqual(kinds(['dockerfile']), [])
+  assert.deepEqual(kinds(['Dockerfile.']), [])
+  assert.equal(one(['Dockerfile.dev']).kind, 'docker')
+})
+
+test('conf.d 必须是完整段：`xconf.d/` 不是 conf.d', () => {
+  assert.deepEqual(kinds(['xconf.d/api.conf']), [])
+  assert.deepEqual(kinds(['conf.d/api.conf']), ['nginx'])
+  // conf.d 在多深都算，不限于是不是 etc/nginx 之下
+  assert.deepEqual(kinds(['a/conf.d/b/api.conf']), ['nginx'])
+})
+
+// ------------------------------------------------------------
+// 报错信息的可读性
+// ------------------------------------------------------------
+
+test('候选证据超过 3 项时截断并给出总数（全列出来没人读得下去）', () => {
+  const e = err(() =>
+    resolveTargetKind(
+      { entries: ['conf.d/a.conf', 'conf.d/b.conf', 'conf.d/c.conf', 'conf.d/d.conf', 'index.html'] },
+      'fail',
+    ),
+  )
+  assert.match(e.message, /conf\.d\/a\.conf、conf\.d\/b\.conf、conf\.d\/c\.conf 等 4 项/)
+  assert.doesNotMatch(e.message, /conf\.d\/d\.conf/, '第 4 项应由「等 4 项」代指，不逐个铺开')
+})
+
+test('未实现的候选在报错里带「未实现」标记', () => {
+  const e = err(() => resolveTargetKind({ entries: ['app.service', 'ecosystem.config.js'] }, 'fail'))
+  assert.match(e.message, /systemd（app\.service，confidence 60，未实现）/)
+})
+
+test('0 命中报的是 DP.CONFIG.INVALID，且列出的文件名已归一化', () => {
+  const e = err(() => resolveTargetKind({ entries: ['a\\b.ts', '.', 'c.ts'] }, 'auto'))
+  assert.equal(e.code, 'DP.CONFIG.INVALID')
+  // 反斜杠归一化后才不会在 Windows 上打出另一种形态
+  assert.match(e.hint ?? '', /a\/b\.ts、c\.ts（共 2 个）/)
+})
+
+test('0 命中：清单里全是空条目时说「源清单为空」而不是列出一串空名字', () => {
+  const e = err(() => resolveTargetKind({ entries: ['.', '/', './'] }, 'auto'))
+  assert.match(e.hint ?? '', /源清单为空/)
+})
+
+// ------------------------------------------------------------
+// pick 的语义边界
+// ------------------------------------------------------------
+
+test('1 命中时 pick=fail 不报错：fail 只否多命中，不否唯一', () => {
+  const r = resolveTargetKind({ entries: ['docker-compose.yml'] }, 'fail')
+  assert.equal(r.kind, 'docker')
+  assert.deepEqual(r.rejected, [])
+})
+
+test('pick=fail 下同分报的是「多命中不猜」，不是 auto 那条「强度相同」', () => {
+  // fail 分支在同分判断之前：同分本身就是多命中，auto 的措辞会让人以为改成 auto 就能过
+  const e = err(() => resolveTargetKind({ entries: ['app.service', 'ecosystem.config.js'] }, 'fail'))
+  assert.match(e.message, /2 个目标类型同时命中/)
+  assert.doesNotMatch(e.message, /证据强度相同/)
+})
+
+test('delegate 的两条证据合并成一条候选，且都非空', () => {
+  const found = detectCandidates({ entries: ['.deploy/scripts/ship.sh'], packageScripts: ['deploy'] })
+  const delegate = found.filter((c) => c.kind === 'delegate')
+  assert.equal(delegate.length, 1, '两条证据不该拆成两个 delegate 候选')
+  assert.deepEqual(delegate[0]?.evidence, ['.deploy/scripts/ship.sh', 'package.json:scripts.deploy'])
+})
+
+test('delegate + static：未实现的高分候选仍不否决已实现的那个', () => {
+  const r = resolveTargetKind({ entries: ['.deploy/scripts/ship.sh', 'index.html'] }, 'auto')
+  assert.equal(r.kind, 'static')
+  assert.deepEqual(r.rejected.map((c) => c.kind), ['delegate'])
+})
+
+test('子目录里的 compose 文件：证据带完整相对路径，不是只留 basename', () => {
+  // 只留 basename 会让「部署的是哪个 compose」这句话答不出来
+  const r = resolveTargetKind({ entries: ['deploy/docker-compose.yml'] }, 'auto')
+  assert.deepEqual(r.evidence, ['deploy/docker-compose.yml'])
+  assert.match(r.reason, /deploy\/docker-compose\.yml/)
 })

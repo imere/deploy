@@ -10,12 +10,15 @@ import { describe, it } from 'node:test'
 import { DpError } from '@dp/ports'
 import { DEFAULT_KEEP, defineDocker, defineHost, defineNginx, defineTarget, dockerSchema, nginxSchema, releaseSchema, type DockerInput, type NginxInput } from './config.js'
 
-function codeOf(fn: () => unknown): { code: string; path?: string; hint?: string } {
+function codeOf(fn: () => unknown): { code: string; message: string; path?: string; hint?: string } {
   try {
     fn()
   } catch (err) {
     if (err instanceof DpError) {
-      return { code: err.code, ...(err.path !== undefined ? { path: err.path } : {}), ...(err.hint !== undefined ? { hint: err.hint } : {}) }
+      // message 一并带出来：联合形态的报错把「实际是 X」放在 message 里，
+      // hint 只说「两种写法都可以」—— 只返回 code/hint 时那半句谁也没断言过，
+      // 于是把类型名的判据翻掉，整条 message 换掉也照样绿
+      return { code: err.code, message: err.message, ...(err.path !== undefined ? { path: err.path } : {}), ...(err.hint !== undefined ? { hint: err.hint } : {}) }
     }
     throw err
   }
@@ -94,6 +97,32 @@ describe('nginx · server 的联合形态', () => {
     assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.match(String(r.hint), /单个 server 块对象/)
     assert.match(String(r.hint), /server 块数组/)
+    assert.equal(r.path, 'nginx.server')
+    // hint 已经说过两种写法，但「实际是 number」只在 message 里。
+    // 不钉这半句，把类型名函数的判据翻成「非 null 一律 null」测试照样全绿
+    assert.match(r.message, /期望 单个 server 块对象 或 server 块数组/)
+    assert.match(r.message, /实际是 number/)
+  })
+
+  it('null 既不是 server 块也不是数组 → 报 null 而不是 object', () => {
+    // 必须单独钉 null：typeof null === 'object'，只有 object / string / array 这几条
+    // 断言时，把「input === null」翻成「!==」会让非 null 输入全报 null，
+    // 那条翻转恰好被上一条抓住 —— 但 null 自己被报成 object 这半边仍无人看守
+    const r = codeOf(() => parseRaw({ ...BASE, server: null }))
+    assert.equal(r.code, 'DP.CONFIG.INVALID')
+    assert.equal(r.path, 'nginx.server')
+    assert.match(String(r.hint), /两种写法都可以/)
+    assert.match(r.message, /实际是 null/)
+  })
+
+  it('listen 的联合：元素既不是数字也不是字符串 → 报 array，而不是摊开后的 object', () => {
+    // 数组摊开是 {}，只看 typeof 分不出「用户写了个数组」与「用户写了个对象」：
+    // 前者改一个字符就能修好，后者往往是一整层结构搞错了
+    const r = codeOf(() => parseRaw({ ...BASE, server: { listen: [['80']] } }))
+    assert.equal(r.code, 'DP.CONFIG.INVALID')
+    assert.equal(r.path, 'nginx.server.listen[0]')
+    assert.match(r.message, /期望 数字端口 或 带修饰符的字符串/)
+    assert.match(r.message, /实际是 array/)
   })
 })
 
@@ -119,6 +148,15 @@ describe('nginx · reload', () => {
     assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.match(String(r.hint), /argv 数组/)
     assert.match(String(r.hint), /false/)
+    assert.match(r.message, /期望 argv 数组 或 false/)
+    assert.match(r.message, /实际是 string/)
+  })
+
+  it('给一个普通对象 → 报 object，不猜它是不是某种可迭代形状', () => {
+    const r = codeOf(() => parseRaw({ ...BASE, reload: { argv: ['nginx', '-s', 'reload'] } }))
+    assert.equal(r.code, 'DP.CONFIG.INVALID')
+    assert.equal(r.path, 'nginx.reload')
+    assert.match(r.message, /实际是 object/)
   })
 })
 

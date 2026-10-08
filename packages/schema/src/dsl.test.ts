@@ -8,15 +8,19 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DpError } from '@dp/ports'
-import { arr, literal, obj, oneOf, prefChain, record, str } from './dsl.js'
+import { arr, literal, num, obj, oneOf, prefChain, record, str } from './dsl.js'
 
-function codeOf(fn: () => unknown): { code: string; path?: string; hint?: string } {
+function codeOf(fn: () => unknown): { code: string; message: string; path?: string; hint?: string } {
   try {
     fn()
   } catch (err) {
     if (err instanceof DpError) {
+      // message 一并带出来：typeName 的产物只落在 message 里，
+      // 之前只断言 code / hint，等于整条「实际是 X」没人看守，
+      // 把判据翻掉（null 那条尤其如此）测试照样全绿
       return {
         code: err.code,
+        message: err.message,
         ...(err.path !== undefined ? { path: err.path } : {}),
         ...(err.hint !== undefined ? { hint: err.hint } : {}),
       }
@@ -45,11 +49,23 @@ describe('obj · 非对象输入', () => {
     const err = codeOf(() => obj(shape).parse('web', 'projects.web'))
     assert.equal(err.code, 'DP.CONFIG.INVALID')
     assert.match(String(err.hint ?? ''), /^$/)
+    // hint 为空不代表用户看不出问题，但「实际是 string」只在 message 里。
+    // 不钉这半句，类型名的判据整体翻掉也照样绿
+    assert.match(err.message, /期望对象，实际是 string/)
   })
 
   it('null 与数组同样被拒：null 的 typeof 是 object，数组摊开是 {}', () => {
-    assert.equal(codeOf(() => obj(shape).parse(null, 'p')).code, 'DP.CONFIG.INVALID')
-    assert.equal(codeOf(() => obj(shape).parse([], 'p')).code, 'DP.CONFIG.INVALID')
+    const errNull = codeOf(() => obj(shape).parse(null, 'p'))
+    assert.equal(errNull.code, 'DP.CONFIG.INVALID')
+    // null 必须单独钉：typeof null === 'object'。少了这条，把 `v === null`
+    // 翻成 `!==` 时 null 会掉到 object 分支上，而 string / array 那两条一样通过
+    assert.match(errNull.message, /期望对象，实际是 null/)
+
+    const errArray = codeOf(() => obj(shape).parse([], 'p'))
+    assert.equal(errArray.code, 'DP.CONFIG.INVALID')
+    // 数组同理：typeof [] === 'object'，摊开还是 {}，它被拒的理由与 null 不同
+    // （一个是「压根没给形状」，一个是「形状是数组但这里要对象」）
+    assert.match(errArray.message, /期望对象，实际是 array/)
   })
 })
 
@@ -57,6 +73,34 @@ describe('record · 非对象输入', () => {
   it('键自由不代表可以收标量', () => {
     const err = codeOf(() => record(str()).parse(7, 'env'))
     assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.match(err.message, /期望对象，实际是 number/)
+  })
+
+  it('数组同样被拒：它有下标，误当键会得到一串 "0" 的值', () => {
+    // 这条与 obj 那条看着重复，但守住的是 record 自己的那个使用点：
+    // obj 与 record 各写了一份判据与报错，去掉其中一处调用只有这条会红
+    const err = codeOf(() => record(str()).parse([], 'env'))
+    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.path, 'env')
+    assert.match(err.message, /期望对象，实际是 array/)
+  })
+})
+
+describe('原子与数组 · 类型不符时报出实际类型', () => {
+  it('字符串喂给 num：说它是 string，不说「不是数字」就完事', () => {
+    const err = codeOf(() => num().parse('8080', 'projects.web.release.keep'))
+    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.path, 'projects.web.release.keep')
+    // 引号必须是用户的，不加引号的 8080 与 8080 在报错里分不出来 ——
+    // 而「用户写了带引号的数字」正是本包刻意不转换的那一类手滑
+    assert.match(err.message, /期望 number，实际是 string/)
+  })
+
+  it('对象喂给数组：报 object，不因为它有下标就当数组', () => {
+    const err = codeOf(() => arr(str()).parse({}, 'projects.web.source.include'))
+    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.path, 'projects.web.source.include')
+    assert.match(err.message, /期望数组，实际是 object/)
   })
 })
 
