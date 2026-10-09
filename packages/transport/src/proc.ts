@@ -110,7 +110,6 @@ export function runProcess(
   return new Promise<RunProcessResult>((resolve, reject) => {
     let settled = false
     let killed = false
-    let timer: NodeJS.Timeout
 
     let child: SpawnedProcess
     try {
@@ -162,7 +161,7 @@ export function runProcess(
       reject(err)
     }
 
-    timer = setTimeout(() => {
+    const timer = setTimeout(() => {
       failFast(
         new DpError('DP.TIMEOUT.EXEC', `传输超时 ${timeoutMs}ms：${label}`, {
           hint: '增大 transport.timeout，或检查链路是否卡在等待输入（若是，先配好免密）',

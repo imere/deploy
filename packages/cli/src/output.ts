@@ -74,7 +74,6 @@ export function exitCodeFor(err: unknown): number {
     if (isUsageError(err)) return EXIT_USAGE
     switch (err.code) {
       case 'DP.CONFIG.INVALID':
-      case 'DP.CONFIG.INVALID':
       case 'DP.SOURCE.EMPTY':
       case 'DP.PATH.RESERVED_NAME':
       case 'DP.PATH.ILLEGAL_CHAR':

@@ -97,8 +97,14 @@ export { parseSshTarget }
  * 导出：apply 的传输层要构造自己的 ssh argv（rsync 的 -e / tar 的远端命令），
  * 必须用**同一套**判定 —— 另立一套就会出现「探测用密钥 A、传输用 agent」
  * 这种探测成功但传输要密码的死锁。
+ *
+ * 判定是**全局**的：不按 host 区分。此前这里有个 `path` 参数（调用方传进来的是
+ * `hosts.<id>.ssh` 这类按主机区分的路径），但实现从来没读过它 —— 留着等于让调用方
+ * 以为「每台机器可以有自己的密钥」，而实际上所有主机走同一个 DP_SSH_KEY / ~/.ssh。
+ * 与其留一个什么都不做的参数，不如把这句限制写在签名上：要支持按主机区分，
+ * 改的就是这个函数，而不是某个调用点。
  */
-export function resolveAuth(env: NodeJS.ProcessEnv, path: string): SshConnectionOptions['auth'] {
+export function resolveAuth(env: NodeJS.ProcessEnv): SshConnectionOptions['auth'] {
   const explicit = env['DP_SSH_KEY']
   if (explicit !== undefined && explicit !== '') {
     return { type: 'key', identityFile: explicit }
@@ -330,7 +336,7 @@ export async function acquireFacts(request: FactsRequest): Promise<FactsResult> 
     }
   }
 
-  const targetAuth = resolveAuth(env, `hosts.${request.hostId}.ssh`)
+  const targetAuth = resolveAuth(env)
   const endpoint = resolveSshEndpoint(host, `hosts.${request.hostId}`, targetAuth)
   const options: SshConnectionOptions = {
     host: endpoint.host,

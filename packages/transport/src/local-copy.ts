@@ -11,18 +11,6 @@ import { join } from 'node:path'
 import { DpError, type Runner } from '@dp/ports'
 import type { TransferRequest, TransferResult } from './types.js'
 
-/**
- * 本机复制的两类计数。
- *
- * 分开而不是合成一个「条目数」：目录是我们**建出来**的，文件是**写了内容**的，
- * 两者的失败方式不同。合成一个数之后，「建了 200 个目录却一个文件都没写进去」
- * 看起来和「传了 200 个文件」一模一样。
- */
-export interface CopyLocalResult {
-  readonly files: number
-  readonly dirs: number
-}
-
 const rel = (root: string, relativePath: string): string => join(root, ...relativePath.split('/'))
 
 /**
@@ -69,7 +57,6 @@ export async function copyLocal(
   await runner.mkdir(req.remoteRoot, { recursive: true })
 
   let files = 0
-  let dirs = 0
   const warnings: string[] = []
   // 逐条 writeFile 不会隐式补父目录，所以**按条目的祖先链**去建。
   //
@@ -86,7 +73,6 @@ export async function copyLocal(
   for (const entry of req.entries) {
     if (entry.endsWith('/')) {
       await ensureDir(entry.replace(/\/+$/, ''))
-      dirs += 1
       continue
     }
     const parts = entry.split('/')

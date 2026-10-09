@@ -310,7 +310,7 @@ async function makeTransferHook(
   const { context, deps, logger, hostConfig, host, spec, entries, releaseRoot, releaseId, remoteFacts } = input
   const hostPath = `hosts.${host}`
 
-  const auth = resolveAuth(context.env, `${hostPath}.ssh`)
+  const auth = resolveAuth(context.env)
   const endpoint = resolveSshEndpoint(hostConfig, hostPath, auth)
   const preferred = transportPreference(hostConfig, `${hostPath}.transport.strategy`)
 

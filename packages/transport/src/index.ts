@@ -47,7 +47,7 @@ export {
 } from './rsync.js'
 export { buildScpArgv, runScp, type ScpArgvOptions } from './scp.js'
 export { buildTarArgv, remoteExtractCommand, runTarSsh, type TarArgvOptions, type TarArgvPair } from './tar-ssh.js'
-export { copyLocal, type CopyLocalResult } from './local-copy.js'
+export { copyLocal } from './local-copy.js'
 export { runProcess, realSpawn, DEFAULT_TIMEOUT_MS, summarizeFailure, type RunProcessOptions } from './proc.js'
 
 /** 主机密钥策略的缺省：strict（铁律 3：主机密钥默认 strict） */
