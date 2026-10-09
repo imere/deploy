@@ -172,6 +172,26 @@ test('受门禁包有 noRecord 时判失败；没有 noRecord 时才按覆盖率
   assert.deepEqual(partial.noRecord, [])
 })
 
+test('lcov 里的测试产物与盘上同口径排除：多写测试不会掉覆盖率', () => {
+  const onDisk = ['packages/core/build/logic.js']
+  const artifacts = { 'packages/core/build/logic.js': 'export const a = 1;\n' }
+  // 测试产物自己从不被覆盖：算进分母的话，一句没跑到的测试代码就会让受门禁包跌破 100%
+  const lcovText = lcovOf([
+    { file: 'packages/core/build/logic.js', lines: [1, 2], hit: [1, 2] },
+    { file: 'packages/core/build/logic.test.js', lines: [1, 2, 3], hit: [1, 2] },
+  ])
+  const r = evaluateCoverage({
+    lcovText,
+    onDisk,
+    readText: reader(artifacts),
+    thresholds: { core: 100 },
+    gated: { core: 100 },
+  })
+  assert.equal(r.rows[0].pct, 100)
+  assert.equal(r.failed.length, 0)
+  assert.deepEqual(r.testArtifacts, ['packages/core/build/logic.test.js'])
+})
+
 test('门槛里写了不存在的包名也要出现在表里，且不被算成通过', () => {
   const r = evaluateCoverage({
     lcovText: lcovOf([]),

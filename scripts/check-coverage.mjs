@@ -68,6 +68,14 @@ export function parseLcov(text) {
 
 export const pkgOf = (file) => /^packages\/([^/]+)\/build\//.exec(file)?.[1] ?? null
 
+/**
+ * 测试产物是脚手架，不是被测对象：它自己不被任何东西覆盖，把它算进分母等于
+ * 「多写测试就掉覆盖率」。两侧必须同口径 —— 盘上扫描与 lcov 记录用同一个判据，
+ * 只在一侧排除的话，门禁的松紧会随覆盖率怎么采集而漂移（glob 换种展开方式
+ * 就会撞出来），那时同一份源码在本地绿、在 runner 上红。
+ */
+export const isTestArtifact = (file) => file.endsWith('.test.js')
+
 // ---------------------------------------------------------------- 产物分类
 
 /** 空导出标记：`export {};` / `export {}`。它只是声明「这是个 ES 模块」，不产生任何执行动作。 */
@@ -182,6 +190,7 @@ const rate = (hit, total) => (total > 0 ? (hit / total) * 100 : null)
 export function evaluateCoverage({ lcovText, onDisk, readText, thresholds = GATED, gated = GATED }) {
   const seen = new Set()
   const outOfScope = []
+  const testArtifacts = []
   const stats = new Map()
   const bucket = (name) => {
     let s = stats.get(name)
@@ -196,6 +205,10 @@ export function evaluateCoverage({ lcovText, onDisk, readText, thresholds = GATE
     const pkg = pkgOf(r.file)
     if (pkg === null) {
       outOfScope.push(r.file)
+      continue
+    }
+    if (isTestArtifact(r.file)) {
+      testArtifacts.push(r.file)
       continue
     }
     seen.add(r.file)
@@ -244,7 +257,7 @@ export function evaluateCoverage({ lcovText, onDisk, readText, thresholds = GATE
   const totalHit = rows.reduce((a, r) => a + r.hit, 0)
   const totalAll = rows.reduce((a, r) => a + r.total, 0)
 
-  return { rows, gatedRows, failed, outOfScope, typeOnly, noRecord, totalHit, totalAll }
+  return { rows, gatedRows, failed, outOfScope, typeOnly, noRecord, totalHit, totalAll, testArtifacts }
 }
 
 // ---------------------------------------------------------------- 参数
@@ -443,7 +456,7 @@ function walkBuild(dir, out = []) {
   for (const e of entries) {
     const p = join(dir, e.name)
     if (e.isDirectory()) walkBuild(p, out)
-    else if (e.isFile() && e.name.endsWith('.js') && !e.name.endsWith('.test.js')) {
+    else if (e.isFile() && e.name.endsWith('.js') && !isTestArtifact(e.name)) {
       out.push(toPosix(relative(root, p).split(sep).join('/')))
     }
   }
