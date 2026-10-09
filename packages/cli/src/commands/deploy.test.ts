@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { promises as fs } from 'node:fs'
 import { existsSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { deriveLayout, pickReleaseRoot } from '@dp/core'
 import { DpError, type Facts, type Platform } from '@dp/ports'
 import { EXIT_CONFIG, EXIT_OK } from '../output.js'
@@ -179,8 +179,14 @@ describe('collectProjectFacts · 源根与清单', () => {
   })
 
   it('路径里推不出项目名时报错，不拿空串当名字', () => {
-    // Windows 下 `C:\` 的 basename 是空串；POSIX 的 `/` 同理。两条路径都要挡住
-    for (const p of ['C:\\', 'C:/', '/', '//']) {
+    // 「basename 为空」是平台相关的：`C:\` 只在 Windows 上推不出名字，POSIX 上它就是
+    // 一个普通的相对目录名（basename 是 `C:\` 本身），那里会先撞上 scandir 的 ENOENT ——
+    // 那是「目录不存在」，不是这条要验的「推不出名字」。写死四个路径会让这条用例在
+    // Linux runner 上恒红，而红的原因与它想守的行为无关。所以按当前平台实测筛一遍。
+    const noName = ['C:\\', 'C:/', '/', '//'].filter((p) => basename(p) === '')
+    // 万一哪天这个平台上一个都筛不出来，这条用例就变成空跑了 —— 那是比失败更难发现的事
+    assert.ok(noName.length > 0, '当前平台上没有 basename 为空的路径，这条用例白跑了')
+    for (const p of noName) {
       const err = caught(() => collectProjectFacts(p))
       assert.equal(err.code, 'DP.CONFIG.INVALID', `path=${p}`)
       assert.ok(err.hint !== undefined && err.hint.length > 0, `path=${p} 缺 hint`)
