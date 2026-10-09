@@ -111,11 +111,3 @@ function caughtThrows(fn: () => unknown, ctor?: Function): DpError {
   }
   throw new Error('期望抛错，但没有')
 }
-async function caughtRejects(p: Promise<unknown>): Promise<DpError> {
-  try {
-    await p
-  } catch (err) {
-    return err as DpError
-  }
-  throw new Error('期望 reject，但没有')
-}

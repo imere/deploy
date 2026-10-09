@@ -55,7 +55,7 @@ export const PROMPT_PATTERNS: readonly PromptPattern[] = [
   // 这种普通日志会被误判成提示符 —— 宁可漏判也不误杀。
   { kind: 'host-key-confirm', re: /^[ \t]*(?:Are you sure|Do you want to continue)[^\n]*\?[ \t]*$/i },
   // 独立的 `(y/n)` / `[Y/n]` 一行
-  { kind: 'host-key-confirm', re: /^[ \t]*[\[(]?[Yy]\/[Nn][\])]?[ \t]*\??[ \t]*$/ },
+  { kind: 'host-key-confirm', re: /^[ \t]*[[(]?[Yy]\/[Nn][\])]?[ \t]*\??[ \t]*$/ },
   // sudo 在没有 tty 时拒绝读密码 —— 挂着的最主要来源
   { kind: 'sudo-no-tty', re: /^[ \t]*sudo:[ \t]*no tty present[^\n]*$/i },
   { kind: 'sudo-no-tty', re: /^[ \t]*sudo:[ \t]*a terminal is required[^\n]*$/i },

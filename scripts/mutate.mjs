@@ -79,8 +79,16 @@ function parseArgs(argv) {
     const a = argv[i]
     if (a === '--package') { opts.pkg = value(i, a); i += 1; continue }
     if (a === '--max') {
-      const n = Number(value(i, a))
-      if (!Number.isInteger(n) || n < 0) throw new Error('--max 需要非负整数')
+      const raw = value(i, a)
+      // `all` 是「跑完整个候选池」。用 0 表达「不限」会被读成「一个都不跑」——
+      // 同一个位置上两种完全相反的意思，是这类开关最容易咬人的写法。
+      if (raw === 'all') {
+        opts.max = Infinity
+        i += 1
+        continue
+      }
+      const n = Number(raw)
+      if (!Number.isInteger(n) || n < 0) throw new Error('--max 需要非负整数或 all')
       opts.max = n
       i += 1
       continue
@@ -96,7 +104,7 @@ function parseArgs(argv) {
       i += 1
       continue
     }
-    throw new Error(`未知参数：${a}（可用：--package / --max / --json / --fail-over / --no-exempt）`)
+    throw new Error(`未知参数：${a}（可用：--package / --max <n|all> / --json / --fail-over / --no-exempt）`)
   }
   return opts
 }
@@ -104,7 +112,7 @@ function parseArgs(argv) {
 // ---------------------------------------------------------------- 文件系统
 
 function walkFiles(dir, outList = []) {
-  let entries = []
+  let entries
   try {
     entries = readdirSync(dir, { withFileTypes: true })
   } catch {
@@ -119,7 +127,7 @@ function walkFiles(dir, outList = []) {
 }
 
 function listPackages() {
-  let pkgs = []
+  let pkgs
   try {
     pkgs = readdirSync(PKGS_ROOT, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
   } catch {
@@ -507,7 +515,8 @@ function main() {
     }
 
     if (!opts.json) {
-      out(`候选变异 ${pool} 处，本轮跑 ${plan.length} 个（上限 ${opts.max}）；包：${targets.join(', ')}`)
+      const cap = opts.max === Infinity ? '不限' : `上限 ${opts.max}`
+      out(`候选变异 ${pool} 处，本轮跑 ${plan.length} 个（${cap}）；包：${targets.join(', ')}`)
       out('')
     }
 

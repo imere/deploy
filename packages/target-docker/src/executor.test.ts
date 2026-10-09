@@ -159,7 +159,6 @@ function makeFacts(): Facts {
 const RELEASE = '/srv/app/releases/r-1'
 const PREV_RELEASE = '/srv/app/releases/r-0'
 const COMPOSE = `${RELEASE}/docker-compose.yml`
-const COMPOSE_2 = `${RELEASE}/docker-compose.prod.yml`
 const ENV_FILE = `${RELEASE}/.env.prod`
 
 const PULL_ARGV = ['docker', 'compose', '-f', COMPOSE, '-p', 'api', 'pull']

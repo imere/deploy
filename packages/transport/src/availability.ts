@@ -16,7 +16,7 @@
  *     换成 tar，那是在骗人；`DP.PREF.UNSUPPORTED` 的 message 逐项列清楚。
  */
 import { DpError, type Facts } from '@dp/ports'
-import type { ChooseTransportInput, TransportChoice, TransportKind, TransportPreference } from './types.js'
+import type { ChooseTransportInput, TransportChoice, TransportKind } from './types.js'
 
 /**
  * 缺省偏好链。顺序即**成本序**：rsync 真增量 → tar 全量 → sftp 逐文件 → scp 最后手段。

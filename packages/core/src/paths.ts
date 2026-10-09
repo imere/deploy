@@ -204,6 +204,9 @@ export function deriveLayout(facts: Facts): Layout {
 // ------------------------------------------------------------
 
 const WIN_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i
+// 控制字符是被**故意**列进非法集的：路径里带 \n 或 \0 能在日志与 conf 里折断一行。
+// 规则报它是因为它以为这些转义是无意敲进去的，这里恰恰相反。
+// eslint-disable-next-line no-control-regex
 const WIN_ILLEGAL = /[<>:"|?*\u0000-\u001f]/
 
 const PATH_LIMIT: Readonly<Record<Platform, number>> = {

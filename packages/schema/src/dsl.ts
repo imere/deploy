@@ -74,6 +74,11 @@ export interface JsonSchemaNode {
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- DSL 必须擦除具体类型才能做形状推导 */
 
+/* eslint-disable @typescript-eslint/no-unused-vars --
+   TIn 不在接口体里出现是刻意的：它是给 InputOf<S> 反推「输入类型」用的幻影参数
+   （parse 的输入与输出同类型时它等于 TOut，withDefault 这类才与 TOut 不同）。
+   按「未使用」删掉它，InputOf 就再也推不出输入类型了。
+   开关放在 JSDoc 块**外面**：插在 JSDoc 与声明之间会把 doc 块顶掉，JSDoc 门禁立刻报缺块。 */
 /**
  * `IsOptional` 必须是**字面量类型**而不是 boolean —— 否则类型层面无法区分
  * 可选字段与必填字段，`withDefault` 的字段会被误判成必填。
@@ -90,6 +95,7 @@ export interface Schema<TOut, TIn = TOut, IsOptional extends boolean = false> {
   parse(input: unknown, path: string): TOut
   toJsonSchema(): JsonSchemaNode
 }
+/* eslint-enable @typescript-eslint/no-unused-vars */
 
 /**
  * schema 归一化**之后**的类型 —— 下游消费的形状。

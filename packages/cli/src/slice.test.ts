@@ -19,7 +19,7 @@ import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Facts } from '@dp/ports'
-import { defineConfig, defineHost, defineProject } from '@dp/schema'
+import { defineProject } from '@dp/schema'
 import { createLocalRunner, listSourceEntries, normalizeSourceSpec } from '@dp/local'
 import { deploy } from '@dp/target-static'
 import { makePlan } from '@dp/core'
@@ -46,11 +46,6 @@ const webProject = defineProject({
   target: { type: 'static' },
   release: { keep: 2 },
   healthcheck: { fileExists: ['index.html'] },
-})
-
-const cfg = defineConfig({
-  hosts: { local: defineHost({ local: true }) },
-  projects: { web: webProject },
 })
 
 describe('纵向切片 · 配置到落盘', () => {

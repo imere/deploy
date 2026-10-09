@@ -156,7 +156,7 @@ describe('renderString · 错误路径（每条都断言 code 与 hint）', () =
     try {
       out = renderString('root ${nope};', ctx)
     } catch {
-      out = ''
+      // 抛错正是预期路径：要验的是「出错时不留下 ${x} 原文」，所以 out 保持空串
     }
     assert.equal(out.includes('${'), false)
   })

@@ -92,7 +92,7 @@ dp rollback --json  # 切回上一版，然后**再验一次**；新版本不健
 与「每次 exec 一次性连接」不合，所以那里明确失败而不是给一条走不通的通道。
 
 ```bash
-pnpm verify      # build + test + 门禁自测 + 七项静态门禁（产物落在 build/，lcov 在 build/coverage/）
+pnpm verify      # build + lint + test + 门禁自测 + 七项静态门禁（产物落在 build/，lcov 在 build/coverage/）
 ```
 
 ---
@@ -179,7 +179,7 @@ flowchart TB
 
 ## 质量门禁
 
-**当前 `pnpm verify` = `build` + `test` + `test:scripts` + 七项静态门禁**（见根 `package.json`）。七项按
+**当前 `pnpm verify` = `build` + `lint` + `test` + `test:scripts` + 七项静态门禁**（见根 `package.json`）。七项按
 `dead-code` → `check-imports` → `check-deps` → `check-tests` → `check-jsdoc` → `check-coverage` → `smoke` 依次串起，
 单独跑它们的那一段叫 `verify:gates`。第七项门禁自检（`accept-gates.mjs`）**不在这条链里**，
 是 `pnpm run verify:selfcheck`、由 CI 单独一步跑 —— 理由见下表那一行。`test:scripts` 跑的是**门禁脚本自己的测试**（`scripts/*.test.mjs`），目前 130 个用例
@@ -195,7 +195,7 @@ CI 只跑这一条 `pnpm verify`，不挑着跑。下面这张表是这套门禁
 | `typecheck` | 源码与测试各一个 project，均 `--noEmit` | ✅ 由 `tsc -b` 承担 |
 | `build` | 产物落各包 `build/`，测试跑的是产物不是源码 | ✅ |
 | `test` | `node --test`（Node 24 内置运行器），lcov 落 `build/coverage` | ✅ |
-| `lint` | 含五条硬规则里的 **import 边界**限制（`no-restricted-imports`），违规即失败 | ❌ 未配置：仓库里没有 lint 工具与配置文件（跨层与循环由下一行的 `check-imports` 承担） |
+| `lint` | ESLint + typescript-eslint（flat config），0 error 才算过 | ✅ `eslint.config.js` + `pnpm lint`，接在 `build` 之后。首次接入时清出 51 条，其中 `no-duplicate-case`（switch 里同一个码写了两遍，后一个是死分支）、`no-unsafe-finally`（`finally` 里 throw 会顶掉真实失败原因）、`no-unused-vars`（含一个**没有任何函数返回**的 `CopyLocalResult`）是真缺陷 —— 七道自研门禁一条都没报出来。测试文件里放开 `no-explicit-any` / `no-unsafe-function-type`：测试要故意造形状不合法的值去证明被测代码不炸，那两个类型正是要表达的东西 |
 | 依赖检查 | **严禁循环依赖**与跨层反向依赖，工具校验而不是靠自觉 | ✅ `scripts/check-imports.mjs`，当前通过（跨层反向 0 / 环 0） |
 | 依赖声明 | 源码里 import 的 `@dp/*` 必须在同包 package.json 声明过 —— 不声明在本机照样能解析（junction 把 workspace 包全链进根 node_modules），到 pnpm 的 isolated 布局上就是 TS2307，**只能等 CI 红**。CI 首跑红的正是这一条 | ✅ `scripts/check-deps.mjs`，当前 0 处 |
 | 死代码 | 没有未被引用的导出/文件；**见到冗余代码就删，不留「以后可能用」** | ✅ `scripts/dead-code.mjs`，当前 0 处 |

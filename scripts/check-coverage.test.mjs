@@ -10,7 +10,7 @@
  */
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -111,7 +111,7 @@ const lcovOf = (entries) =>
   entries
     .map(
       (e) =>
-        `SF:${e.file}\nDA:${e.lines.map((n, i) => `${n},${e.hit.includes(n) ? 1 : 0}`).join('\n')}\n` +
+        `SF:${e.file}\nDA:${e.lines.map((n) => `${n},${e.hit.includes(n) ? 1 : 0}`).join('\n')}\n` +
         `LF:${e.lines.length}\nLH:${e.lines.filter((n) => e.hit.includes(n)).length}\nend_of_record`,
     )
     .join('\n') + '\n'

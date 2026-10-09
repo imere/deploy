@@ -281,7 +281,7 @@ export function parseArgs(argv) {
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
-    let spec = null
+    let spec
     if (arg === '--threshold') {
       spec = argv[i + 1]
       consumed.add(i)

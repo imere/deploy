@@ -240,13 +240,13 @@ export function resolveVar(name: string, ctx: RenderContext, options?: { path?: 
       // `${env}` 是环境名；`${env.FOO}` 是环境变量。少写一个点就是两种意思，
       // 所以这里按段数严格区分，不做任何容错合并
       if (rest.length === 0) {
-        if (ctx.env === '') return fail(missingValue('env', '环境名未确定；用 \`dp deploy --env prod\` 显式指定'))
+        if (ctx.env === '') return fail(missingValue('env', '环境名未确定；用 `dp deploy --env prod` 显式指定'))
         return ctx.env
       }
       if (rest.length > 1) {
         return fail(
           new DpError('DP.TPL.UNKNOWN_VAR', `未知变量 \${${name}}`, {
-            hint: '环境变量名只能是一段，如 \${env.DEPLOY_KEY}',
+            hint: '环境变量名只能是一段，如 ${env.DEPLOY_KEY}',
           }),
         )
       }

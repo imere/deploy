@@ -20,7 +20,7 @@ function caught(fn: () => unknown): DpError {
     fn()
   } catch (err) {
     if (err instanceof DpError) return err
-    throw new Error(`期望 DpError，实际是 ${String(err)}`)
+    throw new Error(`期望 DpError，实际是 ${String(err)}`, { cause: err })
   }
   throw new Error('期望抛错，但没有')
 }

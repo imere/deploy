@@ -122,7 +122,7 @@ function entriesUnder(cwd: string, root: string, projectName: string): readonly 
  * 解析失败**报错**而不是当成「没有 scripts」：scripts 里的 `deploy` 是一条
  * delegate 证据，静默吞掉解析错误等于让探测少看一个信号却不告诉任何人。
  */
-function packageScriptsOf(cwd: string, projectName: string): readonly string[] {
+function packageScriptsOf(cwd: string): readonly string[] {
   const path = join(cwd, 'package.json')
   if (!existsSync(path)) return []
   let raw: unknown
@@ -164,6 +164,6 @@ export function collectProjectFacts(cwd: string): ProjectFacts {
     projectName,
     existingDirs,
     entries: root === undefined ? [] : entriesUnder(cwd, join(cwd, root), projectName),
-    packageScripts: packageScriptsOf(cwd, projectName),
+    packageScripts: packageScriptsOf(cwd),
   }
 }

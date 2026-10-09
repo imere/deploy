@@ -9,11 +9,10 @@
  * 纯逻辑（优先级判定、校验、扩展名分流）都是纯函数，只有 stat/readdir/import 是 IO。
  */
 import { existsSync, promises as fs } from 'node:fs'
-import { dirname, isAbsolute, join, parse as parsePath, resolve as resolvePath } from 'node:path'
+import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { DpError } from '@dp/ports'
 import { configSchema, type Config, type ProjectConfig } from '@dp/schema'
-import { CliUsageError } from './args.js'
 
 /** 自动发现的文件名，顺序即优先级（ts > js > json：前者能写逻辑，后者最通用） */
 export const CONFIG_FILENAMES: readonly string[] = [
@@ -267,7 +266,7 @@ export function validateConfig(raw: unknown, sourcePath: string): Config {
         path: err.path ?? sourcePath,
         hint:
           err.hint ??
-          `配置必须符合 configSchema。跑 \`dp schema > deploy.schema.json\`，把 \$schema 写进 ${sourcePath}，编辑器就会指出第几行错了`,
+          `配置必须符合 configSchema。跑 \`dp schema > deploy.schema.json\`，把 $schema 写进 ${sourcePath}，编辑器就会指出第几行错了`,
         cause: err,
       })
     }

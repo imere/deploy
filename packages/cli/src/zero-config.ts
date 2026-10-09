@@ -17,7 +17,6 @@ import {
   defineHost,
   defineProject,
   defineTarget,
-  targetSchema,
   type Config,
   type DockerConfig,
   type HostConfig,

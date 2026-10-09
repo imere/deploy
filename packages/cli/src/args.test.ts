@@ -174,14 +174,3 @@ function caughtThrows(fn: () => unknown, ctor?: Function): DpError {
   }
   throw new Error('期望抛错，但没有')
 }
-async function caughtRejects(p: Promise<unknown>, ctor?: Function): Promise<DpError> {
-  try {
-    await p
-  } catch (err) {
-    if (ctor !== undefined) {
-      assert.ok(err instanceof ctor, `期望 reject ${ctor.name}，实际是 ${(err as Error)?.name}: ${String(err)}`)
-    }
-    return err as DpError
-  }
-  throw new Error('期望 reject，但没有')
-}

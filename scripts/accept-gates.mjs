@@ -169,16 +169,18 @@ function runMutation({ gate, gateArgs = [], file, describe, transform }) {
   mkdirSync(join(abs, '..'), { recursive: true })
   writeFileSync(abs, mutated)
   let after
+  let restoreFailure = null
   try {
     after = runGate(gate, gateArgs)
   } finally {
     if (before === null) unlinkSync(abs)
     else writeFileSync(abs, before)
     const now = existsSync(abs) ? readFileSync(abs, 'utf8') : null
-    if (now !== before) {
-      throw new Error(`还原失败：${file} —— 副本已被污染，后续组别的对照不再可信`)
-    }
+    if (now !== before) restoreFailure = new Error(`还原失败：${file} —— 副本已被污染，后续组别的对照不再可信`)
   }
+  // 在 finally 里 throw 会把 runGate 自己的失败顶掉：那等于把「门禁为什么红」换成
+  // 「还原失败」，真正该看的诊断反而没了。还原失败同样是致命的，但排在后面抛。
+  if (restoreFailure !== null) throw restoreFailure
   return { describe, control, after, detail }
 }
 
@@ -493,7 +495,7 @@ function collectMutations() {
 }
 
 let passed = 0
-let total = 0
+let total
 const blind = []
 const broken = []
 const missed = []

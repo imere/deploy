@@ -19,7 +19,6 @@ import {
   notImplementedMessage,
   rootHelp,
   unknownCommandMessage,
-  type CommandDoc,
 } from './help.js'
 import {
   EXIT_FAILURE,

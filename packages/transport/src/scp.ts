@@ -11,7 +11,7 @@
 import { DpError } from '@dp/ports'
 import { quoteArg, wrapCommand } from '@dp/ssh'
 import { runProcess, summarizeFailure } from './proc.js'
-import { buildRshArgv, rshValueForRsync } from './rsh.js'
+import { buildRshArgv } from './rsh.js'
 import type { TransferRequest, TransferResult, SpawnImpl } from './types.js'
 import type { RshOptions } from './rsh.js'
 

@@ -199,6 +199,12 @@ function isoNow(clock: () => Date): string {
   }
 }
 
+/**
+ * 装配入口的选项。空扩展是刻意的：`CreateLoggerOptions` 是给调用方的**公开名字**，
+ * 让它跟内部的 `LoggerOptions` 分开，以后前者要加字段不会动到后者。直接写成
+ * type 别名也能编译，但那会把两个名字焊死成同一个东西 —— 分开的意义就没了。
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface CreateLoggerOptions extends LoggerOptions {}
 
 /**
