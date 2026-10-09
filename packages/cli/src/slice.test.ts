@@ -6,6 +6,12 @@
  * schema 里写的 release.keep，prune 认不认。
  *
  * 除了虚拟的 Facts 夹具，其余全是真实磁盘操作，不做 mock。
+ *
+ * 为什么放在 cli 而不是 core：这一份要同时用到 core 的推导、target-static 的执行、
+ * local 的真实磁盘 —— 只有最上层同时依赖这三个包。放在 core 里等于让一个「零 IO
+ * 纯编排」的包在自己的测试里做真实部署，而且那两个反向引用只有在本机靠 junction
+ * 把 workspace 包全链进根 node_modules 时才解析得到；pnpm 的 isolated 布局
+ * （Linux runner 上就是这个）只链接声明过的依赖，于是 tsc 直接报 TS2307。
  */
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
@@ -16,7 +22,7 @@ import type { Facts } from '@dp/ports'
 import { defineConfig, defineHost, defineProject } from '@dp/schema'
 import { createLocalRunner, listSourceEntries, normalizeSourceSpec } from '@dp/local'
 import { deploy } from '@dp/target-static'
-import { makePlan } from './index.js'
+import { makePlan } from '@dp/core'
 
 let sourceRoot = ''
 /** plan 推导出的 releaseRoot 会落在这里（user 布局 → ~/apps/<name>） */
