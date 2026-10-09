@@ -2,8 +2,10 @@
 
 > 一句话：**每个包都要能独立安装与独立演进，所以入口、产物、依赖边界必须显式声明 —— 能不能发得出去，是对分层是否合理的一次压力测试。**
 >
-> ⚠️ **本文是策略设计，不是现状**：包尚未发布到 npm，changesets 与 CI 发布流程都**未接入**
-> （版本号目前手工维护）。文中描述的是「要发时按这套来」。
+> ⚠️ **本文的前半是策略设计**：包尚未发布到 npm（`packages/` 下 12 个包全是 `private: true`），
+> CI 发布流程未接入。changesets **已接入到「推导版本」这一步**（`pnpm changeset` →
+> `.github/workflows/release.yml` 开版本 PR），发布那一跳还差两个前置条件：
+> 摘掉 private，以及一个 npm token。文中「要发时按这套来」。
 
 配套：[`DESIGN.md`](./DESIGN.md)（分层与依赖方向）、[`testing.md`](./testing.md)（吓得小孩 regression 门禁）。
 

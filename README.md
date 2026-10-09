@@ -206,7 +206,8 @@ CI 只跑这一条 `pnpm verify`，不挑着跑。下面这张表是这套门禁
 | 变异测试 | 故意改坏源码，红 = 真守着，绿 = 形同虚设 —— 验的是「测试有没有守住源码」，与上一行验的「门禁有没有守住仓库」不是一回事，两者都要有 | ✅ `scripts/mutate.mjs` + `pnpm run verify:mutation`，**周跑**（`.github/workflows/mutation.yml`，周一 03:17 UTC）并支持手动触发；只改 `.tmp/mutate/` 下的副本，跑前后对 `packages/*/build` 做文件数+字节数快照，不一致即判红线被踩。范围与覆盖率门禁同口径：只卡受 100% 门槛的三个纯逻辑包。**首份实测基线：三包各 20 个变异，存活 0**（schema 另有 2 个等价变异豁免），阈值据此收到 5%。抽样是确定的（产物文件排序 + 包间轮转），同一份源码每轮取到同一批，所以这个数字可复现 |
 | 等价变异豁免 | 有些变异改了行为完全相同（典型：越界那一轮读到的值没人再用），永远杀不死，硬留着只会让阈值长期顶在边缘。这类要**登记而不是放水** | ✅ `scripts/mutate-exempt.json`，逐条写 `file` / `line` / `label` / `reason`，缺 reason 或形状不对就整体停手（不静默跳过）。豁免命中的条目哪天被杀了会报「清单过期」并让这一步失败 —— 清单是「这处杀不死」的唯一授权来源，不能自己烂掉 |
 | 覆盖率 | 纯逻辑包（`schema` / `core` / `template`）**三项 100%**；IO 层靠契约测试与集成，不追数字 | ✅ `scripts/check-coverage.mjs`，三个受门禁包均达 100% |
-| 发版 | Conventional Commits，scope 用包名；版本由 changesets 推导 | ❌ changesets 未接入，版本号手工维护 |
+| 版本推导 | Conventional Commits，scope 用包名；版本与 CHANGELOG 由 changesets 推导 | ✅ `@changesets/cli` + `.changeset/config.json` + `pnpm changeset` / `pnpm version-packages`；`.github/workflows/release.yml` 在有未发布 changeset 时开「版本 PR」。配置里 `privatePackages.version: true` 是关键 —— changesets 默认**完全忽略**私有包，不开这一项 `changeset version` 就是恒等空操作（实测：开了之后一个 patch 能让 ports 从 0.0.0 变 0.0.1 并给 12 个包都生成 CHANGELOG） |
+| 发布到 npm | `pnpm changeset publish`，带 provenance | ⬜ 未启用（不是缺口，是前置条件未满足）：`packages/` 下 12 个包全是 `private: true`，`changeset publish` 会直接跳过；真要发得先摘掉 private 并配 npm token。策略见 `docs/packaging.md` |
 
 对**不可达分支**的处理沿用参考项目的定式：先分清是「没测到」还是「根本走不到」；走不到就**改代码删掉**，不许写替身去凑。
 

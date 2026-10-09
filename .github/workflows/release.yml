@@ -1,0 +1,56 @@
+name: 版本
+
+# 只做「由 changeset 推导版本号并开 PR」，**不发布**。
+#
+# 为什么不发：packages/ 下 12 个包目前全是 `private: true`（docs/packaging.md 里写明了
+# 「包尚未发布到 npm」）。private 包 `changeset publish` 会直接跳过，而真要发布还得先
+# 摘掉 private、再有一个 npm token —— 这两件都还没发生。先把「版本从哪来」这一步
+# 接上：changeset 文件逼每个改动声明影响范围，版本号由此推导，CHANGELOG 自动生成。
+# 等真要发包时，加一个 publish 步骤就够了，其余不用动。
+#
+# 为什么用 PR 而不是直接推回 main：`changeset version` 改的是 package.json 与
+# CHANGELOG，让它走一次评审（哪怕只是看一眼版本号对不对）比自动落到 main 上稳。
+# 没有未发布的 changeset 时这一步什么都不做，不会空开 PR。
+#
+# 配置里 `privatePackages.version: true` 是关键：changesets 默认**完全忽略**私有包，
+# 不开这一项的话 `changeset version` 在这仓里就是一个恒等空操作（实测过：开了之后
+# 一个 patch 能让 ports 从 0.0.0 变 0.0.1 并给 12 个包都生成 CHANGELOG）。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install pnpm
+        run: |
+          npm install -g pnpm@12.6.0
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Create Version PR
+        uses: changesets/action@v1
+        with:
+          version: pnpm version-packages
+          commit: 'chore(release): 由 changeset 推导版本'
+          title: 'chore(release): 由 changeset 推导版本'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
