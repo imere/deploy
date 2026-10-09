@@ -295,6 +295,26 @@ const mutJsdoc = () => {
   }
 }
 
+/**
+ * 依赖声明：往一个**不依赖 local 的包**里塞一条 `import from '@dp/local'`。
+ *
+ * 这一组验的是「本机绿、CI 红」那一类：未声明的依赖在本机靠 junction 能解析，
+ * 只有 pnpm 的 isolated 布局会拒绝它。所以必须由门禁在本机就抓住。
+ */
+const mutDeps = () => {
+  const file = 'packages/core/src/detect.ts'
+  if (!existsSync(join(MUT, file))) throw new Error(`找不到 ${file}`)
+  return {
+    gate: 'check-deps.mjs',
+    file,
+    describe: `在 ${file} 追加一条 import 指向 @dp/local（core 的 package.json 没声明它）：本机靠 junction 能解析，isolated 布局下是 TS2307`,
+    transform: (src) => {
+      if (src.includes('zzGateMutDep')) return null
+      return `${src}\n// 门禁自检注入：未声明的跨包依赖\nimport type { zzGateMutDep } from '@dp/local'\n`
+    },
+  }
+}
+
 /** 假测试：零断言用例 + 形同虚设的 throws（都没有第二参 = 没校验错误）。 */
 function pickTestFile() {
   const pkgs = readdirSync(join(MUT, 'packages'), { withFileTypes: true })
@@ -463,6 +483,7 @@ function collectMutations() {
   return [
     ...pickDeadCodeTargets().map(mutDeadCode),
     mutImports(),
+    mutDeps(),
     mutJsdoc(),
     mutTests(),
     mutCoverageHit(),

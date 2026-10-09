@@ -42,7 +42,7 @@ jobs:
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
 
-    # 门禁顺序在根 package.json 里：build → test → 门禁自测 → 六项静态检查。
+    # 门禁顺序在根 package.json 里：build → test → 门禁自测 → 七项静态检查。
     # 不在这里挑着跑 —— 门禁的价值在于全绿，拆开单跑某几项等于把编排责任搬到 YAML 里再分叉一次。
     - name: Verify
       run: pnpm verify
