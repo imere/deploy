@@ -84,6 +84,15 @@ describe('record · 非对象输入', () => {
     assert.equal(err.path, 'env')
     assert.match(err.message, /期望对象，实际是 array/)
   })
+
+  it('null 被拒：obj 有这条，record 没有就守不住', () => {
+    // 与 obj 那条不是重复：两处各写了一份 `input === null` 判据，obj 那条挡不住
+    // record 这里的翻转（全池变异实测：build/dsl.js:231 存活，179 被杀）。
+    // 去掉 null 这一项，null 会掉进 object 分支摊成一个空对象 —— 不报错。
+    const err = codeOf(() => record(str()).parse(null, 'env'))
+    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.match(err.message, /期望对象，实际是 null/)
+  })
 })
 
 describe('原子与数组 · 类型不符时报出实际类型', () => {
@@ -101,6 +110,27 @@ describe('原子与数组 · 类型不符时报出实际类型', () => {
     assert.equal(err.code, 'DP.CONFIG.INVALID')
     assert.equal(err.path, 'projects.web.source.include')
     assert.match(err.message, /期望数组，实际是 object/)
+  })
+})
+
+describe('num · 非有限数不算数字', () => {
+  // `num` 的判据是 `typeof v === 'number' && Number.isFinite(v)`，两个条件都得分开站住：
+  // 全池变异实测把 `&&` 翻成 `||` 之后 build/dsl.js:65 存活 —— 说明当时只测了「类型不对」，
+  // 没测「类型对但值不是有限数」。翻成 `||` 后 NaN 与 Infinity 都能靠 `typeof` 那半边蒙过。
+  it('NaN 被拒', () => {
+    const err = codeOf(() => num().parse(Number.NaN, 'projects.web.release.keep'))
+    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.path, 'projects.web.release.keep')
+  })
+
+  it('Infinity 被拒', () => {
+    const err = codeOf(() => num().parse(Number.POSITIVE_INFINITY, 'projects.web.release.keep'))
+    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.path, 'projects.web.release.keep')
+  })
+
+  it('正常数字照原样返回：别把拒非有限数写成拒一切', () => {
+    assert.equal(num().parse(3, 'p'), 3)
   })
 })
 
@@ -135,7 +165,26 @@ describe('复合类型的 toJsonSchema', () => {
     const err = codeOf(() => schema.parse('nope', 'p'))
     assert.equal(err.hint, '可选值：static, nginx')
   })
+})
 
+describe('oneOf · 合法值必须真的放行', () => {
+  // 判据是 `typeof input !== 'string' || !values.includes(input)`，两个条件各守一头。
+  // 全池变异实测 build/dsl.js:94 存活：当时只喂了非法值，翻转后非法值照样被拒，
+  // 于是「合法值被一起拒掉」这一侧从来没人测过。
+  it('白名单内的字面量原样返回', () => {
+    const schema = oneOf(['static', 'nginx'] as const)
+    assert.equal(schema.parse('nginx', 'target.kind'), 'nginx')
+  })
+
+  it('严格相等：尾部空格不算命中', () => {
+    const schema = oneOf(['static', 'nginx'] as const)
+    const err = codeOf(() => schema.parse('nginx ', 'target.kind'))
+    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.hint, '可选值：static, nginx')
+  })
+})
+
+describe('数组元素定位', () => {
   it('数组元素的路径带下标：元素写错要能定位到那一项', () => {
     const schema = arr(str())
     const err = codeOf(() => schema.parse(['a', 2], 'locations'))
