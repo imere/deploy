@@ -86,15 +86,41 @@ export const sourceSchema = obj(
 
 // 主机：连接 / 提权 / 布局 / 传输
 
-export const becomeSchema = obj(
-  {
-    type: withDefault(oneOf(['none', 'sudo', 'su', 'doas', 'custom'] as const), 'none'),
-    user: opt(str('提权到哪个用户')),
-    method: withDefault(oneOf(['auto', 'nopasswd', 'stdin', 'pty'] as const), 'auto'),
-    passwordRef: opt(str('凭据引用，如 env:SUDO_PASSWORD —— 绝不直接写密码')),
-    preserveEnv: withDefault(bool(), false),
+export const becomeSchema = constrained(
+  obj(
+    {
+      type: withDefault(oneOf(['none', 'sudo', 'su', 'doas', 'custom'] as const), 'none'),
+      user: opt(str('提权到哪个用户')),
+      method: withDefault(oneOf(['auto', 'nopasswd', 'stdin', 'pty'] as const), 'auto'),
+      passwordRef: opt(str('凭据引用，如 env:SUDO_PASSWORD —— 绝不直接写密码')),
+      preserveEnv: withDefault(bool(), false),
+      template: opt(str('type=custom 的命令模板，必须含 ${cmd}')),
+    },
+    '提权方式。type: none = 纯普通用户，同样是一等公民',
+  ),
+  (value, path) => {
+    if (value.type !== 'custom') {
+      if (value.template !== undefined) {
+        throw new DpError('DP.CONFIG.INVALID', `become.type=${value.type} 时写 template 不生效`, {
+          path: `${path}.template`,
+          hint: 'template 只有 type=custom 读得到。要自定义提权命令就把 type 改成 custom，或删掉 template',
+        })
+      }
+      return
+    }
+    if (value.template === undefined || value.template.trim() === '') {
+      throw new DpError('DP.CONFIG.INVALID', 'become.type=custom 必须写 template', {
+        path: `${path}.template`,
+        hint: '模板形如 `dzdo -u root ${cmd}`；${cmd} 是占位，运行时替换成被提权那条命令',
+      })
+    }
+    if (!value.template.includes('${cmd}')) {
+      throw new DpError('DP.CONFIG.INVALID', `become.template 缺少 \${cmd} 占位：${value.template}`, {
+        path: `${path}.template`,
+        hint: '没有占位的模板会把被提权的命令整条丢掉 —— 那表现成「提权成功了但什么都没发生」',
+      })
+    }
   },
-  '提权方式。type: none = 纯普通用户，同样是一等公民',
 )
 
 export const TRANSPORT_KINDS = ['rsync', 'tar-ssh', 'sftp', 'scp', 'local'] as const

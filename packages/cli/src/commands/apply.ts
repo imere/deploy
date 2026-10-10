@@ -164,11 +164,18 @@ function becomeFor(hostConfig: HostConfig, path: string): BecomeConfig | undefin
       }
       return { type: 'su', user: b.user }
     }
-    case 'custom':
-      throw new DpError('DP.CONFIG.INVALID', 'become.type=custom 尚未接入传输层', {
-        path: `${path}.become.type`,
-        hint: 'custom 需要一条命令模板，而 schema 没有承载它的字段；请改用 sudo / su / doas',
-      })
+    case 'custom': {
+      // schema 已保证 template 存在且含 ${cmd}；这里再兜一次是因为本函数也会被
+      // 不经过 schema 的路径调用（测试夹具、--facts 旁路），「custom 一定有模板」
+      // 得在代码里也成立，否则 wrapCommand 会在更深处抛一个不带配置项位置的错
+      if (b.template === undefined || b.template.trim() === '') {
+        throw new DpError('DP.CONFIG.INVALID', 'become.type=custom 缺少 template', {
+          path: `${path}.become.template`,
+          hint: '模板形如 `dzdo -u root ${cmd}`；${cmd} 会被替换成被提权的那条命令',
+        })
+      }
+      return { type: 'custom', template: b.template }
+    }
   }
 }
 

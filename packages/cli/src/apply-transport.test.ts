@@ -148,8 +148,8 @@ interface Harness {
   readonly calls: { count: number; remoteRoots: string[]; entryCounts: number[]; deleteExtraneous: (boolean | undefined)[] }
   /** 每次调用传输时拿到的 `deps.preferred` —— 用户写的 strategy 有没有真的传下去 */
   readonly prefs: (readonly string[] | undefined)[]
-  /** 每次调用传输时拿到的请求本体。跳板链/sshTarget 有没有真的传下去，只有这里看得见 */
-  readonly requests: Readonly<{ sshTarget?: string; port?: number; hops?: readonly string[] }>[]
+  /** 每次调用传输时拿到的请求本体。跳板链/sshTarget/become 有没有真的传下去，只有这里看得见 */
+  readonly requests: Readonly<{ sshTarget?: string; port?: number; hops?: readonly string[]; become?: unknown }>[]
 }
 
 interface HarnessOptions {
@@ -433,6 +433,40 @@ describe('apply · 远端走 transport', () => {
       assert.equal(parsed.error?.code, 'DP.CONFIG.INVALID')
       assert.match(parsed.error?.message ?? '', /尚未接入传输层/)
       assert.equal(h.calls.count, 0, '装配期就拒绝，不起传输')
+    }, config)
+  })
+
+  it('become.type=custom 的模板真的传到传输层', async () => {
+    const config = {
+      hosts: {
+        prod: { ssh: 'deployer@10.0.0.5:2222', become: { type: 'custom', template: 'dzdo -u root ${cmd}' } },
+      },
+      projects: { web: { source: { root: './dist' }, release: { root: '/srv/app' } } },
+    }
+    await withWorkspace(async (dir) => {
+      const h = makeHarness()
+      const r = await run(dir, ['--json', '--host', 'prod'], h.deps)
+      assert.equal(r.code, 0, `stderr: ${r.stderr}`)
+      assert.deepEqual(
+        h.requests[0]?.become,
+        { type: 'custom', template: 'dzdo -u root ${cmd}' },
+        'custom 的模板必须原样到达传输层，否则 wrapCommand 拿不到 ${cmd}',
+      )
+    }, config)
+  })
+
+  it('custom 缺 template 在配置期就拒绝，不起传输', async () => {
+    const config = {
+      hosts: { prod: { ssh: 'deployer@10.0.0.5:2222', become: { type: 'custom' } } },
+      projects: { web: { source: { root: './dist' }, release: { root: '/srv/app' } } },
+    }
+    await withWorkspace(async (dir) => {
+      const h = makeHarness()
+      const r = await run(dir, ['--json', '--host', 'prod'], h.deps)
+      assert.notEqual(r.code, 0)
+      // 配置期拒绝：错误还没进 apply 的结果结构，所以不走 stdout 的 JSON
+      assert.match(`${r.stdout}\n${r.stderr}`, /hosts\.prod\.become\.template/)
+      assert.equal(h.calls.count, 0)
     }, config)
   })
 })

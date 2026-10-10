@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DpError } from '@dp/ports'
-import { DEFAULT_KEEP, defineDocker, defineHost, defineNginx, defineTarget, dockerSchema, nginxSchema, releaseSchema, type DockerInput, type NginxInput } from './config.js'
+import { DEFAULT_KEEP, defineBecome, defineDocker, defineHost, defineNginx, defineTarget, becomeSchema, dockerSchema, nginxSchema, releaseSchema, type DockerInput, type NginxInput } from './config.js'
 
 function codeOf(fn: () => unknown): { code: string; message: string; path?: string; hint?: string } {
   try {
@@ -376,5 +376,46 @@ describe('hops：多跳配置入口', () => {
 
   it('只给 ssh（单跳）行为不变', () => {
     assert.equal(defineHost({ ssh: 'deploy@10.0.0.7:2222' }).ssh, 'deploy@10.0.0.7:2222')
+  })
+})
+
+describe('become · custom 的命令模板', () => {
+  it('type 缺省是 none，且不带 template 键', () => {
+    const parsed = defineBecome({})
+    assert.equal(parsed.type, 'none')
+    assert.equal('template' in parsed, false)
+  })
+
+  it('custom 带合法模板原样通过', () => {
+    const parsed = defineBecome({ type: 'custom', template: 'dzdo -u root ${cmd}' })
+    assert.deepEqual(parsed, { type: 'custom', template: 'dzdo -u root ${cmd}', method: 'auto', preserveEnv: false })
+  })
+
+  it('custom 不给 template 报错并指向 template', () => {
+    const e = codeOf(() => defineBecome({ type: 'custom' }))
+    assert.equal(e.code, 'DP.CONFIG.INVALID')
+    assert.equal(e.path, 'become.template')
+    assert.match(e.message, /必须写 template/)
+  })
+
+  it('模板缺 ${cmd} 占位报错：没有占位会把被提权的命令整条丢掉', () => {
+    const e = codeOf(() => defineBecome({ type: 'custom', template: 'dzdo -u root' }))
+    assert.equal(e.path, 'become.template')
+    assert.match(e.message, /\$\{cmd\}/)
+  })
+
+  it('空白模板按没给处理', () => {
+    const e = codeOf(() => defineBecome({ type: 'custom', template: '   ' }))
+    assert.equal(e.path, 'become.template')
+  })
+
+  it('非 custom 写了 template 报错，不静默忽略', () => {
+    const e = codeOf(() => defineBecome({ type: 'sudo', template: 'dzdo ${cmd}' }))
+    assert.equal(e.path, 'become.template')
+    assert.match(e.message, /不生效/)
+  })
+
+  it('非法输入走 schema.parse 那条路（配置加载器的实际入口）', () => {
+    assert.throws(() => becomeSchema.parse({ type: 'custom' }, 'hosts.prod.become'), { path: 'hosts.prod.become.template' })
   })
 })
