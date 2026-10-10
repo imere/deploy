@@ -1,7 +1,7 @@
 /**
- * SSH_ASKPASS 助手 —— 本机临时可执行文件，**只在密码认证时用**。
+ * SSH_ASKPASS 助手 —— 本地临时可执行文件，**只在密码认证时用**。
  *
- * 为什么需要它（实测）：本机没有 sshpass，也不允许用。而
+ * 为什么需要它（实测）：本地没有 sshpass，也不允许用。而
  * OpenSSH 只肯从 TTY 或 askpass 助手读密码 —— `SSH_ASKPASS=<helper>
  * SSH_ASKPASS_REQUIRE=force DISPLAY=:0 ssh ... < /dev/null` 是实测可行的那条路。
  *
@@ -46,13 +46,13 @@ export interface AskpassHelper {
 /**
  * 助手的落盘位置。
  *
- * 为什么可选：askpass 文件**永远落在本机**（ssh 子进程也在本机跑），
- * 所以它跟目标机的 tmpdir 没有关系，只是调用方常常已经知道一个合适的本机目录。
+ * 为什么可选：askpass 文件**永远落在本地**（ssh 子进程也在本地跑），
+ * 所以它跟目标机的 tmpdir 没有关系，只是调用方常常已经知道一个合适的本地目录。
  * 不给就退到 `os.tmpdir()`，而不是像其他临时物那样要求必须显式给 ——
- * 这里放错的后果是本机上多一个 0700 目录，不会碰到任何生产路径。
+ * 这里放错的后果是本地上多一个 0700 目录，不会碰到任何生产路径。
  */
 export interface AskpassOptions {
-  /** 临时目录。远端场景由调用方给 Facts.tmpdir；本机测试用 os.tmpdir() */
+  /** 临时目录。远端场景由调用方给 Facts.tmpdir；本地测试用 os.tmpdir() */
   readonly dir?: string
 }
 

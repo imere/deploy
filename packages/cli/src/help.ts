@@ -92,7 +92,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     ],
     related: ['plan'],
     commonErrors: [
-      ['DP.SSH.TOOL_MISSING', '本机没有 ssh 可执行文件；装 OpenSSH 或改用本机目标'],
+      ['DP.SSH.TOOL_MISSING', '本地没有 ssh 可执行文件；装 OpenSSH 或改用本地目标'],
       ['DP.SSH.HOST_KEY_UNKNOWN', '主机密钥不认识；先手工 ssh 一次确认指纹，或显式配 knownHosts'],
     ],
     implemented: true,
@@ -224,7 +224,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     ],
     related: ['verify', 'facts', 'rollback'],
     commonErrors: [
-      ['DP.SSH.CONNECT_FAILED', '连不上目标机；确认网络 / 凭据 / 端口，或改用 --host 本机'],
+      ['DP.SSH.CONNECT_FAILED', '连不上目标机；确认网络 / 凭据 / 端口，或改用 --host 本地'],
       ['DP.PATH.NOT_WRITABLE', '发布根算不出来；用 release.root 显式指定，或让运维授权候选之一'],
     ],
     implemented: true,

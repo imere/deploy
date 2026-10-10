@@ -6,9 +6,9 @@
  * pnpm 的 isolated 布局下解析失败 —— 两者是独立的两件事，混在一门里会让
  * 「跨层」与「未声明」互相掩盖。
  *
- * 为什么必须挡在本地：未声明的依赖在本机没有任何症状（junction 把 workspace 包
+ * 为什么必须挡在本地：未声明的依赖在本地没有任何症状（junction 把 workspace 包
  * 全链进了根 node_modules），只能等 CI 的 Linux runner 用 TS2307 报出来。
- * 一门只能在推送后被验证的门禁，价值远低于能在本机就红的门禁。
+ * 一门只能在推送后被验证的门禁，价值远低于能在本地就红的门禁。
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, sep } from 'node:path'
@@ -74,7 +74,7 @@ if (asJson) {
     lines.push(`  ${formatViolation(v, pkgName)}`)
   }
   lines.push('')
-  lines.push(`未声明 ${violations.length} 处 —— 本机靠 junction 能解析，pnpm isolated 布局下会 TS2307`)
+  lines.push(`未声明 ${violations.length} 处 —— 本地靠 junction 能解析，pnpm isolated 布局下会 TS2307`)
   process.stdout.write(`${lines.join('\n')}\n`)
 }
 

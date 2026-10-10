@@ -98,7 +98,7 @@ export function buildRemoteCommand(argv: readonly string[]): string {
  *
  * 键名只允许 POSIX 环境变量名那套字符；值里禁换行/NUL（原因同上）。
  *
- * 凭据**不走这条路**：`-o SetEnv=...` 的值会出现在本机进程的命令行里，
+ * 凭据**不走这条路**：`-o SetEnv=...` 的值会出现在本地进程的命令行里，
  * 而本文件只接受普通环境变量，不为凭据提供任何入口。
  *
  * @param env 要设置的远端环境变量。遍历顺序即输出顺序，不排序也不去重 ——
@@ -244,7 +244,7 @@ export function defaultPinPath(): string {
 }
 
 /**
- * 拼本机 `ssh` 的 argv。
+ * 拼本地 `ssh` 的 argv。
  *
  * 关键：**远端命令作为独立 argv 追加，不经过任何 shell**。`ssh host cmd arg`
  * 是 OpenSSH 自己做的事：它把 host 之后的全部 argv 拼成一条远程命令字符串发过去

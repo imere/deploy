@@ -167,7 +167,7 @@ function pickSourceRoot(projectName: string, existingDirs: readonly string[]): s
   })
 }
 
-/** 零配置只造本机主机：猜 SSH 连接串与凭据，比直接报错危险得多 */
+/** 零配置只造本地主机：猜 SSH 连接串与凭据，比直接报错危险得多 */
 function hostFor(): HostConfig {
   return defineHost({ local: true })
 }
@@ -207,7 +207,7 @@ export function deriveZeroConfig(input: ZeroConfigInput): ZeroConfigResult {
 
   const notes: string[] = [
     `源根：cwd 下存在 ${root}（按 ${SOURCE_ROOT_CANDIDATES.join(' > ')} 取第一个存在的）→ source.root=${sourceSpecFor(root)}`,
-    `主机：零配置只造一个本机主机 ${input.hostId}（local: true）—— 远端的连接串与凭据一概不猜`,
+    `主机：零配置只造一个本地主机 ${input.hostId}（local: true）—— 远端的连接串与凭据一概不猜`,
     env === '' ? '环境：没有 profile，本次不套用任何环境覆盖' : `环境：${env}`,
     detected.reason,
   ]

@@ -1,8 +1,8 @@
 /**
- * 本机 Runner —— 把 Runner 接口落到真实文件系统与真实子进程上。
+ * 本地 Runner —— 把 Runner 接口落到真实文件系统与真实子进程上。
  *
  * 与 SSH Runner 的唯一差别是「操作走哪儿执行」，形状完全一致，
- * 所以 target / core 不需要知道目标是本机还是远端。
+ * 所以 target / core 不需要知道目标是本地还是远端。
  */
 import { promises as fs } from 'node:fs'
 import { DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
@@ -29,7 +29,7 @@ function toDpError(err: unknown, path: string): DpError {
 }
 
 /**
- * 把端口契约落到本机文件系统与子进程上；除了透传进来的 facts，不持有任何跨调用的状态。
+ * 把端口契约落到本地文件系统与子进程上；除了透传进来的 facts，不持有任何跨调用的状态。
  *
  * 刻意**不做缓存与失效**：Runner 是能力与形状的适配器，不是状态的持有者。
  * 一旦在这里缓存 stat 或文件内容，探测结论与实际文件之间就会隔一层不可见的时差 ——
@@ -38,7 +38,7 @@ function toDpError(err: unknown, path: string): DpError {
  * @param facts 由 probeLocalFacts 实测得来。这里只做透传不校验：
  *   Runner 无法重新核实一份 facts（那就等于把探测重做一遍），而目标层需要原样
  *   拿着它做决策
- * @returns 实现 ports.Runner 的对象，所有方法直接落到本机文件系统与子进程
+ * @returns 实现 ports.Runner 的对象，所有方法直接落到本地文件系统与子进程
  */
 export function createLocalRunner(facts: Facts): Runner {
   const id = `local:${facts.host}`

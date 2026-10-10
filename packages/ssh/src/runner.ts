@@ -2,7 +2,7 @@
  * 远端 Runner —— 把 `Runner` 接口落到 SSH 上。
  *
  * 与 packages/local/src/runner.ts 形状完全一致，target 与 core 不需要知道
- * 对面是本机子进程还是三跳之外的机器。
+ * 对面是本地子进程还是三跳之外的机器。
  *
  * 路径安全的落点：**任何路径在发出去之前**都先过两道 ——
  *  1. `normalizeRemotePath`：归一化 + 绝对路径 + 允许根校验（防 `..` 逃逸）
@@ -67,7 +67,7 @@ function raiseForExit(op: string, path: string, code: number, stderr: string): v
       throw ioError('EINVAL', path, '不是软链')
     case EXIT_NO_BASE64:
       throw new DpError('DP.SSH.TOOL_MISSING', '远端没有 base64，无法按字节搬运文件', {
-        hint: '装 coreutils（提供 base64）；或让本机改走 sftp 通道（sftp 走的是长度前缀二进制协议，不需要 base64）',
+        hint: '装 coreutils（提供 base64）；或让本地改走 sftp 通道（sftp 走的是长度前缀二进制协议，不需要 base64）',
       })
     case EXIT_DENIED:
       throw ioError('EACCES', `${op} ${path}`, detail)
@@ -192,7 +192,7 @@ export interface SshRunnerOptions {
   readonly facts: Facts
   /** 全局超时（毫秒）。方法级 `ExecOptions.timeoutMs` 优先于它 */
   readonly timeoutMs?: number
-  /** 单次执行保留的输出字节上限。**每次执行都套**，不是每次部署 —— 一条跑飞的远端命令会打爆的是本机内存 */
+  /** 单次执行保留的输出字节上限。**每次执行都套**，不是每次部署 —— 一条跑飞的远端命令会打爆的是本地内存 */
   readonly maxOutputBytes?: number
   /** 允许写入的根；不给则只做绝对路径 + 平台校验 */
   readonly allowedRoots?: readonly string[]

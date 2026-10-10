@@ -84,7 +84,7 @@ describe('detectPrompt —— 绝不能误伤正常输出', () => {
 })
 
 describe('detectPrompt —— 额外模式', () => {
-  it('调用方可以追加本机特有的模式', () => {
+  it('调用方可以追加本地特有的模式', () => {
     const custom: PromptPattern[] = [{ kind: 'su-password', re: /^请输入密码[:：]\s*$/ }]
     assert.equal(hit('请输入密码：'), undefined)
     assert.ok(hit('请输入密码：', custom) !== undefined)

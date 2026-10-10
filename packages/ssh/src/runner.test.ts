@@ -203,7 +203,7 @@ describe('SshRunner.listDir', () => {
     assert.deepEqual([...(await makeRunner(driver).listDir('/srv/app'))].sort(), ['a.txt', 'releases'])
   })
 
-  it('不存在返回 []（与本机 Runner 契约一致）', async () => {
+  it('不存在返回 []（与本地 Runner 契约一致）', async () => {
     assert.deepEqual(await makeRunner().listDir('/srv/app/nope'), [])
   })
 

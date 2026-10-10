@@ -133,7 +133,7 @@ async function linkWithFallback(
   } catch (err) {
     if (!runner.facts.capabilities.canSymlink) {
       warnings.push(
-        'DP.LINK.UNAVAILABLE: 本机无法创建软链（无开发者模式/管理员权限），current 改为复制目录 —— 这不是原子操作，且磁盘占用翻倍',
+        'DP.LINK.UNAVAILABLE: 本地无法创建软链（无开发者模式/管理员权限），current 改为复制目录 —— 这不是原子操作，且磁盘占用翻倍',
       )
       await runner.remove(linkPath)
       await runner.mkdir(linkPath, { recursive: true })
@@ -206,7 +206,7 @@ export interface DeployResult {
    */
   readonly filesWritten: number
   /**
-   * 非致命但绝不能吞掉的事，比如本机无法建软链、current 退化成复制目录。
+   * 非致命但绝不能吞掉的事，比如本地无法建软链、current 退化成复制目录。
    *
    * 健康检查不过**不在**这里 —— 那条路径直接抛错（见 deploy 的 @throws），
    * 因为它已经动过 current，报告成功或只留一句 warning 都会让人以为线上没事。
@@ -241,7 +241,7 @@ export interface DeployInput {
   readonly onStep?: (step: Step) => void
   /**
    * 由调用方提供的「把源搬到 staging 目录」的实现。
-   * 不提供时走现在的逐条 writeFile（本机、小目录都够用）。
+   * 不提供时走现在的逐条 writeFile（本地、小目录都够用）。
    * 返回值里的 filesWritten 同样要过「空版本拒绝」—— 传输出了 0 个文件
    * 与 source 为空是同一类事故（current 指向空目录 = 线上 404）。
    */

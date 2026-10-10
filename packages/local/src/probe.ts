@@ -1,5 +1,5 @@
 /**
- * 本机事实探测。
+ * 本地事实探测。
  *
  * 铁律：**能力一律实证，不推断。** 不看 uid 就断定能写 /etc，不看平台就断定有 systemd。
  * 每条结论都是「真的做了一次」，代价是一点启动耗时，收益是预检不会说谎。
@@ -113,7 +113,7 @@ async function removeOnceWithRetry(path: string, remove: ProbeRemove): Promise<b
  * 一堆、然后把所有候选目录拖成不可写，而没有任何线索指得到它。
  * @param paths 待实测的路径，通常是候选目录。**必须传**而不是内部取默认：
  *   「探哪些目录」是部署布局的推导结果，探测层自己决定候选就等于把推导复制一份，
- *   两份候选不一致时同一份配置会在本机与远端得出不同的结论
+ *   两份候选不一致时同一份配置会在本地与远端得出不同的结论
  * @param options 目前只有 remove（注入删除动作）；生产用 fs.rm，测试注入必定失败的版本
  * @returns 每个输入路径一条结论（key 与入参一一对应），外加清理失败的残留路径。
  *   路径互相独立，一个失败不影响其余
@@ -266,7 +266,7 @@ const TOOLS_TO_PROBE = [
 ] as const
 
 /**
- * 本机事实探测的入口。产出的 `Facts` 是纯数据，**不缓存** ——
+ * 本地事实探测的入口。产出的 `Facts` 是纯数据，**不缓存** ——
  * 部署途中权限可能变（提权后、写满磁盘后），拿一份十分钟前的结论去决定
  * 当前能不能写，恰好是这类工具最要避免的那种自信。
  *
@@ -294,7 +294,7 @@ export async function probeLocalFacts(options: ProbeOptions = {}): Promise<Facts
   // 候选按平台分流：/srv、/opt 这类 POSIX 目录在 Windows 上会被解析成 C:\srv 之类
   // 根本不存在的位置，探它们既没意义又拖慢启动（每次探测都是一次真实建文件+删除）。
   // 表本身取自 @dp/ports —— 与 @dp/ssh 那份同源。两份 facts 的候选不一致会让同一份
-  // 配置在远端能推出 confd、在本机推不出来（表现为「ssh 目标成功、local 目标报权限错」）。
+  // 配置在远端能推出 confd、在本地推不出来（表现为「ssh 目标成功、local 目标报权限错」）。
   const candidates =
     options.writeProbePaths ??
     [

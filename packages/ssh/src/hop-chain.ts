@@ -17,7 +17,7 @@ export type HopAuth = AuthConfig
 export type HopVia = 'direct' | 'forwardOut' | 'nc'
 
 export interface HopChainStep {
-  /** 第几跳（0 起）。第 0 跳是本机直连的那一跳，最后一跳是目标机 */
+  /** 第几跳（0 起）。第 0 跳是本地直连的那一跳，最后一跳是目标机 */
   readonly index: number
   readonly ssh: string
   readonly host: string

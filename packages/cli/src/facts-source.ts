@@ -234,7 +234,7 @@ export function resolveSshEndpoint(host: HostConfig, path: string, targetAuth?: 
   if (host.ssh === undefined) {
     throw new DpError('DP.CONFIG.INVALID', `主机 ${path} 既没有 local: true，也没有 ssh 或 hops`, {
       path,
-      hint: '写 { "local": true } 指向本机，或写 { "ssh": "user@host:port" } 单跳，或写 { "hops": [...] } 多跳（最后一跳就是目标机）。三者都没有就无法确定目标',
+      hint: '写 { "local": true } 指向本地，或写 { "ssh": "user@host:port" } 单跳，或写 { "hops": [...] } 多跳（最后一跳就是目标机）。三者都没有就无法确定目标',
     })
   }
 
@@ -343,7 +343,7 @@ export async function acquireFacts(request: FactsRequest): Promise<FactsResult> 
     auth: targetAuth,
     knownHosts: 'strict',
     timeoutMs,
-    // 端口与用户不写就交给驱动默认值（22 / 本机用户名），不猜
+    // 端口与用户不写就交给驱动默认值（22 / 本地用户名），不猜
     ...(endpoint.user !== undefined ? { user: endpoint.user } : {}),
     ...(endpoint.port !== undefined ? { port: endpoint.port } : {}),
     // hops 是整条链（含目标机），驱动自己判断哪一跳进 -J

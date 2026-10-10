@@ -3,7 +3,7 @@
  *
  * 定位：**最后手段**（OpenSSH 9+ 的 scp 默认走 sftp 协议，
  * `-O` 只是为兼容老目标）。所以 `buildScpArgv` 显式带 `-O`，让行为确定，
- * 不依赖本机 scp 的版本默认值。
+ * 不依赖本地 scp 的版本默认值。
  *
  * 相对 rsync 的硬损失：不增量、不能删多余文件。所以 `deleteExtraneous`
  * 在这条路上**被拒绝而不是静默忽略** —— 静默忽略会让用户以为远端被清干净了。
@@ -18,12 +18,12 @@ import type { RshOptions } from './rsh.js'
 /**
  * scp 侧构造 argv 的输入。
  *
- * 形状与 rsync 那套**刻意保持一致**（本机可执行文件路径 + 同一份 rsh + 目标标识）：
+ * 形状与 rsync 那套**刻意保持一致**（本地可执行文件路径 + 同一份 rsh + 目标标识）：
  * 两种传输在同一条偏好链上，调用方换一条路时不该重新学一套字段 —— 字段形状一变，
  * 「换传输方式」就变成一次需要改调用点的迁移。
  */
 export interface ScpArgvOptions {
-  /** 本机 scp 绝对路径（facts.tools.scp） */
+  /** 本地 scp 绝对路径（facts.tools.scp） */
   readonly scpPath: string
   /** 复用同一套 ssh 选项。scp 的 `-o` 与 ssh 同名同义 */
   readonly rsh: RshOptions
@@ -34,7 +34,7 @@ export interface ScpArgvOptions {
  * scp 的完整 argv。**纯函数**。
  *
  * `-O` 写死而不是留默认值：OpenSSH 9+ 的 scp 默认改走 sftp 协议，老目标机只认传统
- * SCP 协议。不写死的话，同一份配置会随**本机** scp 的版本不同而连出不同的结果，
+ * SCP 协议。不写死的话，同一份配置会随**本地** scp 的版本不同而连出不同的结果，
  * 而版本恰恰是没人去看的东西。
  *
  * `deleteExtraneous` 与 `become` 在这里**抛错而不是静默忽略**：scp 协议既没有

@@ -110,7 +110,7 @@ describe('共享常量', () => {
     assert.equal(INCOMING_SUFFIX, '.incoming')
   })
 
-  it('可写性候选表含 nginx 的 confd —— 之前两份表不一致，同一份配置在远端能推出 confd、本机推不出来', () => {
+  it('可写性候选表含 nginx 的 confd —— 之前两份表不一致，同一份配置在远端能推出 confd、本地推不出来', () => {
     assert.equal(POSIX_WRITE_CANDIDATES.includes('/etc/nginx/conf.d'), true)
   })
 

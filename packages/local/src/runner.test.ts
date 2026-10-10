@@ -1,5 +1,5 @@
 /**
- * 本机 Runner 的行为测试 —— 跑在真实文件系统上，不做 mock。
+ * 本地 Runner 的行为测试 —— 跑在真实文件系统上，不做 mock。
  *
  * 这一层专门盯「操作系统差异」：junction 与 symlink 的行为、路径分隔符、
  * 二进制读写是否失真。Windows 与 Linux/macOS 都必须通过同一份断言。
@@ -106,7 +106,7 @@ describe('local runner · 文件系统', () => {
       assert.ok(pointed !== null && pointed.includes('case7-target'))
       assert.ok((await runner.realpath(`${sandbox}/case7-link`)).includes('case7-target'))
     } catch {
-      // 本机无 symlink 权限时也允许：这条能力必须在 Facts 里如实体现
+      // 本地无 symlink 权限时也允许：这条能力必须在 Facts 里如实体现
       const facts = await probeLocalFacts({ writeProbePaths: [tmpdir()] })
       assert.equal(facts.capabilities.canSymlink, false, '若软链失败，实测必须如实报告')
     }

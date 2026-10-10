@@ -3,7 +3,7 @@
  *
  * 形状：第 0 跳直连，之后每一跳的 TCP 流都由**前一跳开出的 direct-tcpip
  * 通道**承载，并把那个通道当 `sock` 交给新的 Client。ssh2 的 Channel 是
- * Duplex，能直接当 socket 用 —— 不经过本机任何 TCP 端口，于是端口冲突、
+ * Duplex，能直接当 socket 用 —— 不经过本地任何 TCP 端口，于是端口冲突、
  * 监听地址暴露、别的进程抢端口这三类问题一个都不存在。
  *
  * 为什么 nc 只在**运行期**兜底：跳板禁 TCP 转发是常见加固手段，而"能不能开
@@ -130,7 +130,7 @@ function hopConnectConfig(
   timeoutMs: number,
 ): Record<string, unknown> {
   return {
-    // sock 优先：给了它 host/port 就是摆设（那两键只服务于本机直连那一跳）
+    // sock 优先：给了它 host/port 就是摆设（那两键只服务于本地直连那一跳）
     ...(sock === undefined ? { host: step.host, port: step.port ?? 22 } : { sock }),
     ...(step.user === undefined ? {} : { username: step.user }),
     // 永远不要 agent forwarding：那是把钥匙交给中间机器
@@ -211,7 +211,7 @@ function connectOne(
 
 function hopHint(step: HopChainStep): string {
   if (step.index === 0) {
-    return '这是本机直连的那一跳：检查 host/port 可达性与这一跳自己的凭据（auth 由 hops 逐跳给出，不继承任何东西）'
+    return '这是本地直连的那一跳：检查 host/port 可达性与这一跳自己的凭据（auth 由 hops 逐跳给出，不继承任何东西）'
   }
   return (
     `第 ${step.index} 跳是通过第 ${step.index - 1} 跳的通道进来的。` +
@@ -223,7 +223,7 @@ function hopHint(step: HopChainStep): string {
 /**
  * 从前一跳拿一条通向 `step` 的字节流。
  *
- * srcPort 必须是 0：direct-tcpip 的源地址只给服务端记账，填一个本机没监听的
+ * srcPort 必须是 0：direct-tcpip 的源地址只给服务端记账，填一个本地没监听的
  * 端口会让一部分 sshd 直接拒掉这条请求。
  */
 function openChannel(

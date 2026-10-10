@@ -1,5 +1,5 @@
 /**
- * 真实端到端：本机文件系统上跑一次完整发布。
+ * 真实端到端：本地文件系统上跑一次完整发布。
  *
  * 这一层不许用 mock —— 它的价值就在于校验 ls / readlink / rename / 路径分隔符
  * 在**真实操作系统**上的行为。Windows 上尤其重要：junction / 路径长度 /
@@ -72,7 +72,7 @@ async function entries(pattern: string) {
   return listSourceEntries(spec)
 }
 
-describe('端到端 · 本机发布', () => {
+describe('端到端 · 本地发布', () => {
   it('source "./dist" 连目录本身一起过去，"./dist/**" 只过去内容', async () => {
     const selfEntries = await entries('./dist')
     const contentEntries = await entries('./dist/**')

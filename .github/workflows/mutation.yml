@@ -1,7 +1,7 @@
 name: 变异测试
 
 # 为什么不在主 CI 里跑，也不放进 pnpm verify：
-#   1. 它靠派生子进程跑「改坏一份副本 → 跑该包测试」，本机（Windows）派生子进程会随
+#   1. 它靠派生子进程跑「改坏一份副本 → 跑该包测试」，本地（Windows）派生子进程会随
 #      负载间歇性 EBUSY，放进 verify 会让那条命令随机红在最后一项 —— 需要人判断环境
 #      的门禁不是门禁。Linux runner 上没有这个限制；
 #   2. 它比其余七项慢一个量级 —— 每个变异都要整包跑一遍测试，PR 上跑不划算。
@@ -61,8 +61,8 @@ jobs:
     - name: Build
       run: pnpm build
 
-    # 本机（Windows + WorkBuddy 的 safe-delete 垫片）跑不了 mutate.mjs：
-    # 脚本每个变异都要建/删一次 .tmp/mutate 副本，而垫片对本机 node 的 rmSync
+    # 本地（Windows + WorkBuddy 的 safe-delete 垫片）跑不了 mutate.mjs：
+    # 脚本每个变异都要建/删一次 .tmp/mutate 副本，而垫片对本地 node 的 rmSync
     # 有批量删除守卫，跑几个变异就会抛 BULK_GUARD_ERROR 中断 —— 这不是脚本的问题，
     # 所以不为它改脚本，而是让它在没有垫片的 runner 上跑。runner 上没有那个限制。
     #
@@ -71,6 +71,6 @@ jobs:
     # 不一致就判红线被踩（退出非 0）—— 所以这里不需要额外的「确认没污染产物」步骤。
     - name: Mutate
       run: pnpm run verify:mutation
-      # 本机也能跑，但要先关掉删除垫片（CODEBUDDY_SAFE_DELETE_ENABLED=0）—— 脚本每个
+      # 本地也能跑，但要先关掉删除垫片（CODEBUDDY_SAFE_DELETE_ENABLED=0）—— 脚本每个
       # 变异都要建/删一次 .tmp/mutate 副本，垫片的批量删除守卫会在跑到十几个时中断它。
-      # 那是本机环境的限制，不是脚本的问题，所以没有为它改脚本。
+      # 那是本地环境的限制，不是脚本的问题，所以没有为它改脚本。

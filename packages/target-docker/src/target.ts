@@ -21,7 +21,7 @@ const DEFAULT_EXPECT_STATES: readonly string[] = ['running', 'healthy']
 /** `up` 的 undo 只能是「再 up 一次上一版」—— 没有能同时让旧版与新版都在跑的 compose 语义 */
 function upUndo(ctx: TargetContext): string {
   return ctx.previousReleaseId === undefined
-    ? '首次部署无上一版可还原：需要撤销时执行 `docker compose ... down`（本包不自动 down —— 那样会连停掉本机正在跑的同名项目）'
+    ? '首次部署无上一版可还原：需要撤销时执行 `docker compose ... down`（本包不自动 down —— 那样会连停掉本地正在跑的同名项目）'
     : `重新 up 上一版的 compose 文件：${releaseDir(ctx, ctx.previousReleaseId)}`
 }
 
@@ -158,7 +158,7 @@ export const dockerTarget: Target<DockerTargetConfig> = {
         path: CONFIG_PATH,
         hint:
           '首次部署没有可回退的版本。确认要撤销的话，手工执行 `docker compose ... down` —— ' +
-          '本包不返回「回滚成功」这种假结果，也不自动 down（那会连停掉本机同名的其它项目）',
+          '本包不返回「回滚成功」这种假结果，也不自动 down（那会连停掉本地同名的其它项目）',
       })
     }
 

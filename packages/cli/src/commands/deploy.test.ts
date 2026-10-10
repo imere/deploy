@@ -348,7 +348,7 @@ describe('dp deploy · 命令契约', () => {
       // 「自动不等于静默」：每一步为什么这么定都要说清
       assert.match(run.stdout, /自动决定：/)
       assert.match(run.stdout, /源根：cwd 下存在 dist/)
-      assert.match(run.stdout, /主机：零配置只造一个本机主机/)
+      assert.match(run.stdout, /主机：零配置只造一个本地主机/)
       assert.match(run.stdout, /内存里/)
       // 干跑：目录必须一个都没建出来
       assert.equal(releasesExist(dir), false, '零配置默认干跑却落了盘')

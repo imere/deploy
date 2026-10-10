@@ -88,7 +88,7 @@ describe('ssh2 + hops —— 走链，不再是入口就拒绝', () => {
     const driver = new Ssh2Driver(options([]))
     await assert.rejects(
       () => driver.exec({ argv: ['true'] }),
-      // 走到这里说明没被多跳拦下；缺 ssh2 时是 DRIVER_UNAVAILABLE，这里不依赖本机装没装
+      // 走到这里说明没被多跳拦下；缺 ssh2 时是 DRIVER_UNAVAILABLE，这里不依赖本地装没装
       (err: unknown) => !(err instanceof DpError) || err.code !== 'DP.CONFIG.INVALID' || !/多跳/.test(err.message),
     )
   })

@@ -16,7 +16,7 @@ import { deriveZeroConfig } from '../zero-config.js'
 import { runApply } from './apply.js'
 
 /**
- * 零配置只造本机主机。猜 SSH 连接串与凭据比直接报错危险得多，
+ * 零配置只造本地主机。猜 SSH 连接串与凭据比直接报错危险得多，
  * 主机 id 也固定成这一个 —— 主机名会出现在日志、发布目录与 compose 项目名里，
  * 按 cwd 推一个出来只会在这些地方制造「看起来像用户指定的」假象。
  */

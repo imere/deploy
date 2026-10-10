@@ -1,9 +1,9 @@
 /**
- * 本机复制 —— **不经过任何网络，也不起任何子进程**。
+ * 本地复制 —— **不经过任何网络，也不起任何子进程**。
  *
  * 走注入的 `Runner` 而不是 `node:fs`：本包依赖里没有 `@dp/local`（只有
  * ports/log/ssh/core），而且 CLI 手里已经有 `createLocalRunner()` 建好的那个
- * Runner。复用它等于"只有一个本机真相来源"，也不会出现两份探测事实打架。
+ * Runner。复用它等于"只有一个本地真相来源"，也不会出现两份探测事实打架。
  *
  * 同样做**空源拒绝**：空清单会让"部署成功"变成一句无法证伪的话。
  */
@@ -14,10 +14,10 @@ import type { TransferRequest, TransferResult } from './types.js'
 const rel = (root: string, relativePath: string): string => join(root, ...relativePath.split('/'))
 
 /**
- * 本机复制：**不起任何子进程，也不碰网络**。
+ * 本地复制：**不起任何子进程，也不碰网络**。
  *
- * 逐条经 `Runner` 写而不是 `cp -r`：本机目标与远端目标要共用同一套「写文件」的语义，
- * 各走一条路的话，「本机成功、远端失败」的差异里有一半是两套实现本身的差异，
+ * 逐条经 `Runner` 写而不是 `cp -r`：本地目标与远端目标要共用同一套「写文件」的语义，
+ * 各走一条路的话，「本地成功、远端失败」的差异里有一半是两套实现本身的差异，
  * 排障时根本分不清。
  *
  * 目录按**条目的祖先链**建，不按文件名猜：靠「名字里有没有点」判断目录，会把
@@ -27,7 +27,7 @@ const rel = (root: string, relativePath: string): string => join(root, ...relati
  * @param req 传输声明。`entries` 为空直接报 DP.SOURCE.EMPTY —— 空清单会让
  *   「部署成功」变成一句无法证伪的话
  * @param runner 落盘通道，由调用方注入（本包零依赖 @dp/local，只认 ports 的 Runner 接口）
- * @returns 复制结果。`command` 是一行**给人看的说明**，不是 argv —— 本机没有 argv
+ * @returns 复制结果。`command` 是一行**给人看的说明**，不是 argv —— 本地没有 argv
  * @throws DpError DP.SOURCE.EMPTY；写失败由注入的 Runner 抛（DP.PATH.NOT_WRITABLE）
  */
 export async function copyLocal(

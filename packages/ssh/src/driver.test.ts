@@ -110,10 +110,10 @@ describe('resolveDriver —— 偏好链', () => {
     assert.match(err.message, /探测 native-ssh 时炸了/)
   })
 
-  it('真实驱动：ssh2 本机没装时表现为「不可用 + 怎么装」，不是崩溃', async () => {
+  it('真实驱动：ssh2 本地没装时表现为「不可用 + 怎么装」，不是崩溃', async () => {
     const load = loadSsh2(true)
     if (load.ok) {
-      // 本机恰好装了 ssh2：断言它能收窄出 Client 就够了
+      // 本地恰好装了 ssh2：断言它能收窄出 Client 就够了
       assert.equal(typeof load.mod.Client, 'function')
       return
     }

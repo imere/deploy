@@ -7,7 +7,7 @@
  *  2. **远端注入** —— 假 Runner + 假 facts，全程不碰网络。
  *  3. **边界** —— 没部署过 / 只有一个版本 / --json 纯度 / --all 扇出。
  *
- * 全程零网络：本机主机的 facts 探测只读本机文件系统。
+ * 全程零网络：本地主机的 facts 探测只读本地文件系统。
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
@@ -146,12 +146,12 @@ async function seedRemote(runner: FakeRunner, root: string, ids: readonly string
 }
 
 /**
- * 本机装配，但**只探测一次**。
+ * 本地装配，但**只探测一次**。
  *
  * 真实探测是这份测试里最贵的一步（每个探测点都要建文件再删，docs 里记过 ~2.4s/个），
  * 而一条 apply → status → verify → rollback 链路会调用它好几次。按 (host, releaseRoot)
  * 记忆化后，真实探测只发生一次，其余每一步仍走真 createLocalRunner + 真文件系统。
- * 缓存是安全的：本机路径不建连接，没有 close 需要配对。
+ * 缓存是安全的：本地路径不建连接，没有 close 需要配对。
  */
 function memoizedRealDeps(): ApplyDeps {
   const base = defaultApplyDeps()
@@ -198,7 +198,7 @@ async function runCli(
   return { code, stdout: out.join(''), stderr: err.join('') }
 }
 
-/** 本机工作区：dist 里有文件，配置指向 tmpdir 里的发布根 */
+/** 本地工作区：dist 里有文件，配置指向 tmpdir 里的发布根 */
 async function withLocalWorkspace(
   fn: (dir: string, releaseRoot: string) => Promise<void>,
   config?: (releaseRoot: string) => Record<string, unknown>,

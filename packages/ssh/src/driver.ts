@@ -33,7 +33,7 @@ export interface DriverAvailability {
 /**
  * 一次远端执行请求 —— 驱动层的唯一输入形状。
  *
- * 为什么不用 ports 的 `ExecOptions`：那一份是**本机语义**（cwd 是本机目录、
+ * 为什么不用 ports 的 `ExecOptions`：那一份是**本地语义**（cwd 是本地目录、
  * env 与父进程合并）。远端的 cwd 与 env 都要穿过 sshd 与登录 shell，
  * 同一个字段名会让人以为两端行为一致，而实际一致的那个部分只有 argv。
  */
@@ -82,7 +82,7 @@ export interface SshDriver {
 }
 
 /**
- * 驱动的原始执行结果。**刻意与本机的 `ExecResult` 同形**：
+ * 驱动的原始执行结果。**刻意与本地的 `ExecResult` 同形**：
  * 上层（Runner 与它上面的 core）不该因为对面隔着三跳就改判定逻辑。
  */
 export interface DriverExecResult {
@@ -202,7 +202,7 @@ export interface SshConnectionOptions {
  * 不会把一次部署挂成"看起来在跑"。**显式给值覆盖它**，但 0 与负数不算覆盖。
  */
 export const DEFAULT_SSH_TIMEOUT_MS = 30_000
-/** 远端输出上限，防止一条 `cat /dev/zero` 打爆本机内存 */
+/** 远端输出上限，防止一条 `cat /dev/zero` 打爆本地内存 */
 export const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024
 
 /**

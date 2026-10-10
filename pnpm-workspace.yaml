@@ -2,8 +2,8 @@ packages:
   - packages/*
 
 # 【临时方案，见 docs/troubleshooting.md】
-# 本机未开启 Windows 开发者模式 → 创建 symlink 报 EPERM（实测 junction 可用）。
-# pnpm 12.6.0 在本机不会自动回退到 junction，isolated 布局的顶层链接会**静默缺失**：
+# 本地未开启 Windows 开发者模式 → 创建 symlink 报 EPERM（实测 junction 可用）。
+# pnpm 12.6.0 在本地不会自动回退到 junction，isolated 布局的顶层链接会**静默缺失**：
 # 包在 node_modules/.pnpm 里完整，但 node_modules/<pkg> 不存在，tsc 找不到模块。
 # 已验证无效的尝试：.npmrc 的 node-linker / symlink（pnpm 12 不读 .npmrc 的这两项）。
 #

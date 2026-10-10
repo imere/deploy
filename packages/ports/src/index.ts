@@ -97,9 +97,9 @@ export const INCOMING_SUFFIX = '.incoming'
 /**
  * 实测可写性的 POSIX 候选目录。
  *
- * `@dp/local`（本机探测）与 `@dp/ssh`（远端探测）**必须用同一张表**：两份 facts
+ * `@dp/local`（本地探测）与 `@dp/ssh`（远端探测）**必须用同一张表**：两份 facts
  * 只是来源不同，语义必须可比。各写一份的后果是同一份配置在远端能推出 confd、
- * 在本机推不出来（表现为「ssh 目标成功、local 目标报权限错」），而这种错指不回真正的原因。
+ * 在本地推不出来（表现为「ssh 目标成功、local 目标报权限错」），而这种错指不回真正的原因。
  */
 export const POSIX_WRITE_CANDIDATES: readonly string[] = [
   '/srv',

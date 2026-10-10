@@ -2,7 +2,7 @@
  * native-ssh 驱动 —— spawn 系统 `ssh` 二进制。
  *
  * 排第一的理由只有一个，但它不可替代（/S2 实测）：
- * **只有它能协商抗量子 KEX**。本机 OpenSSH 10.3 默认就协商出
+ * **只有它能协商抗量子 KEX**。本地 OpenSSH 10.3 默认就协商出
  * mlkem768x25519-sha256；ssh2 传这个算法直接抛 Unsupported algorithm。
  *
  * 三条硬约束（与 packages/local/src/exec.ts 同源）：
@@ -330,7 +330,7 @@ export class NativeSshDriver implements SshDriver {
       // detached 让 POSIX 下能建进程组，超时时能一次杀干净
       const child = spawn(argv[0]!, argv.slice(1), {
         env: ctx.env,
-        // stdin 给 'ignore' 而不是 'pipe'：铁律 0，本机 ssh 连一个字节都不该收到
+        // stdin 给 'ignore' 而不是 'pipe'：铁律 0，本地 ssh 连一个字节都不该收到
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: false,
         windowsHide: true,
@@ -450,13 +450,13 @@ export class NativeSshDriver implements SshDriver {
   /** sftp 批量通道（远端文件系统首选路径，见 runner.ts） */
   async runSftpBatch(commands: readonly string[], timeoutMs: number): Promise<DriverExecResult> {
     if (this.sshPath === null) {
-      throw new DpError('DP.SSH.TOOL_MISSING', '找不到本机 ssh，无法走 sftp 通道', {
+      throw new DpError('DP.SSH.TOOL_MISSING', '找不到本地 ssh，无法走 sftp 通道', {
         hint: '降级到 POSIX 命令通道（runner.ts 会自动降级）',
       })
     }
     const sftpPath = resolveTool('sftp', process.env as Readonly<Record<string, string | undefined>>)
     if (sftpPath === null) {
-      throw new DpError('DP.SSH.TOOL_MISSING', '找不到本机 sftp', {
+      throw new DpError('DP.SSH.TOOL_MISSING', '找不到本地 sftp', {
         hint: '降级到 POSIX 命令通道（sh -c + base64），功能等价，只是没有 sftp 的长度前缀协议',
       })
     }

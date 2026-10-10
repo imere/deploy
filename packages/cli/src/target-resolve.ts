@@ -56,8 +56,8 @@ export interface ResolvedTargetInput {
  *  1. runner 优先用 `facts.runner`。ssh 路径下 acquireFacts 已经连好了一条连接，
  *     复用它保证「探测看到的机器」与「写入的机器」物理上就是同一台 —— 重新连
  *     既慢，又可能因主机密钥或瞬时抖动在第二次失败。
- *  2. 没有 `facts.runner` 时**只有** `local: true` 才造本机 Runner。
- *  3. 其余情况抛 `DP.CONFIG.INVALID`，绝不悄悄退回本机 —— 那会把「部署到远端」
+ *  2. 没有 `facts.runner` 时**只有** `local: true` 才造本地 Runner。
+ *  3. 其余情况抛 `DP.CONFIG.INVALID`，绝不悄悄退回本地 —— 那会把「部署到远端」
  *     变成「部署到自己机器上」，是本仓最不能犯的那类错误。
  */
 export async function resolveTarget(input: ResolvedTargetInput): Promise<ResolvedTarget> {

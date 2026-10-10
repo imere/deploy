@@ -24,7 +24,7 @@ import type { TransferRequest, TransferResult, SpawnImpl } from './types.js'
  * 「配置里写一个并不存在的 rsync」—— 而协商是按 facts 做的，两处会悄悄分叉。
  */
 export interface RsyncArgvOptions {
-  /** 本机 rsync 绝对路径与本机 ssh 绝对路径（均来自 facts.tools） */
+  /** 本地 rsync 绝对路径与本地 ssh 绝对路径（均来自 facts.tools） */
   readonly rsyncPath: string
   readonly rsh: RshOptions
   /** 目标主机标识，不含 user 前缀。rsync 自己追加 `[-l user] host`，所以它只在目标串里出现 */
@@ -98,7 +98,7 @@ export function buildRsyncArgv(
   const rsyncPathOpt = buildRsyncPath(req.become)
   if (rsyncPathOpt !== undefined) argv.push(`--rsync-path=${rsyncPathOpt}`)
 
-  // 源是本机路径；远端写成 `host:path`，path 走 @dp/ssh 的 quoteArg（唯一转义出口）
+  // 源是本地路径；远端写成 `host:path`，path 走 @dp/ssh 的 quoteArg（唯一转义出口）
   const src = `${req.localRoot.replace(/\/+$/, '')}/`
   for (const e of req.entries) {
     argv.push(`${src}${e.split('/').join('/')}`)

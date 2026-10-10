@@ -9,7 +9,7 @@ import { EXIT_CONFIG, EXIT_OK } from './output.js'
 
 /**
  * apply 是**唯一会写目标机**的命令，所以这些测试全部用 os.tmpdir()：
- * 本机实测往用户目录写文件要 2–4 秒，一次测试写几次就够把套件拖垮。
+ * 实测往用户目录写文件要 2–4 秒，一次测试写几次就够把套件拖垮。
  */
 async function withWorkspace(fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = await fs.mkdtemp(join(tmpdir(), 'dp-cli-apply-'))

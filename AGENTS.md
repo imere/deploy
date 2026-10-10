@@ -21,26 +21,21 @@ pnpm 单仓多包，包名前缀 `@dp/*`。**Node ≥ 24**。
 ## 命令
 
 ```
-pnpm build             # tsc -b，产物 packages/<pkg>/build
-pnpm test              # 构建 + node --test + 覆盖率 → build/coverage/lcov.info
-pnpm run test:scripts  # 门禁脚本自己的测试（scripts/*.test.mjs）—— 判据被改坏要有东西变红
-pnpm verify            # build + lint + test + test:scripts + 七项静态门禁（verify:gates）
-                       # Windows 上经 pnpm 链条派会 EBUSY，直接 node 该脚本则正常
-                       # 变异测试更慢（每个变异都要整包跑一遍测试）：pnpm run verify:mutation
-                       # 本机可以跑，但要先关掉删除垫片（CODEBUDDY_SAFE_DELETE_ENABLED=0）
-                       # —— 每个变异都要删一次 .tmp/mutate 副本，垫片的批量删除守卫
-                       # 会在跑十几个时中断它。派生子进程在本机会随负载间歇 EBUSY，
-                       # 降负载重试通常就好。常规验证交给 CI 周跑。
-pnpm clean             # tsc -b --clean
+pnpm build                # tsc -b，产物 packages/<pkg>/build
+pnpm test                 # 构建 + node --test + 覆盖率 → build/coverage/lcov.info
+pnpm verify               # build + lint + test + 七项静态门禁（verify:gates）
+pnpm run verify:selfcheck # 门禁自检：注入违规看它们是否还拦得住
+pnpm run verify:mutation  # 变异测试（每个变异都要整包跑一遍测试，慢，常规交给 CI 周跑）
+pnpm clean                # tsc -b --clean
 ```
 
-Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：它依赖的 esbuild 平台二进制在部分 Windows 环境装不上，
+Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：它依赖的 esbuild 平台二进制在部分环境装不上，
 而 Node 24 内置测试运行器够用且零依赖。
 
 测试文件与源码同目录（`src/*.test.ts`），经 `tsc -b` 落到 `build/` 后由 `node --test` 执行；
 覆盖率只统计 `packages/*/build/**`。写新能力时同步补三样：纯函数夹具测试、真实 IO 测试、一条能指导下一步的错误路径断言。
 
-Windows 未开启开发者模式时，pnpm 的 isolated 布局会静默丢链接，`postinstall` 里的
+某些环境下 pnpm 的 isolated 布局会静默丢链接，`postinstall` 里的
 `scripts/link-workspace.mjs` 用 junction 补上。**不要为了绕坑改成 hoisted** ——
 那等于丢掉 pnpm 的核心价值。解除条件。
 
@@ -100,7 +95,7 @@ build/          覆盖率产物所在根目录（已 gitignore）
 - **护栏层**：目标机状态日志 + 带租约的部署锁 + 两阶段激活 `trial→promote`；unit 必须注入 `MemoryMax`/`StartLimitBurst`/`Restart=on-failure`
 - **抗量子**：ssh2 **不支持**，只能靠 `native-ssh` 驱动；密码登录用 `SSH_ASKPASS`（不需要 sshpass）
 - **日志**：一律走 `@dp/log`，脱敏在 sink 出口统一做，禁止单点 `console.log`；日志抛错绝不上抛
-- **远端**：`@dp/ssh` 驱动偏好链 `native-ssh` → `ssh2`（ssh2 运行时可选加载，本机没装即表现为不可用）
+- **远端**：`@dp/ssh` 驱动偏好链 `native-ssh` → `ssh2`（ssh2 运行时可选加载，未安装即表现为不可用）
 - **多跳**：`hosts.*.hops`（与 `ssh` 互斥）已接通，语义是**最后一跳就是目标机**。
   两个消费者都得按这条来：native 把它排除在 `-J` 之外（写进去就成了
   `ssh -J jump,target target`，在目标机上再连一次自己），`@dp/transport` 的 rsh 同理。
@@ -119,7 +114,7 @@ build/          覆盖率产物所在根目录（已 gitignore）
   取候选里第一个 `canWrite === true` 的 > 都没有报 `DP.PERM.CONFD_NOT_WRITABLE`。
   `canWrite` 里没有那个键就是不可写 —— 当成「可能可写」去猜是这类 bug 的标准形状。
   两份 facts 来源（`@dp/ssh` 与 `@dp/local`）的探测候选**必须一致**，否则同一份配置会
-  在远端推得出来、本机推不出来
+  在远端目标推得出来、本地目标推不出来
 - **docker**：compose 的每条 argv **只在 `compose.ts` 里写一次**，plan 与执行器各写一份 =
   计划说一套、真跑另一套。校验覆盖面按「值被拼进什么」数：进 argv 的都要过
   `@dp/template` 的 shell 档，项目名另过字符集（它成为容器名/网络名前缀）。

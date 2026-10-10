@@ -620,7 +620,7 @@ async function applyOne(
   let result: ApplyTargetResult
 
   try {
-    // ① 源清单先枚举：它只读本机文件系统，出问题时用户还没付任何代价
+    // ① 源清单先枚举：它只读本地文件系统，出问题时用户还没付任何代价
     const spec = normalizeSourceSpec(target.projectConfig.source.root, context.cwd)
     const rawEntries = await listSourceEntries(spec)
     if (rawEntries.length === 0) {
@@ -773,7 +773,7 @@ async function applyOne(
     // ⑤ 真执行。previousReleaseId **不填** —— deploy() 自己从索引里读，
     //    重复造一遍只会制造两个可能不一致的来源。
 
-    // 远端改走传输层，本机保持逐条 writeFile —— 见 makeTransferHook 的说明
+    // 远端改走传输层，本地保持逐条 writeFile —— 见 makeTransferHook 的说明
     const transferHook =
       target.hostConfig.local === true
         ? undefined

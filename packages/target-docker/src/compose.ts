@@ -137,7 +137,7 @@ export function assertMode(mode: DockerMode, path: string): void {
     path,
     hint:
       '本轮只实现 `remote-cli`（compose 文件随 release 上传、远端 docker compose up）。' +
-      '`build-push` / `build-load` / `image-only` 需要本机 docker 与镜像仓库，由后续回合补上；' +
+      '`build-push` / `build-load` / `image-only` 需要本地 docker 与镜像仓库，由后续回合补上；' +
       '在此之前报错而不是按 remote-cli 处理 —— 静默降级会让你以为镜像构建过了',
   })
 }
@@ -240,7 +240,7 @@ function base(resolved: ResolvedCompose): readonly string[] {
 /**
  * `docker compose ... pull` 的 argv。
  *
- * 刻意与 up 分成两条命令：浮动 tag（`:latest`）必须先落到本机缓存才能判断「这次部署拿到的
+ * 刻意与 up 分成两条命令：浮动 tag（`:latest`）必须先落到本地缓存才能判断「这次部署拿到的
  * 是哪个镜像」。合成一条的话，失败点是「容器没起」，而真正的原因可能是镜像没拉到 ——
  * 两者看的命令完全不同。
  *

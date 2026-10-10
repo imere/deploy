@@ -126,7 +126,7 @@ describe('zero-config · 目标类型', () => {
     assert.equal(projectOf('web', r.config).target, undefined)
   })
 
-  it('只造一个本机主机，项目指向它', () => {
+  it('只造一个本地主机，项目指向它', () => {
     const r = deriveZeroConfig(webInput({}))
     const hosts = r.config.hosts
     assert.ok(hosts !== undefined)
@@ -222,7 +222,7 @@ describe('zero-config · notes：自动不等于静默', () => {
 
   it('主机与环境各有一行，且说明不落盘', () => {
     const r = deriveZeroConfig(webInput({ profiles: ['prod'] }))
-    assert.ok(r.notes.some((n) => n.includes('local') && n.includes('本机')))
+    assert.ok(r.notes.some((n) => n.includes('local') && n.includes('本地')))
     assert.ok(r.notes.some((n) => n.includes('环境：prod')))
     assert.ok(r.notes.some((n) => n.includes('内存')))
   })

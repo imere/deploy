@@ -16,9 +16,9 @@ import { DpError, type Facts, type Layout, type Platform } from '@dp/ports'
 export interface TemplateContext {
   /** 项目名，替换模板里的 `<name>` */
   readonly name: string
-  /** 目标机 home 目录。取**目标机**的而不是本机的 —— 展开发生在目标机语境下 */
+  /** 目标机 home 目录。取**目标机**的而不是本地的 —— 展开发生在目标机语境下 */
   readonly homedir: string
-  /** 目标机的环境变量全集，不是本机的 */
+  /** 目标机的环境变量全集，不是本地的 */
   readonly env: Readonly<Record<string, string | undefined>>
 }
 
@@ -200,7 +200,7 @@ export function deriveLayout(facts: Facts): Layout {
 }
 
 // ------------------------------------------------------------
-// 跨平台路径校验（四条，本机即可查）
+// 跨平台路径校验（四条，都不需连目标机就能查）
 // ------------------------------------------------------------
 
 const WIN_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i

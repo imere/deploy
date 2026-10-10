@@ -339,7 +339,7 @@ export function parseToolPaths(stdout: string): Record<string, string | null> {
 /**
  * 远端 `stat` 的结果。**秒而不是毫秒**是远端的原生粒度（脚本直接用
  * `stat -c %Y`），换算成毫秒留在 Runner 里做 —— 在这里换会让读到这个类型的人
- * 以为它与本机 `FileStat` 已经同形，而两者其实差一个数量级。
+ * 以为它与本地 `FileStat` 已经同形，而两者其实差一个数量级。
  */
 export interface RemoteStat {
   /** 四选一。`'other'` 是显式的"认识但不是这三种"，不是解析失败 */

@@ -2,15 +2,15 @@
  * 传输方式协商 —— **纯函数，零 IO**。
  *
  * 判定一律看 `facts.tools.<name>`（不存在为 `null`），**绝不看平台**。
- * 原因在：能力必须实证。本机没有 rsync 不是错误而是常态
- * （本机 `facts.tools.rsync === null`），按平台猜会在这台机器上
+ * 原因在：能力必须实证。本地没有 rsync 不是错误而是常态
+ * （本地 `facts.tools.rsync === null`），按平台猜会在这台机器上
  * 直接给出错误的结论。
  *
  * 三条纪律：
  *
  *  1. **必须给出被拒绝的每一种及其原因**。只给结论等于没法排障 —— 用户会问
  *     "为什么这次没走 rsync"，而这个问题的答案就是 `rejected`。
- *  2. **降级必须留痕**。选了 tar-ssh 要能说清"因为本机没 rsync"，否则用户
+ *  2. **降级必须留痕**。选了 tar-ssh 要能说清"因为本地没 rsync"，否则用户
  *     只会看到"这次比上次慢"。
  *  3. **显式指定不可用就抛错，不静默降级**。用户写了 `rsync-ssh` 而我们偷偷
  *     换成 tar，那是在骗人；`DP.PREF.UNSUPPORTED` 的 message 逐项列清楚。
@@ -75,7 +75,7 @@ function evaluate(
         return { kind, ok: true, reason: '两端都检测到 rsync，可做真增量传输' }
       }
       const missing: string[] = []
-      if (localR === null) missing.push('本机')
+      if (localR === null) missing.push('本地')
       if (remoteR === null) missing.push('目标机')
       return {
         kind,
@@ -93,7 +93,7 @@ function evaluate(
           ok: true,
           reason:
             localR === null || remoteR === null
-              ? `两端都有 tar${localR === null ? '；本机没有 rsync' : ''}${remoteR === null ? '，目标机没有 rsync' : ''}，退到全量打包传输`
+              ? `两端都有 tar${localR === null ? '；本地没有 rsync' : ''}${remoteR === null ? '，目标机没有 rsync' : ''}，退到全量打包传输`
               : '两端都有 tar，可打包流式传输',
         }
       }
@@ -102,7 +102,7 @@ function evaluate(
         ok: false,
         reason:
           localTar === null
-            ? '本机没有 tar，无法构造归档流'
+            ? '本地没有 tar，无法构造归档流'
             : '目标机没有 tar，无法解包归档流',
       }
 
@@ -125,7 +125,7 @@ function evaluate(
         return {
           kind,
           ok: false,
-          reason: localScp === null ? '本机没有 scp 客户端' : '目标机没有 scp',
+          reason: localScp === null ? '本地没有 scp 客户端' : '目标机没有 scp',
         }
       }
       return {
@@ -171,7 +171,7 @@ export function chooseTransport(input: ChooseTransportInput): TransportChoice {
         `local 目标不支持传输方式 ${wanted.join(' / ')}`,
         {
           path: 'transport.preferred',
-          hint: 'local-copy 是本机目标唯一的方式：源与目标是同一个文件系统，不存在跨机传输。要跨机请把 host 配成远端',
+          hint: 'local-copy 是本地目标唯一的方式：源与目标是同一个文件系统，不存在跨机传输。要跨机请把 host 配成远端',
         },
       )
     }
@@ -218,7 +218,7 @@ function buildUnusableMessage(
 ): string {
   const lines = [
     input.kind === 'local'
-      ? '本机目标没有可用的传输方式'
+      ? '本地目标没有可用的传输方式'
       : `没有可用的传输方式。逐项结论（偏好链：${
           (input.preferred ?? DEFAULT_PREFERENCE).join(' > ')
         }）：`,
@@ -232,7 +232,7 @@ function buildSuggestion(input: ChooseTransportInput): string {
   const remoteMissing = (['rsync', 'tar', 'scp'] as const).filter((t) => tool(input.remote, t) === null)
   const out: string[] = []
   if (localMissing.length > 0) {
-    out.push(`本机装上其中之一即可恢复：${localMissing.join(' / ')}`)
+    out.push(`本地装上其中之一即可恢复：${localMissing.join(' / ')}`)
   }
   if (remoteMissing.length > 0) {
     out.push(`目标机装上其中之一即可恢复：${remoteMissing.join(' / ')}`)

@@ -1,7 +1,7 @@
 /**
- * tar-ssh —— 本机 tar 打包流经 ssh 送到远端 tar 解包。
+ * tar-ssh —— 本地 tar 打包流经 ssh 送到远端 tar 解包。
  *
- * 存在的理由：本机没 rsync 是**常态**（本仓
+ * 存在的理由：本地没 rsync 是**常态**（本仓
  * 明写 `facts.tools.rsync === null`），而 tar 两端几乎总有。所以它是 rsync 之后的
  * 主力退路，代价是全量传输。
  *
@@ -21,8 +21,8 @@ import type { RshOptions } from './rsh.js'
 /**
  * tar-ssh 两侧的构造输入。
  *
- * `become` 只作用于**远端解包端**：本机 tar 就在本机跑，给它套提权包装既没用，
- * 还会改变「本机到底执行了什么」这件事。放在这里而不是让两侧各从请求里读一次，
+ * `become` 只作用于**远端解包端**：本地 tar 就在本地跑，给它套提权包装既没用，
+ * 还会改变「本地到底执行了什么」这件事。放在这里而不是让两侧各从请求里读一次，
  * 是为了让「提权落在哪半边」只有一个地方说了算。
  */
 export interface TarArgvOptions {
@@ -36,12 +36,12 @@ export interface TarArgvOptions {
 /**
  * 两侧的 argv 必须**成对**返回，而不是两个各自独立的返回值。
  *
- * 成对而不是分开：任一半单独执行都不成立 —— 本机端产出的归档流
+ * 成对而不是分开：任一半单独执行都不成立 —— 本地端产出的归档流
  * 没人接，远端端的 stdin 没人喂。分开传就会出现「只起了一半」的调用，而这种调用
  * 不报错，只是默默挂着。
  */
 export interface TarArgvPair {
-  /** 本机打包端 */
+  /** 本地打包端 */
   readonly local: readonly string[]
   /** 远端解包端：ssh 的 argv + 提权包装后的 tar */
   readonly remote: readonly string[]
@@ -56,7 +56,7 @@ export interface TarArgvPair {
  *
  * @param req 传输声明。清单为空直接拒绝：空的归档流在两端都「成功」，
  *   而那会让「部署成功」变成一句无法证伪的话
- * @param options 本机 tar 路径、rsh、目标标识，以及远端解包的提权方式
+ * @param options 本地 tar 路径、rsh、目标标识，以及远端解包的提权方式
  * @returns 两侧 argv。`--` 之后才是文件清单，之后追加的任何东西都不会被当成选项
  * @throws DpError DP.SOURCE.EMPTY（清单为空）
  */
@@ -114,14 +114,14 @@ export interface RunTarSshOptions {
 /**
  * 起两个子进程并把 stdout 直连 stdin。
  *
- * 任一端失败都杀掉另一端 —— 远端 tar 挂了却让本机 tar 继续往管道写，
+ * 任一端失败都杀掉另一端 —— 远端 tar 挂了却让本地 tar 继续往管道写，
  * 结果是一个永远不消费的孤儿进程（Windows 上更明显，native.ts 注释里记过）。
  *
  * @param pair `buildTarArgv` 给出的两侧 argv
  * @param options 超时 / spawn 注入 / dryRun
  * @returns tar-ssh 路径的传输结果。`filesTransferred` 是**我们打包的条目数**，
  *   不是「对面收到了几个」—— 归档流没有回执，报成后者就是谎报
- * @throws DpError DP.VERIFY.FAILED（本机打包失败）、DP.SSH.CONNECT_FAILED（远端 255）、
+ * @throws DpError DP.VERIFY.FAILED（本地打包失败）、DP.SSH.CONNECT_FAILED（远端 255）、
  *   DP.SSH.TOOL_MISSING（远端 127，目标机没有 tar）、DP.PATH.NOT_WRITABLE（远端解包失败）
  */
 export async function runTarSsh(
@@ -133,7 +133,7 @@ export async function runTarSsh(
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     ...(options.spawnImpl !== undefined ? { spawnImpl: options.spawnImpl } : {}),
   }
-  // 两端并发跑：串行的话本机 tar 先产出一整个归档却没人接，管道会直接写满阻塞
+  // 两端并发跑：串行的话本地 tar 先产出一整个归档却没人接，管道会直接写满阻塞
   const [local, remote] = await Promise.all([
     runProcess(pair.local, { ...common, label: 'tar(local)' }),
     runProcess(pair.remote, { ...common, label: 'ssh(tar remote)' }),
@@ -143,7 +143,7 @@ export async function runTarSsh(
   const remoteDetail = summarizeFailure(remote.stderr)
 
   if (local.code !== 0) {
-    throw new DpError('DP.VERIFY.FAILED', `本机打包失败（tar ${local.code}）：${localDetail}`, {
+    throw new DpError('DP.VERIFY.FAILED', `本地打包失败（tar ${local.code}）：${localDetail}`, {
       hint: '确认源文件在传输过程中没被删掉；或用 --dry-run 先看清单',
     })
   }

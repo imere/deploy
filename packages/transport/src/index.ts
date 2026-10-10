@@ -62,9 +62,9 @@ const DEFAULT_KNOWN_HOSTS: KnownHostsMode = 'strict'
  * 换掉的话报告里显示的传输方式与机器上发生的事就不一致了。
  *
  * @param req 一次传输的声明，不含「用哪种方式」——那由两端 Facts 决定
- * @param deps 依赖与偏好。本机目标需注入 localRunner；远端需给 remoteFacts
+ * @param deps 依赖与偏好。本地目标需注入 localRunner；远端需给 remoteFacts
  * @returns 传输结果，`command` 为实际执行的 argv，供日志与报告使用
- * @throws DpError DP.CONFIG.INVALID（缺 Facts / 缺 localRunner / 本机没有 ssh）、
+ * @throws DpError DP.CONFIG.INVALID（缺 Facts / 缺 localRunner / 本地没有 ssh）、
  *   DP.SSH.TOOL_MISSING、DP.PREF.UNSUPPORTED（偏好不可用，或选到尚未接入执行的 sftp）
  */
 export async function transfer(
@@ -80,7 +80,7 @@ export async function transfer(
   const log = logger.child({ host: req.host ?? (req.kind === 'local' ? 'local' : 'unknown') })
   const started = (deps.now ?? (() => new Date()))()
 
-  // 本机两端口是同一份事实 —— 传两份不同的会凭空造出"两端工具不一致"的假象
+  // 本地两端口是同一份事实 —— 传两份不同的会凭空造出"两端工具不一致"的假象
   const remoteFacts = deps.remoteFacts ?? deps.localFacts
   if (req.kind === 'remote' && deps.remoteFacts === undefined) {
     throw new DpError('DP.CONFIG.INVALID', '远程传输需要 remoteFacts', {
@@ -125,7 +125,7 @@ async function runLocal(
 ): Promise<TransferResult> {
   if (deps.localRunner === undefined) {
     throw new DpError('DP.CONFIG.INVALID', 'local 传输需要注入 localRunner', {
-      hint: '本包不依赖 @dp/local：调用方用 createLocalRunner(facts) 建好 Runner 传进来，本机只有一个真相来源',
+      hint: '本包不依赖 @dp/local：调用方用 createLocalRunner(facts) 建好 Runner 传进来，本地只有一个真相来源',
     })
   }
   log.info('transfer.local', { entries: req.entries.length, remoteRoot: req.remoteRoot })
@@ -146,7 +146,7 @@ async function runRemote(
   }
   const sshPath = localFacts.tools.ssh ?? null
   if (sshPath === null) {
-    throw new DpError('DP.SSH.TOOL_MISSING', '本机没有 ssh，远程传输无法进行', {
+    throw new DpError('DP.SSH.TOOL_MISSING', '本地没有 ssh，远程传输无法进行', {
       hint: '本包走系统 ssh 作为 rsync 的 remote-shell。装 OpenSSH，或在 ssh2 驱动上走 dp-rsh 助手',
     })
   }
@@ -176,7 +176,7 @@ async function runRemote(
     case 'rsync-ssh': {
       const rsyncPath = localFacts.tools.rsync ?? null
       if (rsyncPath === null) {
-        throw new DpError('DP.SSH.TOOL_MISSING', '本机没有 rsync（协商结论已过期）', {
+        throw new DpError('DP.SSH.TOOL_MISSING', '本地没有 rsync（协商结论已过期）', {
           hint: '重新探测 Facts 后再协商；不要在这里偷偷换成 tar —— 那会让 plan 与实际执行不一致',
         })
       }
@@ -190,7 +190,7 @@ async function runRemote(
     case 'tar-ssh': {
       const tarPath = localFacts.tools.tar ?? null
       if (tarPath === null) {
-        throw new DpError('DP.SSH.TOOL_MISSING', '本机没有 tar（协商结论已过期）', {
+        throw new DpError('DP.SSH.TOOL_MISSING', '本地没有 tar（协商结论已过期）', {
           hint: '重新探测 Facts 后再协商',
         })
       }
@@ -210,7 +210,7 @@ async function runRemote(
     case 'scp': {
       const scpPath = localFacts.tools.scp ?? null
       if (scpPath === null) {
-        throw new DpError('DP.SSH.TOOL_MISSING', '本机没有 scp（协商结论已过期）', {
+        throw new DpError('DP.SSH.TOOL_MISSING', '本地没有 scp（协商结论已过期）', {
           hint: '重新探测 Facts 后再协商',
         })
       }

@@ -2,7 +2,7 @@
  * docker 目标的配置形状。
  *
  * 本轮只覆盖 的**默认模式 `remote-cli`**：compose 文件随 release 上传，
- * 然后在远端跑 `docker compose`。另外两种（build-load / registry）要本机 docker，
+ * 然后在远端跑 `docker compose`。另外两种（build-load / registry）要本地 docker，
  * 依赖与失败模型完全不同，另开回合再长。
  *
  * `mode` 存在是为了将来扩展，但**非 `remote-cli` 必须显式报错** —— 静默降级会让

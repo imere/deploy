@@ -29,7 +29,7 @@ export type TransportPreference = readonly TransportKind[]
 export interface TransferRequest {
   /** 目标是不是另一台机器。决定要不要跑协商、能不能走 ssh 那几条路 */
   readonly kind: 'local' | 'remote'
-  /** 本机源根（绝对路径） */
+  /** 本地源根（绝对路径） */
   readonly localRoot: string
   /** 相对路径清单（'/' 分隔，相对 localRoot） */
   readonly entries: readonly string[]
@@ -102,15 +102,15 @@ export interface TransportChoice {
 /**
  * 协商的输入。
  *
- * 两端 Facts 即使本机目标也必填：那样 `local` 与 `remote` 是同一个对象，
- * 协商代码里就不需要「本机算不算另一端」这类分支，也不会出现两份事实打架。
+ * 两端 Facts 即使本地目标也必填：那样 `local` 与 `remote` 是同一个对象，
+ * 协商代码里就不需要「本地算不算另一端」这类分支，也不会出现两份事实打架。
  */
 export interface ChooseTransportInput {
-  /** 本机事实 */
+  /** 本地事实 */
   readonly local: Facts
   /** 远端探测结果。`kind: 'local'` 时与 local 同一份 */
   readonly remote: Facts
-  /** 本机目标时忽略 preferred 并直接定 local-copy */
+  /** 本地目标时忽略 preferred 并直接定 local-copy */
   readonly kind: 'local' | 'remote'
   /** 显式偏好链，顺序即优先级。给了就只按它选，一个都不成立就抛错 */
   readonly preferred?: TransportPreference
@@ -186,7 +186,7 @@ export type SpawnImpl = (
  * 的选择（spawn 用系统的、logger 用默认构造、now 用真实时钟）。
  */
 export interface TransportDeps {
-  /** 本机事实。协商的输入之一 */
+  /** 本地事实。协商的输入之一 */
   readonly localFacts?: Facts
   /** 远端事实。`kind: 'remote'` 时必填；`local` 时留空即复用 localFacts */
   readonly remoteFacts?: Facts
@@ -201,7 +201,7 @@ export interface TransportDeps {
    *
    * **必须由调用方注入**：本包零依赖 @dp/local（依赖只有 ports/log/ssh/core），
    * 而且 CLI 手里已经有 `createLocalRunner()` 建好的 Runner —— 传进来比本包
-   * 自己去 new 一个更对：只有一个本机真相来源。
+   * 自己去 new 一个更对：只有一个本地真相来源。
    */
   readonly localRunner?: Runner
   /** 覆盖默认 timeout（测试用；不传走各自文件的默认值） */

@@ -1,7 +1,7 @@
 /**
  * apply 走 @dp/transport 的测试 —— **注入的传输实现**。
  *
- * 为什么必须注入而不是真跑：本机没有 rsync（实测过的事实），而且真跑
+ * 为什么必须注入而不是真跑：执行环境未必装了 rsync，而且真跑
  * 意味着真连目标机。注入之后这些测试全程离线，却仍然覆盖真实的装配路径 ——
  * TransferRequest 的字段、协商结论、staging 目录、失败回滚、dry-run 零调用。
  */
@@ -312,11 +312,11 @@ describe('apply · 远端走 transport', () => {
     })
   })
 
-  it('本机主机不经过传输层（保持逐条 writeFile）', async () => {
+  it('本地主机不经过传输层（保持逐条 writeFile）', async () => {
     await withWorkspace(async (dir) => {
       const h = makeHarness()
       const r = await run(dir, ['--json', '--host', 'local'], h.deps)
-      assert.equal(h.calls.count, 0, '本机目标没有「跨机传输」这回事，不许绕 transport')
+      assert.equal(h.calls.count, 0, '本地目标没有「跨机传输」这回事，不许绕 transport')
       // 仍然要真部署成功
       assert.equal(JSON.parse(r.stdout).ok, true, `stderr: ${r.stderr}`)
     })
@@ -336,13 +336,13 @@ describe('apply · 远端走 transport', () => {
     })
   })
 
-  it('显式偏好 rsync 但本机没装 → 装配期报 DP.PREF.UNSUPPORTED，不起传输', async () => {
+  it('显式偏好 rsync 但本地没装 → 装配期报 DP.PREF.UNSUPPORTED，不起传输', async () => {
     const config = {
       hosts: { prod: { ssh: 'deployer@10.0.0.5:2222', transport: { strategy: ['rsync'] } } },
       projects: { web: { source: { root: './dist' }, release: { root: '/srv/app' } } },
     }
     await withWorkspace(async (dir) => {
-      // 显式点名 rsync，本机没装就必须**当场报错**，不静默降级成别的方式
+      // 显式点名 rsync，本地没装就必须**当场报错**，不静默降级成别的方式
       const h = makeHarness()
       const noRsync: ApplyDeps = {
         ...h.deps,

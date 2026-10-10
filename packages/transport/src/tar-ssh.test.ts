@@ -1,8 +1,8 @@
 /**
  * tar-ssh 的两侧 argv 与执行。
  *
- * 核心断言：两侧都是**独立 argv**，没有 shell 管道字符；本机侧 `-C <root> -- <entries>`，
- * 远端侧 `-C <remoteRoot>`。提权只包装远端的 tar，不包装本机的。
+ * 核心断言：两侧都是**独立 argv**，没有 shell 管道字符；本地侧 `-C <root> -- <entries>`，
+ * 远端侧 `-C <remoteRoot>`。提权只包装远端的 tar，不包装本地的。
  */
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
@@ -26,7 +26,7 @@ const opts = {
 }
 
 describe('buildTarArgv', () => {
-  test('本机侧：tar -cf - -C <root> -- <entries...>', () => {
+  test('本地侧：tar -cf - -C <root> -- <entries...>', () => {
     const { local } = buildTarArgv(req, opts)
     assert.equal(local[0], '/usr/bin/tar')
     assert.equal(local[local.indexOf('-cf') + 1], '-')
@@ -63,7 +63,7 @@ describe('buildTarArgv', () => {
     }
   })
 
-  test('become 只包装远端 tar，本机 tar 不受影响', () => {
+  test('become 只包装远端 tar，本地 tar 不受影响', () => {
     const { local, remote } = buildTarArgv(req, { ...opts, become: { type: 'sudo', user: 'root' } })
     assert.ok(remote.includes('sudo'))
     assert.ok(remote.includes('-n'), '提权必须 -n，永不交互')
@@ -118,7 +118,7 @@ describe('runTarSsh', () => {
     assert.equal(fake.records[1]!.file, '/usr/bin/ssh')
   })
 
-  test('本机 tar 失败 → DP.VERIFY.FAILED', async () => {
+  test('本地 tar 失败 → DP.VERIFY.FAILED', async () => {
     const { impl } = pairWithExits(2, 0)
     await assert.rejects(
       () => runTarSsh(buildTarArgv(req, opts), { spawnImpl: impl, timeoutMs: 5000 }),

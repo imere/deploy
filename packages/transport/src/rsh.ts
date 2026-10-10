@@ -68,7 +68,7 @@ export const DEFAULT_CONNECT_TIMEOUT_SEC = 15
  * 多一个含空白的值就会在目标机上静默连错，且不报错。
  */
 export interface RshOptions {
-  /** 本机 ssh 可执行文件的绝对路径（来自 facts.tools.ssh） */
+  /** 本地 ssh 可执行文件的绝对路径（来自 facts.tools.ssh） */
   readonly sshPath: string
   /**
    * 认证方式。key/agent 才会带 `BatchMode=yes` —— 密码类不能带，

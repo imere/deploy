@@ -57,7 +57,7 @@ describe('buildRsyncArgv', () => {
     assert.equal(target, "dp-user@dp-target:'/srv/my app/'")
   })
 
-  test('本机源是 root/entry 形式', () => {
+  test('本地源是 root/entry 形式', () => {
     const argv = buildRsyncArgv(req, opts)
     assert.ok(argv.includes('/work/dist/index.html'))
     assert.ok(argv.includes('/work/dist/assets/app.js'))
@@ -242,7 +242,7 @@ describe('runRsync · fake spawn 驱动', () => {
 })
 
 describe('真机集成（默认跳过）', () => {
-  describe('rsync over ssh 真实传输', { skip: '需要真实 rsync/scp 与目标机；本机 facts.tools.rsync === null' }, () => {
+  describe('rsync over ssh 真实传输', { skip: '需要真实 rsync/scp 与目标机；本地 facts.tools.rsync === null' }, () => {
     test('增量传输生效', () => {
       assert.fail('需要 dp-spike-env 起靶机后手工启用')
     })

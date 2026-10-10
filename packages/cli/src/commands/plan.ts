@@ -32,7 +32,7 @@ export async function runPlan(context: RunContext, flags: ResolvedFlags): Promis
     const logger: Logger | undefined = context.logger.child({ host: target.host })
     const releaseId = previewReleaseId(target.project, started)
 
-    // 源清单先枚举：它只读本机文件系统，出问题时用户还没付任何代价
+    // 源清单先枚举：它只读本地文件系统，出问题时用户还没付任何代价
     const spec = normalizeSourceSpec(target.projectConfig.source.root, context.cwd)
     const entries = await listSourceEntries(spec)
     if (entries.length === 0) {

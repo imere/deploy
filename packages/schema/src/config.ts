@@ -178,7 +178,7 @@ export const hopSchema = constrained(
 )
 
 /**
- * 一台目标机。连接方式三选一：ssh（单跳）/ hops（多跳）/ local（本机）。
+ * 一台目标机。连接方式三选一：ssh（单跳）/ hops（多跳）/ local（本地）。
  *
  * 为什么不提供「都写」的合并语义：两条连接路径同时存在时，没有任何规则能说清
  * 该走哪条，而走错的后果是部署到了另一台机器上 —— 报错比连错便宜得多。
@@ -191,7 +191,7 @@ export const hostSchema = constrained(
     {
       ssh: opt(str('user@host[:port]')),
       hops: opt(arr(hopSchema, '多跳跳板链，从第一跳到最终目标依次排列')),
-      local: opt(bool('本机目标')),
+      local: opt(bool('本地目标')),
       become: opt(becomeSchema),
       layout: withDefault(
         oneOf(['auto', 'system', 'user'] as const),

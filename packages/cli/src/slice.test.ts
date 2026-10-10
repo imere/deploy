@@ -1,5 +1,5 @@
 /**
- * 纵向切片：配置 → plan → 真实本机部署。
+ * 纵向切片：配置 → plan → 真实本地部署。
  *
  * 前面各包的测试都只验自己这一层；这一份验的是**它们接起来还对不对**：
  * core 推导出的 releaseRoot，target-static 能不能真的用起来；
@@ -9,7 +9,7 @@
  *
  * 为什么放在 cli 而不是 core：这一份要同时用到 core 的推导、target-static 的执行、
  * local 的真实磁盘 —— 只有最上层同时依赖这三个包。放在 core 里等于让一个「零 IO
- * 纯编排」的包在自己的测试里做真实部署，而且那两个反向引用只有在本机靠 junction
+ * 纯编排」的包在自己的测试里做真实部署，而且那两个反向引用只有在靠 junction 的环境下
  * 把 workspace 包全链进根 node_modules 时才解析得到；pnpm 的 isolated 布局
  * （Linux runner 上就是这个）只链接声明过的依赖，于是 tsc 直接报 TS2307。
  */

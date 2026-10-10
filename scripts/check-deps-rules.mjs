@@ -2,12 +2,12 @@
  * 跨包依赖声明的判据。
  *
  * 为什么要有这一门：`packages/<pkg>/src` 里写了 `import ... from '@dp/x'`，
- * 而 `packages/<pkg>/package.json` 没声明 `@dp/x`，在本机不会有任何症状 ——
+ * 而 `packages/<pkg>/package.json` 没声明 `@dp/x`，在本地不会有任何症状 ——
  * postinstall 的 `link-workspace.mjs` 会用 junction 把 workspace 包全链进根
  * `node_modules/@dp/`，于是解析得到；到了 pnpm 的 isolated 布局（Linux runner
  * 就是它）只链接声明过的依赖，tsc 直接 TS2307，CI 才第一次红。
  *
- * 这类「本机绿、CI 红」的代价特别高：它不在本地任何一道门禁的视野里，
+ * 这类「本地绿、CI 红」的代价特别高：它不在本地任何一道门禁的视野里，
  * 只能等推送之后由 runner 发现。所以判据只做一件事 —— 逐个包比对
  * 「源码里 import 了哪些 @dp/*」与「package.json 声明了哪些」。
  */

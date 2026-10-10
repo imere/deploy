@@ -13,7 +13,7 @@
  * 为什么排在 native-ssh 之后（实测，最硬的约束）：
  *   传入 `mlkem768x25519-sha256` → ssh2 直接抛 `Unsupported algorithm`，
  *   且它的 SUPPORTED_KEX 列表里**没有任何** PQ 算法。所以「抗量子」这条路
- *   ssh2 走不通，只能靠系统 ssh（实测本机 OpenSSH 10.3 默认
+ *   ssh2 走不通，只能靠系统 ssh（实测本地 OpenSSH 10.3 默认
  *   就协商出 mlkem768x25519-sha256）。若 `crypto.kexPolicy: pq-required`，
  *   这条驱动**根本不该被选中**。
  *

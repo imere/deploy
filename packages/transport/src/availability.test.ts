@@ -37,10 +37,10 @@ describe('chooseTransport · remote 缺省链', () => {
     assert.match(choice.reasons[0]!, /两端都检测到 rsync/)
   })
 
-  test('本机没 rsync 但两端有 tar → tar-ssh，且理由要指名本机缺 rsync', () => {
+  test('本地没 rsync 但两端有 tar → tar-ssh，且理由要指名本地缺 rsync', () => {
     const choice = chooseTransport({ local: LOCAL_NO_RSYNC, remote: REMOTE_TAR_ONLY, kind: 'remote' })
     assert.equal(choice.kind, 'tar-ssh')
-    assert.match(choice.reasons[0]!, /本机没有 rsync/)
+    assert.match(choice.reasons[0]!, /本地没有 rsync/)
   })
 
   test('两端都没 rsync 也没 tar，但 sftp 可用 → sftp', () => {
@@ -58,7 +58,7 @@ describe('chooseTransport · rejected 必须逐项给出原因', () => {
     assert.ok(rsync, 'rsync-ssh 必须出现在 rejected 里')
     // 关键：说清"目标机缺"，而不是含糊的"缺 rsync"
     assert.match(rsync.reason, /目标机未检测到 rsync/)
-    assert.doesNotMatch(rsync.reason, /本机未检测到 rsync/)
+    assert.doesNotMatch(rsync.reason, /本地未检测到 rsync/)
   })
 
   test('两端都有 rsync 时，tar-ssh 仍在 rejected 里并说明为什么没选它', () => {
@@ -84,24 +84,24 @@ describe('chooseTransport · rejected 必须逐项给出原因', () => {
     assert.match(scp.reason, /sftp 可用/)
   })
 
-  test('sftp 禁用但本机没 scp → scp 被拒，且说清是哪一端', () => {
+  test('sftp 禁用但本地没 scp → scp 被拒，且说清是哪一端', () => {
     const noScp = makeFacts({ host: 'l', tools: { ssh: '/usr/bin/ssh', tar: '/usr/bin/tar' } })
     const choice = chooseTransport({ local: noScp, remote: REMOTE_TAR_ONLY, kind: 'remote', sftpAvailable: false })
     const scp = choice.rejected.find((r) => r.kind === 'scp')
     assert.ok(scp)
-    assert.match(scp.reason, /本机没有 scp/)
+    assert.match(scp.reason, /本地没有 scp/)
   })
 })
 
 describe('chooseTransport · 显式偏好不可用就抛错', () => {
-  test('点名 rsync-ssh 而本机没 rsync → DP.PREF.UNSUPPORTED，message 逐项列出', () => {
+  test('点名 rsync-ssh 而本地没 rsync → DP.PREF.UNSUPPORTED，message 逐项列出', () => {
     assert.throws(
       () => chooseTransport({ local: LOCAL_NO_RSYNC, remote: REMOTE_WITH_RSYNC, kind: 'remote', preferred: ['rsync-ssh'] }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
         assert.equal(err.code, 'DP.PREF.UNSUPPORTED')
         // 逐项：不能只说"不支持"
-        assert.match(err.message, /本机未检测到 rsync/)
+        assert.match(err.message, /本地未检测到 rsync/)
         assert.ok(err.hint !== undefined && err.hint.length > 0, '必须有可执行建议')
         return true
       },
