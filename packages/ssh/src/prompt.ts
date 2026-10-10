@@ -1,16 +1,4 @@
-/**
- * 交互式 prompt 嗅探 —— **纯函数，零 IO**。
- *
- * 为什么要在运行时嗅探：`sudo` 的措辞、`su` 的措辞、`ssh` 的确认提示，
- * 各发行版/各语言都不同，穷举不完（local/src/exec.ts 也留了同样的口子）。
- * 与其穷举，不如**认出一个就立刻失败** —— 挂起等人类输入是比失败恶劣得多的
- * 行为，在 CI 里表现为永久挂起（铁律 0）。
- *
- * 难点是**别误伤**：远端日志里出现 `password` 这个词是极常见的
- * （`nginx: password file updated`、`sshd: PasswordAuthentication changed`）。
- * 所以所有模式都**行锚定**且要求提示符出现在行尾或冒号后 —— 只有
- * `Password:` 这种「一行里只有提示符」的形态才算命中。
- */
+/** 交互式 prompt 的种类 —— 每一种都对应一条「拒绝交互」的处置方式。 */
 export type PromptKind =
   | 'password'
   | 'passphrase'
@@ -22,16 +10,13 @@ export type PromptKind =
   | 'doas-password'
 
 /**
- * 一条提示符模式。`kind` 决定给出的建议，**必须**是一个已知的 kind：
- * 认不出的 kind 会让上层给不出建议，于是这条提示符变成一句没用的报错。
+ * 一条提示符模式。`kind` 决定给出的建议，**必须**是一个已知的 kind：认不出的 kind 会让上层给不出建议，于是这条提示符变成一句没用的报错。
  */
 export interface PromptPattern {
   /** 提示符的类别。查 `HINT_BY_KIND` 取对应建议 */
   readonly kind: PromptKind
   /**
-   * 模式本身。**必须行锚定且不含 `g`/`y` 标志** ——
-   * 不带 `m` 的 `^` 锚在整段字符串开头，跨行日志里一条都没命中；
-   * 带 `y` 的话 `/` 与 `'` 这类常见字符会漏掉整行的匹配。
+   * 模式本身。**必须行锚定且不含 `g`/`y` 标志** ——不带 `m` 的 `^` 锚在整段字符串开头，跨行日志里一条都没命中；带 `y` 的话 `/` 与 `'` 这类常见字符会漏掉整行的匹配。
    */
   readonly re: RegExp
 }
@@ -52,7 +37,6 @@ export const PROMPT_PATTERNS: readonly PromptPattern[] = [
   // 首次连接的主机指纹确认。OpenSSH 至少有三种措辞。
   { kind: 'host-key-confirm', re: /Are you sure you want to continue connecting[^\n]*/i },
   // 泛化形态：**必须以问号结尾**。少了这个约束，`y/n is not a question here`
-  // 这种普通日志会被误判成提示符 —— 宁可漏判也不误杀。
   { kind: 'host-key-confirm', re: /^[ \t]*(?:Are you sure|Do you want to continue)[^\n]*\?[ \t]*$/i },
   // 独立的 `(y/n)` / `[Y/n]` 一行
   { kind: 'host-key-confirm', re: /^[ \t]*[[(]?[Yy]\/[Nn][\])]?[ \t]*\??[ \t]*$/ },
@@ -67,15 +51,13 @@ export const PROMPT_PATTERNS: readonly PromptPattern[] = [
   // 双重认证 / 硬件密钥
   { kind: 'pin', re: /^[ \t]*(?:Enter[ \t]+)?PIN[ \t]*:[ \t]*$/ },
   // `Enter PIN for 'My Token':` / `Enter PIN for 'PIV Card':` —— 只认裸 `PIN:` 会漏掉
-  // 这种带对象的写法，漏判的后果是挂在那里等人类输入（铁律 0）
   { kind: 'pin', re: /^[ \t]*Enter[ \t]+PIN[ \t]+for[^\n]*:[ \t]*$/i },
   { kind: 'pin', re: /^[ \t]*Verification[ \t]+code:[ \t]*$/i },
   { kind: 'otp', re: /^[ \t]*(?:One-time|OTP)[ \t]*code[^\n]*:[ \t]*$/i },
 ]
 
 /**
- * 一次命中。`line` 会进错误 message，所以它必须是被截断过的原文 ——
- * 提示符行本身很短，而远端同一批输出里可能还有别的东西不该出现在报告里。
+ * 一次命中。`line` 会进错误 message，所以它必须是被截断过的原文 ——提示符行本身很短，而远端同一批输出里可能还有别的东西不该出现在报告里。
  */
 export interface PromptMatch {
   /** 命中的类别，决定给出哪条建议 */
@@ -87,18 +69,14 @@ export interface PromptMatch {
 }
 
 /**
- * 在一段输出里找 prompt。
- *
- * `extra` 允许调用方追加本地特有的模式（比如某个发行版的 su）。
- * 返回第一个命中（按模式表顺序，不是按出现位置）—— 提示符形态都很独特，
- * 位置顺序没有诊断价值。
+ * 命中即说明对端在等输入，调用方据此终止而不是继续等
  *
  * @param text 已收到的输出。空串直接返回 undefined 而不进循环 ——
- *   「没有输出」是绝大多数正常执行的形态，不该为它付出逐行扫描的代价
+ * 「没有输出」是绝大多数正常执行的形态，不该为它付出逐行扫描的代价
  * @param extra 调用方追加的模式。**排在内置表之后**：同一段文本先按内置判，
- *   这样本地定制只能补盲区，不能把内置的结论改掉
+ * 这样本地定制只能补盲区，不能把内置的结论改掉
  * @returns 第一个命中；没有任何模式匹配时返回 `undefined`
- *   （**不是**"未检查"—— 没命中与没检查在这条链上等价：都是没有等待输入就失败了）
+ * （**不是**"未检查"—— 没命中与没检查在这条链上等价：都是没有等待输入就失败了）
  */
 export function detectPrompt(text: string, extra: readonly PromptPattern[] = []): PromptMatch | undefined {
   if (text === '') return undefined
@@ -130,13 +108,9 @@ const HINT_BY_KIND: Readonly<Record<PromptKind, string>> = {
 /**
  * 提示符类别 → 用户该做什么。
  *
- * 建议的落点统一是"换一种不需要输入的认证方式"或"在目标机上配免密"，
- * **没有一条建议是"请输入密码"** —— 给出的操作如果不是无交互的，
- * 执行它的人只会把一次失败变成一次挂起。
- *
  * @param kind {@link detectPrompt} 报出的类别
  * @returns 一句话建议。类别不在表里时返回 `undefined`（`Record` 不做兜底），
- *   调用方必须处理这个 case：静默给 `undefined` 的 hint 会让错误消息里少一整段指引
+ * 调用方必须处理这个 case：静默给 `undefined` 的 hint 会让错误消息里少一整段指引
  */
 export function promptHint(kind: PromptKind): string {
   return HINT_BY_KIND[kind]

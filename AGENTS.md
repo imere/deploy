@@ -44,6 +44,7 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：它依赖的 esbuild 平台�
 ```
 packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / target-docker / cli 均已接线）
 openspec/        行为契约（source of truth）：specs/<capability>/spec.md
+docs/           只留两份参考：config.md（配置字段）、decisions.md（决策与理由）
 .agents/skills/ 可复用流程（与本项目无关，可整体搬到别处）：
                  subagent-dispatch（派活与验收）
                  mutation-verify（变异验证闭环）
@@ -58,9 +59,9 @@ build/          覆盖率产物所在根目录（已 gitignore）
 大块实现交给子代理，但**派发与验收都在这里**。方法见 `.agents/skills/subagent-dispatch/SKILL.md`。三条不能省：
 
 1. **必读清单写进 prompt 第一节**，并强制先读：`AGENTS.md` + `packages/ports/src/index.ts`（Runner 只有 `exec(argv[])`）
-   + 同层参照实现（写 ssh 就看 `local/src/{exec,probe,runner}.ts`）+ 对应设计文档（`spikes.md` 是**实测硬约束**）。
+   + 同层参照实现（写 ssh 就看 `local/src/{exec,probe,runner}.ts`）+ 对应契约 `openspec/specs/<capability>/spec.md`。
    不给清单 → 它瞎猜，还会把读过的东西复述一遍烧你的 token。
-2. **边界写死**：不许跑 git、不许改 `docs/`、不许加依赖；改 `ports/src/index.ts` 只能末尾追加。
+2. **边界写死**：不许跑 git、不许改 `openspec/` 与 `docs/`、不许加依赖；改 `ports/src/index.ts` 只能末尾追加。
    源码只许修**被测试暴露的真 bug**，且不许为过测而放宽断言。
 3. **验收自己来做**：`tsc -b` + 全量 `node --test` + 一份独立验收脚本断言行为（不采信它的测试）
    + grep 禁项（`console.log` / `execShell` / 纯包里的 `node:fs`）+ grep 私有环境。
@@ -68,14 +69,13 @@ build/          覆盖率产物所在根目录（已 gitignore）
 ## 写作纪律（文档与注释）
 
 - **注释只解释「为什么这么定 / 不这么定会怎样」**，不复述代码在做什么。复述型注释是噪声，见到就删。
-- **不引用文档章节**：注释、`hint`、schema 的 description（用户看得见的那几处）里都不写
-  「见 docs/x.md §N」「与 x.md §N 逐字符一致」这类指向章节号的引用。**章节号会漂移** ——
+- **不引用章节号**：注释、`hint`、schema 的 description（用户看得见的那几处）里都不写
+  「见 openspec/x/spec.md §N」「与某节逐字符一致」这类指向章节号的引用。**章节号会漂移** ——
   实测撞过一次：文档写 `target.pick: highest | first`，schema 实际是 `auto | fail`。
   而且读代码的人手边没有文档，写了等于没写。依据要么**就地把事实写清楚**，要么指向代码
-  （`@dp/template` 的 `KNOWN_VARS`、`canElevate()` 之类）；代码里连文档名都不要出现，
-  `spikes.md S5 实测 …` 只留「实测 …」。文档之间的指路不算这条（那是导航，不是依据）。
-- **不写私有环境**：开发机绝对路径、代理端口、token、用户名一律不进文档与注释，用占位符或参数化写法。
-  （容器靶机地址 `127.0.0.1:2222` / `dpuser` 是可复现的实验环境，不算。）
+  （`@dp/template` 的 `KNOWN_VARS`、`canElevate()` 之类）；代码里连 spec 名都不要出现，
+  「S5 实测 …」只留「实测 …」。
+- **不写私有环境**：绝对路径、代理端口、token、用户名一律不进文档与注释，用占位符或参数化写法。
 - **不注水**：文档按"改代码顺手改对应文档"维护，不新增说明性 markdown；套话式的"总结"不写。
 - 子代理产出物尤其要过这两条 —— 它天生爱写复述型注释，也会把开发机环境写进去。
 

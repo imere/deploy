@@ -1,18 +1,9 @@
-/**
- * 目标选择 —— **纯函数**，歧义靠拒绝。
- *
- * 为什么单独一个文件：`plan` / `facts` 两个命令都要「从配置 + 开关」算出
- * 「这次要处理哪些 (project, host)」。这段逻辑一旦和 IO 混在一起，就只能靠
- * 起子进程来测；而「多个候选却没指定」是最容易写错也最值得反复断言的一处。
- */
 import { DpError } from '@dp/ports'
 import type { Config, HostConfig, ProjectConfig } from '@dp/schema'
 import { CliUsageError } from './args.js'
 
 /**
- * 选择目标所需的全部输入。**只有配置与开关**，没有 IO：
- * 这个文件一旦开始 stat 主机是否可达，「多个候选却没指定」这条最容易写错的
- * 分支就只能在起子进程的前提下测了。
+ * 选择目标所需的全部输入。**只有配置与开关**，没有 IO：这个文件一旦开始 stat 主机是否可达，「多个候选却没指定」这条最容易写错的分支就只能在起子进程的前提下测了。
  */
 export interface TargetSelectionInput {
   readonly config: Config
@@ -27,18 +18,13 @@ export interface TargetSelectionInput {
 }
 
 /**
- * 一个要处理的 (项目, 主机) 组合。**已选好、已合并环境覆盖**，
- * 下游不必再查 `config.hosts[host]` 也不必再套 profile ——
- * 覆盖顺序（defaults < hosts < profiles）只有这一处知道。
+ * 一个要处理的 (项目, 主机) 组合。**已选好、已合并环境覆盖**，下游不必再查 `config.hosts[host]` 也不必再套 profile ——覆盖顺序（defaults < hosts < profiles）只有这一处知道。
  */
 export interface SelectedTarget {
   readonly project: string
   readonly host: string
   /**
-   * 注意类型：configSchema 的 `record(projectSchema)` 推出来的元素类型是**输入**
-   * 形态（`keep?: number | undefined`），而 makePlan 要的是**归一化后**的形态
-   * （`keep: number`）。configSchema.parse 已经把默认值填上了，所以这里断言成
-   * ProjectConfig 是安全的 —— 断言放在唯一的取用点上，而不是散进各命令。
+   * 注意类型：configSchema 的 `record(projectSchema)` 推出来的元素类型是**输入**形态（`keep?: number | undefined`），而 makePlan 要的是**归一化后**的形态（`keep: number`）。configSchema.parse 已经把默认值填上了，所以这里断言成ProjectConfig 是安全的 —— 断言放在唯一的取用点上，而不是散进各命令。
    */
   readonly projectConfig: ProjectConfig
   readonly hostConfig: HostConfig
@@ -68,15 +54,9 @@ function resolveHostConfig(config: Config, host: string, env?: string): HostConf
 /**
  * 算出这次要处理的目标列表。
  *
- * 拒绝歧义的具体规则（铁律 2）：
- *  - 没给 `--project` 且配置里有多个项目 → 报错并列出全部名字
- *  - 没给 `--host` 且候选主机多于一个 → 报错并列出全部名字
- *  - `--all` 与 `--host` 同时给 → 报错（一个要全部一个要一个，意图冲突）
- *  - 只有一个候选时**不**追问，直接用它 —— 这不是歧义
- *
  * @param input 配置 + 四个选择类开关
  * @returns 展开后的 (项目, 主机) 列表；主机来自 `projects.<name>.hosts`
- *   声明时按声明顺序，否则按可用主机全取（`--all`）或报错
+ * 声明时按声明顺序，否则按可用主机全取（`--all`）或报错
  * @throws CliUsageError 歧义（多个项目 / 多台主机且未指定、`--all` 与 `--host` 并存、名字不存在）
  * @throws DpError 配置本身不成立（`projects` 或 `hosts` 为空）
  */

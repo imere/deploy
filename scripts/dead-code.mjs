@@ -1,24 +1,3 @@
-/**
- * 死代码门禁：找出没人引用的导出符号与没人 import 的源文件。
- *
- * 为什么判定要保守到宁可漏报：一个误报会把人推向「删掉真在用的东西」，
- * 而漏报只是让人多留一段暂时没人调的代码 —— 两者代价不对等，所以本脚本
- * 只有在「零引用」这种能被静态证明的前提下才下确认结论，其余一律进可疑节。
- *
- * 三档结论（分档比二分更稳：把「只有测试在用」和「没人用」分开，
- * 前者常常是合理的内部 API，后者才是真该清的东西）：
- *   确认  非包入口的源文件里，符号在全仓（含测试）零引用
- *   可疑  仅测试引用 / 声明所在文件本身就是死的 / 包入口的公共 API /
- *         动态 import 或解构导出无法静态解析
- *   活    除上述外一律不报
- *
- * 为什么用两份文本视图：`import { x } from './y'` 的路径本身就是字符串，
- * 在「去掉字符串」的视图里它已经变成空白 —— 用同一份文本既抽说明符又数标识符，
- * 必然把全仓判成互不引用。specifier 走去注释视图，标识符计数走去字符串视图。
- *
- * 不用 typescript 编译器：本仓有它，但引进来会让门禁脚本的启动变成秒级，
- * 这里的判断只需要「去注释去字符串后的标识符计数」，手写扫描足够。
- */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, dirname, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -78,9 +57,6 @@ function walk(dir, out = []) {
 
 /**
  * package.json 声明的入口：bin / main / types / exports。
- *
- * 这些文件由 package manager 或 `dp` 命令行直接加载，仓内永远不会有 import 边 ——
- * 不豁免的话每个包的 bin 都会被稳定地报成死文件。
  */
 function collectPackageEntries() {
   const entries = new Set()
@@ -120,8 +96,6 @@ function collectPackageEntries() {
 
 /**
  * 被检测的源码范围只有各包 src；scripts 与根级脚本只作为「引用方」参与计数。
- * 脚本本身由 package.json 的 npm scripts 调起、从不互相 import，放进来只会
- * 稳定地报出「无人 import」，是噪声而不是发现。
  */
 const analyzed = walk(join(root, 'packages'))
   .filter((p) => p.includes(`${sep}src${sep}`))
@@ -160,7 +134,6 @@ const byPath = new Map(allFiles.map((f) => [f.path, f]))
 const importers = new Map(allFiles.map((f) => [f.path, []]))
 for (const f of allFiles) {
   // `export … from './x'` 同样会把 x 载入模块图（再导出也是引用），漏掉它会把
-  // 纯转发型包（index 只做 export { } from）的每个文件都判成死文件
   for (const e of [...f.edges, ...f.forwards.map((w) => ({ spec: w.spec }))]) {
     const target = resolveSpecifier(f.path, e.spec)
     if (!target) continue

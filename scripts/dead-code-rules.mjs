@@ -1,23 +1,7 @@
-/**
- * 死代码判据里可独立验证的那一块：纯文本与纯解析判定。
- *
- * 单独成模块是为了能直接断言这些判定。遮罩、去说明符、算可达性这三步都极易碎碎：
- * 一处正则放宽不会让门禁报错，只会让「确认的死代码」凭空多出或凭空少掉条目，
- * 而这两种坏法都不会有别的信号。
- *
- * 这里不碰文件系统：路径候选只负责「按什么顺序试」，命中判定在扫描脚本那一侧，
- * 于是本模块的每条断言都能用一段内联文本喂进去，不需要造一棵仓库树。
- */
 import { join, resolve as resolvePath, dirname } from 'node:path'
 
 /**
  * 遮罩源码文本，保留可被静态判定的骨架。`keepStrings` 决定字面量内容是留是抹。
- *
- * 两份视图不是冗余，是两种用途：说明符本身是字符串，必须用留字符串的视图；
- * 标识符计数必须用抹字符串的视图，否则字面量里的同名文本会虚增引用数。
- *
- * 模板串要区别对待：`${...}` 里是真代码（两种视图都留），其余是字面量。
- * 这里写成显式的帧栈而不是逐状态猜测，正是因为它是全局最容易错的一处。
  *
  * @param {string} src 源码文本
  * @param {boolean} keepStrings true = 抹注释留字符串，false = 字符串一起抹（保留行结构）
@@ -201,9 +185,6 @@ export function makeLineAt(text) {
 /**
  * 收集 `export` 声明。输入必须是抹字符串视图 —— 声明不会出现在字面量里。
  *
- * 解析不出来的一律进 `uncertain` 而不是猜：宁可多一条「需人工判断」，也不能把
- * 解构导出当成「无人引用的符号」报成确认死代码。
- *
  * @param {string} code 抹掉注释与字符串后的代码骨架
  * @returns {{decls: Map<string, {name: string, kind: string, offset: number, line: number}>, uncertain: {name: string|null, line: number, reason: string}[]}}
  */
@@ -297,10 +278,6 @@ export function isPkgEntry(rel) {
 /**
  * 相对说明符与 `@dp/*` 包说明符各应按什么顺序试。
  *
- * 只给候选顺序，命中与否交给调用侧：候选怎么排是纯规则（「`.js` 要同时试 `.ts`」
- * 这类 TS 的 ESM 写法），而「哪个真的存在」是文件系统的事，两者混在一起就没法断言。
- * 返回空数组表示不是仓内可解析的说明符（第三方包、Node 内置）。
- *
  * @param {string} root 仓库根绝对路径
  * @param {string} fromFile 引用方文件绝对路径
  * @param {string} spec import 说明符原文
@@ -325,9 +302,6 @@ export function specifierCandidates(root, fromFile, spec) {
 /**
  * 数一个名字在代码骨架里出现多少次。
  *
- * `skipOffset` 用于剔除声明处那次 —— 声明本身不是引用，算了就等于每个符号天生
- * 有一处引用，「零引用」这个结论永远不会成立。
- *
  * @param {string} code 抹掉注释与字符串后的代码骨架
  * @param {string} name 标识符名
  * @param {number|null} [skipOffset] 要跳过的偏移，通常是声明起点
@@ -345,10 +319,6 @@ export function countRefs(code, name, skipOffset) {
 
 /**
  * 星号转发的可达性闭包，迭代到不动点。
- *
- * 必须追到底：a `export * from` b，b 再 `export * from` c，则 c 的导出经 a 也是活的。
- * 只追一跳会把纯转发链上的文件判成死文件 —— 而包入口形态恰好最常是转发链。
- * 轮数按文件数封顶，保证终止；提前 break 是因为闭包必然有限。
  *
  * @param {string[]} paths 全部已知文件路径
  * @param {Map<string, Set<string>>} starTargets 一跳转发目标

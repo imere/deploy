@@ -1,7 +1,3 @@
-/**
- * `main()` —— 唯一对外入口。**不自己 process.exit**：返回退出码，由 bin.ts 决定
- * 怎么退出。这样测试可以 `await main([...])` 直接拿到退出码，不用捕获全局状态。
- */
 import { createRequire } from 'node:module'
 import { DpError } from '@dp/ports'
 import {
@@ -38,10 +34,7 @@ import { runRollback } from './commands/rollback.js'
 import { runSchema } from './commands/schema.js'
 
 /**
- * 打进帮助与 `--version` 的版本号。
- *
- * 读 package.json 失败时回落 `0.0.0` 而不是抛错：版本号不值得让整条命令失败，
- * 而抛错的代价是「在没有任何有效配置的环境里，`dp --help` 也会失败」。
+ * 与 package.json 同源，构建期注入
  */
 export const VERSION: string = readVersion()
 
@@ -58,10 +51,6 @@ function readVersion(): string {
 
 /**
  * 归一化开关。默认值在这里定一次，其余代码不必再判断 undefined。
- *
- * 「用户没给」与「给了这个值」必须能区分，所以取值型选项用条件展开
- * 而不是 `?? '默认值'`：logFormat 若被补上兜底值，createContext 就无法
- * 判断该不该按 TTY 推断（日志格式会永远锁死在 json 或 pretty 上）。
  *
  * @param parsed parseArgs 的结果
  * @returns 归一化开关；没给定的取值型选项**键不存在**（不是 undefined 值）
@@ -92,7 +81,6 @@ export function resolveFlags(parsed: ParsedArgs): ResolvedFlags {
     help: hasFlag(flags, 'help'),
     version: hasFlag(flags, 'version'),
     // 只在用户显式给了才落进 flags：否则 createContext 无法区分「用户要 pretty」
-    // 与「没说，请按 TTY 推断」，后者会被 'pretty' 这个兜底值吃掉
     ...(stringFlag(flags, 'log-format') !== undefined
       ? { logFormat: parseLogFormat(stringFlag(flags, 'log-format'), 'pretty') }
       : {}),
@@ -104,40 +92,30 @@ export function resolveFlags(parsed: ParsedArgs): ResolvedFlags {
 
 /**
  * plan 的开关集合直接取命令模块自己声明的那一份，不在这里再抄一遍。
- * 抄一份的代价不是多写一行，而是「给命令加了开关却忘了同步这里」——
- * 表现为用户按文档加了 flag 却被拒绝，而且两侧代码单看都对。
  */
 const PLAN_FLAGS = PLAN_OPTION_HINT.allowedFlags
 /**
  * apply 的开关集合与 plan 一致 —— **刻意不给 `yes`**。
- * 铁律 0 不许交互，也就意味着没有「人看过提示再敲 y」这个环节；
- * 加一个确认开关只会让人误以为「有确认=更安全」，实际上它只是多一次能忘记的输入。
- * 想要不落盘的预览，`--dry-run` 已经足够。
  */
 const APPLY_FLAGS = ['config', 'env', 'host', 'project', 'all', 'facts', 'json', 'dry-run', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
 /**
- * deploy 的开关集合 = apply 的全部 + `yes`。它多出来的那个只对零配置有意义：
- * apply 前面有一份用户写好的配置，而 deploy 的配置是探测出来的。
+ * deploy 的开关集合 = apply 的全部 + `yes`。它多出来的那个只对零配置有意义：apply 前面有一份用户写好的配置，而 deploy 的配置是探测出来的。
  */
 const DEPLOY_FLAGS = DEPLOY_ALLOWED_FLAGS
 const FACTS_FLAGS = ['config', 'env', 'host', 'project', 'all', 'json', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
 const SCHEMA_FLAGS = ['out', 'json', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
 
 /**
- * status / verify 的开关集合。**不给 `facts`**：它们需要一个 Runner 才能读索引，
- * 而 --facts 只对 local 主机成立（远端写入必须有真连接）。给了它只会让人
- * 以为「离线查状态」是支持的。
+ * status / verify 的开关集合。**不给 `facts`**：它们需要一个 Runner 才能读索引，而 --facts 只对 local 主机成立（远端写入必须有真连接）。给了它只会让人以为「离线查状态」是支持的。
  */
 const READONLY_FLAGS = ['config', 'env', 'host', 'project', 'all', 'json', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
 /**
- * rollback 同样不给 `facts`；也不给 `dry-run` —— 回滚要么做要么不做，
- * 没有「演练回滚」这种半状态。
+ * rollback 同样不给 `facts`；也不给 `dry-run` —— 回滚要么做要么不做，没有「演练回滚」这种半状态。
  */
 const ROLLBACK_FLAGS = ['config', 'env', 'host', 'project', 'all', 'json', 'log-format', 'log-level', 'log-file', 'verbose', 'quiet']
 
 /**
- * `help` 的位置参数有两种可能：`dp help plan`（第 0 个位置参数是命令名）与
- * `dp plan --help`（无）。所以 help 的参数校验要放到解析之后单独做。
+ * `help` 的位置参数有两种可能：`dp help plan`（第 0 个位置参数是命令名）与`dp plan --help`（无）。所以 help 的参数校验要放到解析之后单独做。
  */
 function allowedFor(command: string): readonly string[] {
   switch (command) {
@@ -165,11 +143,7 @@ function allowedFor(command: string): readonly string[] {
 }
 
 /**
- * 注入点。**每一项都对应一个「测试时不想碰的东西」**：
- * cwd / env 是外部状态，write / writeErr 是全局 stdout/stderr，
- * isTTY 影响日志格式推断，deps 让远端部署测试完全不联网。
- *
- * 全部可选且默认取真实全局值，所以生产路径只调 `main(argv)` 就行。
+ * 注入点。**每一项都对应一个「测试时不想碰的东西」**：cwd / env 是外部状态，write / writeErr 是全局 stdout/stderr，isTTY 影响日志格式推断，deps 让远端部署测试完全不联网。
  */
 export interface MainOptions {
   readonly cwd?: string
@@ -183,17 +157,6 @@ export interface MainOptions {
 
 /**
  * 唯一入口。**永不抛、永不自己 exit**，一律把错误渲染完返回退出码。
- *
- * 由 bin.ts 决定 `process.exit`：测试可以直接 `await main([...])` 拿退出码，
- * 而捕获全局状态（尤其 exit）会让「命令跑得对不对」这件事没法断言。
- *
- * 阶段顺序是硬约束，别调换：
- *  ① parseArgs —— 失败也要按 --json 输出（早期失败最容易被调用方误判成崩溃）
- *  ② 帮助 / --version —— **碰文件系统之前**返回，所以 `dp` 单独跑不需要配置
- *  ③ 查命令是否存在 / 是否已实现
- *  ④ 开关白名单校验
- *  ⑤ 建 context（至此才知道日志格式与 json）
- *  ⑥ 执行
  *
  * @param argv 完整参数，`process.argv.slice(2)` 的形态
  * @param options 注入点，全部可省
@@ -213,7 +176,6 @@ export async function main(argv: readonly string[], options: MainOptions = {}): 
   const effective = command === 'help' && positional[0] !== undefined ? positional[0] : command
 
   // `dp help <cmd>` 必须**永远**只打印帮助：不能因为后面还有别的参数就掉进执行分支，
-  // 否则 `dp help plan` 会在临时目录里真的去部署一次
   if (command === 'help' && effective !== undefined) return emit(options, helpFor(effective))
 
   // 无命令 / -h / -V 都在碰文件系统之前返回
@@ -304,8 +266,6 @@ function emitError(err: unknown, verbose: boolean, options: MainOptions, json: b
 
 /**
  * 早期失败（连 context 都还没建）也得尊重 --json。
- * 直接在 argv 上找 `--json` 即可：此时还没解析，宁可粗一点也不能让
- * 「输出的是文本、调用方却在等 JSON」这种错配发生。
  */
 function earlyJson(argv: readonly string[]): boolean {
   return argv.includes('--json')

@@ -1,31 +1,11 @@
-/**
- * JSDoc 门禁的纯文本判定层：源码遮罩、括号配平、形参切分、注释块定位、块解析、复述启发式。
- *
- * 单独成模块是为了让它能被 `node --test` 直接断言。门禁脚本自己的判据一旦没有回归测试，
- * 判据被改坏（放宽到抓不住、或误伤合法写法）不会有任何东西变红 —— 而它恰恰是
- * 「谁来验验证者」的那条链。这套判据有七个已经踩过的解析 bug，每一个报出来的结论都说得过去、
- * 判定却是错的，所以每条边界都有对应用例钉住。
- *
- * 分层：只碰字符串，不碰文件系统（`resolveSpecifier` 的存在性检查由调用方注入）。
- * 读文件、列目录、报告拼装都留在门禁入口那边。
- */
 import { dirname, join } from 'node:path'
 
-// ============================================================
 // 源码遮罩：把注释与字符串内容换成等长空格（保留换行）
-// ============================================================
 
 const PREV_SIGNIFICANT = /[([{,;:=!&|?+\-*/%~^<>]|\breturn|\btypeof|\bcase|\bdo|\bin|\bof|\bnew|\bdelete|\bvoid/
 
 /**
  * 从 open 处的引号起把整段字面量遮罩掉，返回结束后的下标。
- *
- * 模板串必须穿透 `${}`：插值里是代码，里面还能再套引号与模板串。不穿透的后果实测过一次 ——
- * 一个拼接 shell 引号的模板里出现了同种反引号，模板被判成提前结束，从那一行往后几十行
- * 代码全被当成字符串吃掉，那批导出在门禁眼里根本不存在（报「导出找不到定义」）。
- * 这是漏报，比误报难发现得多：脚本只是安静地看不见它们。
- *
- * 已知局限：插值里的块注释不单独处理（那种写法极罕见），按普通字符遮罩。
  */
 export function maskString(src, open, out) {
   const quote = src[open]
@@ -87,10 +67,6 @@ export function maskString(src, open, out) {
 
 /**
  * 与 src 等长的字符串：注释与字符串内部被空格替换，换行保留。
- * 这样后续所有正则都只在**真实代码**上匹配，注释里的函数声明不会再被当成声明。
- *
- * stringsToo 为假时只去注释 —— 导出扫描要用这一份视图：语句形状不会因为字符串而变，
- * 但模块说明符（`from './x.js'`）本身是字符串，全遮罩会把再导出语句一起吃掉。
  */
 export function mask(src, stringsToo = true) {
   const out = src.split('')
@@ -120,7 +96,6 @@ export function mask(src, stringsToo = true) {
     }
     if (c === '/' && (prev === '' || PREV_SIGNIFICANT.test(prev))) {
       // 正则字面量：按「前一个有效字符」判别。漏判的代价是把 /re/ 的内容当代码，
-      // 后果只是多扫一个假声明；错判成正则的代价是丢掉后面的真声明，所以宁可漏判。
       let j = i + 1
       let inClass = false
       let closed = false
@@ -153,9 +128,7 @@ export function mask(src, stringsToo = true) {
   return out.join('')
 }
 
-// ============================================================
 // 括号配平与 token 工具
-// ============================================================
 
 const OPEN = { '(': ')', '[': ']', '{': '}', '<': '>' }
 const CLOSE = new Set([')', ']', '}', '>'])
@@ -178,12 +151,6 @@ export function matchBracket(masked, open, angle = false) {
 
 /**
  * 在 (start, end) 之间按顶层逗号切分（字符串与注释已被遮罩，不会误切）。
- *
- * 尖括号必须参与配平，否则 `opts: Readonly<Record<string, string>>` 会被逗号切成
- * 碎片，碎片里冒出一个叫 `string` 的假形参，报出「形参 string 没有 @param」。
- * 但 `>` 有两种身份：泛型闭合与箭头 `=>`。所以只在**类型注解区**里把尖括号当括号，
- * 进入的时机是顶层冒号，退出的时机是顶层等号（默认值）——默认值里写 `1 < 2`
- * 这种比较不该被当成泛型，否则后面的逗号又会被吞掉。
  */
 export function splitTop(masked, start, end) {
   const parts = []
@@ -259,9 +226,7 @@ export function paramNames(text) {
   return m ? [m[1]] : []
 }
 
-// ============================================================
 // JSDoc 解析
-// ============================================================
 
 export function lineOf(src, index) {
   let line = 1
@@ -271,15 +236,6 @@ export function lineOf(src, index) {
 
 /**
  * 取出紧邻 `pos` 之前、允许中间有空白与 `export` 关键字的 JSDoc 块。
- *
- * 块起点不能取「`pos` 之前最后一个块起始标记」：注释正文里写 glob 或 Markdown 代码块时
- * 常出现同样的字面量（下面用「起始标记」「结束标记」指代这两个三字符序列），
- * 那会把块截在字面量处，后面的 `@param` 被静默丢掉。
- * 可靠的判据是——块起点必然位于**上一个结束标记之后**；在那之后取第一个起始标记，
- * 块内再多的字面量也骗不过去。块结束同理不靠搜索：`pos` 前那个结束标记就是它。
- *
- * 顺带一条给后来人：本文件自己的注释里也别写那两个字面量，否则注释提前闭合，
- * 报错信息会指向下一行，看起来像那里出了问题（作者踩过一次）。
  */
 export function docBefore(src, pos) {
   let i = pos - 1
@@ -345,7 +301,6 @@ export const CJK = /[一-鿿]/
 
 /**
  * 疑似复述的启发式。只在「描述很短 + 以动作动词开头 + 去掉动词后与标识符同源」时报警。
- * 阈值刻意保守：宁可漏报（作者自己看得出来），也不要把好注释判成复述。
  */
 const RESTATE_VERBS = ['获取', '设置', '返回', '创建', '生成', '得到', '读取', '写入', '删除', '检查', '处理', '执行', '计算', '计算', '解析', '计算']
 export function looksRestated(name, summary) {
@@ -377,9 +332,7 @@ export function looksRestated(name, summary) {
   return false
 }
 
-// ============================================================
 // 声明扫描
-// ============================================================
 
 const DECL_PATTERNS = [
   { kind: 'function', re: /(?:^|[\s;}])(?:export\s+)?(?:declare\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/g },
@@ -409,10 +362,6 @@ export function arrowParams(masked, declEnd) {
   const arrow = masked.indexOf('=>', declEnd)
   if (arrow === -1) return null
   // 等号与箭头之间只能是形参：`(...)` 或单个标识符（前面可挂 `async` 与泛型）。
-  // 不能只看等号右边第一个字符 —— 字符串已被遮罩成空格，看过去看到的是字符串**后面**
-  // 的内容，常量照样能蒙混过关。实测：`const HINT = '...'` 后面跟一个带箭头的函数时，
-  // 中间那截骨架长得像 `exportfunctionsummarize...(stderr:string){...`，
-  // 于是门禁要求一个字符串常量写 `@param` 与 `@returns`。
   const body = masked
     .slice(declEnd + 1, arrow)
     .replace(/\s+/g, '')
@@ -438,12 +387,10 @@ export function arrowParams(masked, declEnd) {
 
 /**
  * 从源码文本扫出声明表：名字 → { kind, src, masked, pos, declStart, params, returnsVoid }。
- * `file` 只是报告用的标签，不参与任何判定（判定全部只看文本）。
  */
 export function scanDeclarations(src, file = '') {
   const masked = mask(src)
   // 导出语句的模块说明符是字符串，全遮罩会把 `from './x.js'` 一起吃掉。
-  // 所以导出扫描用「只去注释」的那一份视图 —— 语句形状不会因为字符串而变。
   const codeOnly = mask(src, false)
   const decls = new Map()
   for (const { kind, re } of DECL_PATTERNS) {
@@ -454,8 +401,6 @@ export function scanDeclarations(src, file = '') {
       const pos = m.index + m[0].length - name.length
       if (decls.has(name)) continue
       // JSDoc 挂在**声明起点**（export / declare / async 那几个关键字之前），
-      // 不是挂在名字之前 —— 从名字往回只跨空白会停在 `interface` 上，
-      // 后果是有注释的符号全被报成缺注释（整个检查退化成恒红）。
       const declStart = m.index + m[0].search(/[A-Za-z_$]/)
       const decl = { name, kind, file, src, masked, pos, declStart, params: null, returnsVoid: false }
       if (kind === 'function') {
@@ -484,17 +429,10 @@ export function scanDeclarations(src, file = '') {
   return { src, masked, codeOnly, decls }
 }
 
-// ============================================================
 // index.ts 导出解析
-// ============================================================
 
 /**
  * 把模块说明符解析成本仓的源文件路径。`exists` 由调用方注入 —— 本模块不碰文件系统。
- *
- * workspace 包名（`from '@dp/ports'`）也要能解析：只认相对说明符的话，
- * 跨包再导出整条链会断在这里，表现为那些符号**根本没进检查**（漏报，且很安静）。
- * 源里写的是 ESM 的 .js 说明符（NodeNext 要求），落盘是 .ts —— 不换后缀
- * 会把「包之间互相再导出」整个判成找不到定义，表现是绝大多数符号根本没进检查。
  */
 export function resolveSpecifier(fromFile, spec, exists) {
   if (!spec.startsWith('.')) {
@@ -513,9 +451,7 @@ export function resolveSpecifier(fromFile, spec, exists) {
   return null
 }
 
-// ============================================================
 // 校验判定
-// ============================================================
 
 /** interface / type 字面量的成员。type 别名只在对象字面量形态下才要求成员说明。 */
 export function membersOf(decl) {
@@ -573,8 +509,6 @@ export function memberDocBefore(decl, memberName) {
   const m = re.exec(body)
   if (!m) return null
   // 成员名的真实起点要直接找，不能用 `m[0].length - memberName.length` 反推：
-  // 正则尾部的 `[?:]` 也算进了 `m[0]`，减出来的位置会偏进名字内部（实测落在 `type` 的 `y` 上），
-  // 往回找注释必然落空 —— 表现为「成员缺 JSDoc」，而注释就在那一行的正上方。
   const nameAt = body.indexOf(memberName, m.index)
   if (nameAt === -1) return null
   const abs = braceOf + 1 + nameAt
@@ -587,10 +521,6 @@ export function memberDocBefore(decl, memberName) {
 
 /**
  * @param 相关的三类缺口：实际形参没写、写了的不是实际形参、写了标签但没说明。
- * 返回顺序固定为「缺 → 多 → 空」，与报告里的输出顺序一致。
- *
- * 多余判定按顶层名比对。解构字段写作 `opts.path` 时以根名 opts 计，
- * 否则按解构出的字段逐个对会被判成「多了参数」—— 那是判据写错，不是注释写错。
  */
 export function matchParamDocs(params, parsed) {
   const missing = []

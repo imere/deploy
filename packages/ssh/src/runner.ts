@@ -1,17 +1,3 @@
-/**
- * 远端 Runner —— 把 `Runner` 接口落到 SSH 上。
- *
- * 与 packages/local/src/runner.ts 形状完全一致，target 与 core 不需要知道
- * 对面是本地子进程还是三跳之外的机器。
- *
- * 路径安全的落点：**任何路径在发出去之前**都先过两道 ——
- *  1. `normalizeRemotePath`：归一化 + 绝对路径 + 允许根校验（防 `..` 逃逸）
- *  2. `checkSourcePaths`（@dp/core）：平台保留名 / 非法字符 / 长度 / 大小写碰撞
- * 传输**第一个字节之前**就发现问题，这正是预检关口的意义。
- *
- * 通道选择：sftp 批量 > POSIX 命令。二进制**只走 base64**，绝不用 echo
- * （echo 会吃掉反斜杠，`printf '%s\n'` 会多补一个换行 —— 都会破坏字节）。
- */
 import { DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
 import { checkSourcePaths } from '@dp/core'
 import type { SshDriver } from './driver.js'
@@ -32,9 +18,7 @@ import {
   writeFileScript,
 } from './posix.js'
 
-// ------------------------------------------------------------
 // 退出码 → 错误（约定见 posix.ts）
-// ------------------------------------------------------------
 
 const EXIT_NOT_FOUND = 3
 const EXIT_NOT_LINK = 4
@@ -43,10 +27,6 @@ const EXIT_NO_BASE64 = 6
 
 /**
  * 远端命令以本文件约定的退出码结束时的错误。
- *
- * 单列一个类而不是直接用 `DpError`：调用方需要区分「路径/工具问题」
- * 与「连接问题」，而两者的处置完全不同 —— 前者改配置，后者查机器。
- * 它仍然继承 `DpError`，所以 `catch (e) { e instanceof DpError }` 的老代码照常工作。
  */
 export class RemoteCommandError extends DpError {
   constructor(
@@ -76,13 +56,10 @@ function raiseForExit(op: string, path: string, code: number, stderr: string): v
   }
 }
 
-// ------------------------------------------------------------
 // 路径校验
-// ------------------------------------------------------------
 
 /**
- * 路径守卫的配置。**不给 allowedRoots 就是不做那一层校验**，
- * 而不是"允许一切"—— 前者只是少一道检查，后者是一个听起来像默认放行的语义。
+ * 路径守卫的配置。**不给 allowedRoots 就是不做那一层校验**，而不是"允许一切"—— 前者只是少一道检查，后者是一个听起来像默认放行的语义。
  */
 export interface PathGuardOptions {
   /** 目标平台。决定保留名、非法字符、大小写碰撞这三组规则的哪一套生效 */
@@ -94,20 +71,13 @@ export interface PathGuardOptions {
 /**
  * 归一化 + 允许根校验。
  *
- * 词法归一化（不解软链）是**故意的**：realpath 需要另一趟往返，而在预检阶段
- * 我们要的是"这个路径字面上能不能接受"。真要防软链逃逸，`Runner.realpath`
- * 之后再查一遍才是那一层 —— 两层分工不同。
- *
- * 拒绝越过 `/` 的 `..` 而不是照着 pop 到空：那是把"路径逃出根目录"这件事
- * 交给调用方判断，而调用方不会判断 —— 它只会拿到一个看着正常的路径。
- *
  * @param path 待校验的远端路径。必须是绝对路径：相对路径取决于登录时的 cwd，
- *   而 cwd 随 sshd 配置与 shell 而变，同样的配置在两台机器上会落到不同地方
+ * 而 cwd 随 sshd 配置与 shell 而变，同样的配置在两台机器上会落到不同地方
  * @param options 平台与允许根
  * @returns 归一化后的绝对路径（无冗余分隔符、无 `.`、无未消解的 `..`）。**原样返回**
- *   是允许的 —— 归一化不改变含义时不必制造一个看起来不同的字符串
+ * 是允许的 —— 归一化不改变含义时不必制造一个看起来不同的字符串
  * @throws DpError 路径为空、含 NUL、非绝对、`..` 越过根、违反平台命名规则，
- *   或归一化后不在任何允许根之下（`DP.PATH.ILLEGAL_CHAR`）
+ * 或归一化后不在任何允许根之下（`DP.PATH.ILLEGAL_CHAR`）
  */
 export function normalizeRemotePath(path: string, options: PathGuardOptions): string {
   if (path.includes('\0')) {
@@ -159,15 +129,12 @@ export function normalizeRemotePath(path: string, options: PathGuardOptions): st
 }
 
 /**
- * `child` 是否等于或在 `root` 之下（按路径段比较，避免 `/srv/appx` 冒充 `/srv/app`）
- *
- * 按字符串前缀比是这类检查的标准错法：`startsWith('/srv/app')` 会把
- * `/srv/application` 判成在里面，于是**路径穿越检查在一个字母之差上失效**。
+ * `child` 是否等于或在 `root` 之下（按路径段比较，避免 `/srv/appx` 冒充 `/srv/app`）按字符串前缀比是这类检查的标准错法：`startsWith('/srv/app')` 会把`/srv/application` 判成在里面，于是**路径穿越检查在一个字母之差上失效**。
  *
  * @param child 待检查的路径。**不做归一化**，所以调用方要先过
- *   {@link normalizeRemotePath} —— 这里只判段，不判 `..`
+ * {@link normalizeRemotePath} —— 这里只判段，不判 `..`
  * @param root 允许的根。`/` 是合法的根，表示"任意绝对路径"；尾部的 `/` 会被忽略，
- *   `/srv/` 与 `/srv` 等价
+ * `/srv/` 与 `/srv` 等价
  * @returns `child === root` 或 `child` 以 `root + "/"` 开头时才为 true
  */
 export function isUnder(child: string, root: string): boolean {
@@ -176,14 +143,10 @@ export function isUnder(child: string, root: string): boolean {
   return child === c || child.startsWith(`${c}/`)
 }
 
-// ------------------------------------------------------------
 // Runner
-// ------------------------------------------------------------
 
 /**
- * 组装 Runner 需要的全部东西。**facts 必填**而不是可选：
- * 路径校验要用平台与能力，权限判定要用实测结果，两样都只能来自 facts，
- * 这里没有任何"从环境变量猜一份"的余地。
+ * 组装 Runner 需要的全部东西。**facts 必填**而不是可选：路径校验要用平台与能力，权限判定要用实测结果，两样都只能来自 facts，这里没有任何"从环境变量猜一份"的余地。
  */
 export interface SshRunnerOptions {
   /** 执行通道。Runner 不自己 spawn，只把它要跑的 argv 与超时交给它 */
@@ -206,18 +169,10 @@ const toB64 = (data: string | Uint8Array): string =>
 /**
  * 把 {@link SshDriver} 装成 {@link Runner}。
  *
- * 路径安全集中在 `guard` 一处：每个方法在**发出第一个字节之前**先过
- * {@link normalizeRemotePath}，而不是在某个共用的 helper 里补一次 ——
- * 漏接一个方法的代价是「有一条 API 路径能写到允许根之外」，而它不会报错。
- *
- * `stat` / `listDir` / `readlink` 对"不存在"返回 `null` / 空数组，
- * `realpath` 的解析结果**再过一次 guard**：软链指向别处是路径逃逸的真正入口，
- * 而那一层只有解析之后才看得见。
- *
  * @param options 见 {@link SshRunnerOptions}。`id` 由 host 推导（`ssh:<host>`），
- *   两台不同驱动连同一台机器的 Runner 靠它区分
+ * 两台不同驱动连同一台机器的 Runner 靠它区分
  * @returns 一个 {@link Runner}。它**不持有连接的生命周期** —— 关闭连接是
- *   `ConnectedSsh.close` 的事，否则一次 close 会把别人的 Runner 一起弄坏
+ * `ConnectedSsh.close` 的事，否则一次 close 会把别人的 Runner 一起弄坏
  */
 export function createSshRunner(options: SshRunnerOptions): Runner {
   const { driver, facts } = options
@@ -249,9 +204,7 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
     // ------------------------------------------------------ exec
 
     /**
-     * 只接 argv，**没有 execShell** —— 注入的面在接口层就被掐掉了
-     * （packages/ports/src/index.ts 明确说明）。
-     * 要用管道/`&&` 就显式传 `['sh','-c', quoteArgv([...])]`。
+     * 只接 argv，**没有 execShell** —— 注入的面在接口层就被掐掉了（packages/ports/src/index.ts 明确说明）。
      */
     exec(argv: readonly string[], execOptions: ExecOptions = {}): Promise<ExecResult> {
       if (argv.length === 0) {
@@ -317,7 +270,6 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
       const p = guard(path)
       const res = await sh(readFileScript(p), p, 'readBinary')
       // 显式转 Uint8Array：Buffer 越过 Runner 边界会绑死 Node 语义
-      // （与 packages/local/src/runner.ts 的注释同一理由）
       return new Uint8Array(Buffer.from(res.stdout.replace(/\s+/g, ''), 'base64'))
     },
 
@@ -334,7 +286,6 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
 
     async symlink(target: string, linkPath: string): Promise<void> {
       // 目标可以是相对路径（软链本来就常用相对形式），所以不做绝对校验；
-      // 落点（linkPath）必须校验 —— 那是真正被创建的东西
       const l = guard(linkPath)
       const res = await driver.exec({
         argv: ['sh', '-c', symlinkScript(target, l)],
@@ -378,8 +329,5 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
 export { quoteArg, quoteArgv }
 /**
  * 便捷重导出：调用方不必 import driver.ts 就能拿到同一个上限值。
- *
- * **别名而不是第二份字面量** —— 两个数字一旦各自定义，早晚会出现
- * 「限流用的上限」与「报告里说的上限」对不上的情况，而那种不一致只在事后才看得见。
  */
 export const SSH_DEFAULT_MAX_OUTPUT = DEFAULT_MAX_OUTPUT_BYTES

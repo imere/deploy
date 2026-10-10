@@ -1,14 +1,3 @@
-/**
- * 跳板链的**计划** —— 纯函数，零 IO。
- *
- * 为什么要有这一层而不是在建立连接时顺手把参数算出来：多跳的错法几乎全是
- * 「连到了另一台机器」或「凭据用在了错误的跳上」，而这两种在连接建立之后
- * 表现为一次普通的认证失败，定位成本极高。把 host/port/user/auth 逐跳摊平
- * 并当场校验，就能让这类错误在碰网络之前变成一次明确报错。
- *
- * `via` 里的 `nc` **永远不会由这个函数产出**（见 openHopChain 的注释）：手段
- * 能不能用只有真跑一次才知道，计划阶段选它等于凭空猜。
- */
 import { DpError, assertPortInRange, parseSshTarget } from '@dp/ports'
 import type { AuthConfig, HopSpec } from './driver.js'
 
@@ -33,10 +22,6 @@ export interface PlanHopChainOptions {
   readonly path?: string
   /**
    * 是否允许运行期用 nc 兜底。
-   *
-   * 放进 opts 只是为了让调用方**声明**这件事，不改变计划内容：`via` 恒为
-   * direct/forwardOut。让「允许兜底」这个意图在计划里可见，比藏在连接代码里
-   * 的一个 if 更能让人读出「这条链不保证一定走 direct-tcpip」。
    */
   readonly allowNc?: boolean
 }

@@ -1,9 +1,3 @@
-/**
- * 本地事实探测。
- *
- * 铁律：**能力一律实证，不推断。** 不看 uid 就断定能写 /etc，不看平台就断定有 systemd。
- * 每条结论都是「真的做了一次」，代价是一点启动耗时，收益是预检不会说谎。
- */
 import { createServer } from 'node:net'
 import { homedir as osHomedir, tmpdir as osTmpdir, platform as osPlatform, arch as osArch } from 'node:os'
 import { promises as fs } from 'node:fs'
@@ -57,10 +51,6 @@ const ENV_KEYS = [
 /**
  * 采集一份环境变量**快照**。
  *
- * 只取白名单里的键：facts 会进 plan 与报告，把整个 process.env 原样带出去等于
- * 把凭据写进日志。白名单同时是「哪些变量真的参与路径推导」的答案 ——
- * 外面那些变量对部署没影响，带进来只是噪音与风险。
- *
  * @returns 不可变副本，键固定为 PATH 加白名单各项（不存在的键为 undefined 而非缺省 '')
  */
 export function snapshotEnv(): Readonly<Record<string, string | undefined>> {
@@ -74,10 +64,6 @@ export type ProbeRemove = (path: string) => Promise<unknown>
 
 /**
  * 一次可写性实测的结果。
- *
- * `leftovers` 单列而不是直接丢弃：判定（建出来了没有）与清理（删掉了没有）
- * 是两件独立的事，把它们合成一个布尔，症状要么是把明明可写的目录报死，
- * 要么是残留悄悄攒了一堆而无人知晓。
  */
 export interface WritableProbe {
   readonly canWrite: Readonly<Record<string, boolean>>
@@ -104,19 +90,13 @@ async function removeOnceWithRetry(path: string, remove: ProbeRemove): Promise<b
 
 /**
  * 真实写权限实测：建一个随机名临时文件，**建成功即算可写**，随即删除。
- * 只看 `access(W_OK)` 是不够的 —— 只读挂载、SELinux 标签、WSL `/mnt` 挂载点
- * 都可能让 W_OK 通过而实际写失败。
  *
- * 判定与清理是**两件事**，不放在同一个 try 里：文件真的建出来了，这就是可写的实证，
- * 后面删不掉只说明清理失败（占用 / ACL / 锁），拿它改写判定会把明明可写的目录报成
- * 不可写。清理失败也不吞掉 —— 路径进 `leftovers` 交出去，否则残留会悄悄攒成
- * 一堆、然后把所有候选目录拖成不可写，而没有任何线索指得到它。
  * @param paths 待实测的路径，通常是候选目录。**必须传**而不是内部取默认：
- *   「探哪些目录」是部署布局的推导结果，探测层自己决定候选就等于把推导复制一份，
- *   两份候选不一致时同一份配置会在本地与远端得出不同的结论
+ * 「探哪些目录」是部署布局的推导结果，探测层自己决定候选就等于把推导复制一份，
+ * 两份候选不一致时同一份配置会在本地与远端得出不同的结论
  * @param options 目前只有 remove（注入删除动作）；生产用 fs.rm，测试注入必定失败的版本
  * @returns 每个输入路径一条结论（key 与入参一一对应），外加清理失败的残留路径。
- *   路径互相独立，一个失败不影响其余
+ * 路径互相独立，一个失败不影响其余
  * @throws 理论上不抛：建文件失败按「不可写」记录而不是中断
  */
 export async function probeWritable(
@@ -221,8 +201,6 @@ async function detectLinger(tools: Record<string, string | null>): Promise<boole
 
 /**
  * 「能 sudo 哪些命令」而不是「能不能 sudo」。
- * `sudo -n true` 成功说明**完全免密**；更常见的情况是只有白名单里的几条免密，
- * 那种精细情形留给 sudoers 解析（TODO），这里老实返回保守结果。
  */
 async function probeSudoAllowlist(): Promise<readonly string[]> {
   if (process.platform === 'win32') return []
@@ -236,10 +214,6 @@ async function probeSudoAllowlist(): Promise<readonly string[]> {
 
 /**
  * 探测参数。全可选，且**缺省值就是「按平台该探的那一套」**。
- *
- * 三项各自都有存在理由，没有一项是为了凑测试接口：
- * 探哪些路径由调用方给（见 probeWritable），工具清单同理 —— 探测层不该替部署
- * 决定「需要哪些工具」，那是 target 的事。
  */
 export interface ProbeOptions {
   /** 需要实测写权限的路径（通常是发布目录候选展开后的结果） */
@@ -266,16 +240,11 @@ const TOOLS_TO_PROBE = [
 ] as const
 
 /**
- * 本地事实探测的入口。产出的 `Facts` 是纯数据，**不缓存** ——
- * 部署途中权限可能变（提权后、写满磁盘后），拿一份十分钟前的结论去决定
- * 当前能不能写，恰好是这类工具最要避免的那种自信。
- *
- * 代价明确记在这里：每条能力都是一次真实的系统调用或子进程（bind 一个端口、
- * 建一批临时文件再删），所以调用方**按需探一次并把结果传下去**，不要在循环里调。
+ * 本地事实探测的入口。产出的 `Facts` 是纯数据，**不缓存** ——部署途中权限可能变（提权后、写满磁盘后），拿一份十分钟前的结论去决定当前能不能写，恰好是这类工具最要避免的那种自信。
  *
  * @param options 见 ProbeOptions；不传即按平台取默认候选与默认工具表
  * @returns 目标机事实。值全部是实测结果，`'unknown'` / `'none'` 表示探过但结论为否，
- *   不表示没探 —— 上层靠这个区分「确认不可用」与「还没查」
+ * 不表示没探 —— 上层靠这个区分「确认不可用」与「还没查」
  */
 export async function probeLocalFacts(options: ProbeOptions = {}): Promise<Facts> {
   const env = snapshotEnv()
@@ -292,9 +261,6 @@ export async function probeLocalFacts(options: ProbeOptions = {}): Promise<Facts
   const localAppData = env.LOCALAPPDATA ?? join(home, 'AppData', 'Local')
 
   // 候选按平台分流：/srv、/opt 这类 POSIX 目录在 Windows 上会被解析成 C:\srv 之类
-  // 根本不存在的位置，探它们既没意义又拖慢启动（每次探测都是一次真实建文件+删除）。
-  // 表本身取自 @dp/ports —— 与 @dp/ssh 那份同源。两份 facts 的候选不一致会让同一份
-  // 配置在远端能推出 confd、在本地推不出来（表现为「ssh 目标成功、local 目标报权限错」）。
   const candidates =
     options.writeProbePaths ??
     [

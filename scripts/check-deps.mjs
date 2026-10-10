@@ -1,15 +1,3 @@
-/**
- * 跨包依赖声明门禁：源码里 import 的 `@dp/*`，必须在同包 package.json 里声明过。
- *
- * 为什么单列一门而不是并入 check-imports：那一门管的是**层序**（谁能 import 谁），
- * 这一门管的是**声明**（要 import 就得先声明）。层序对了而声明没写，照样会在
- * pnpm 的 isolated 布局下解析失败 —— 两者是独立的两件事，混在一门里会让
- * 「跨层」与「未声明」互相掩盖。
- *
- * 为什么必须挡在本地：未声明的依赖在本地没有任何症状（junction 把 workspace 包
- * 全链进了根 node_modules），只能等 CI 的 Linux runner 用 TS2307 报出来。
- * 一门只能在推送后被验证的门禁，价值远低于能在本地就红的门禁。
- */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'

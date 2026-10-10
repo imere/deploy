@@ -1,32 +1,3 @@
-/**
- * 给 rsync 的 `--rsh` 造 argv —— **纯函数，零 IO**。
- *
- * 契约来自（实测 rsync 3.5.0）：
- *
- * ```
- * < -e 的 argv（按空白拆分）... >  [ -l <user> ] <host> rsync --server [--sender] <flags> <src> <dst>
- * ```
- *
- * 四条实测事实，各自对应本文件的一条约束：
- *
- *  1. **`%h` 不会被 rsync 替换** —— 实测传进去的是字面 `%h`。所以 rsh argv 里
- *     **绝不能出现主机名**（rsync 会自己追加），也绝不能指望 `%h`。
- *     混淆点：ssh **自己**的 ProxyCommand `%h`/`%p` 确实会被替换 —— 替换发生在
- *     ssh 进程内，rsync 只是把字符串原样转交。两个 `%h` 不是同一个东西。
- *  2. **不经过 shell** —— rsync 侧没有注入面（实测 `;touch` 只是普通 argv）。
- *  3. 无 user 前缀时省略 `-l <user>`。
- *  4. `RSYNC_RSH` 与 `-e` 等价。
- *
- * ## rsync 的 `-e` 有空白拆分限制（本文件最重要的一条约束）
- *
- * rsync 把 `-e` 的值按**空白**拆成多个 argv，且不做 shell 解析。所以
- * `-o ProxyCommand=ssh jump -W %h:%p` 里的空格会让它被切成三段而彻底错乱。
- * 结论：
- *  - `proxy-jump`（`-J a,b`）**无空白**，可以直接走 `-e`；
- *  - 两种 ProxyCommand 形态的 argv 可以构造（单测覆盖），但**不能**经由
- *    `rshOptionValue()` 交给 rsync —— 那条路要换 的
- *    dp-rsh 自建助手（argv 走 IPC，不经空白拆分）。本文件把这条边界做成显式断言。
- */
 import { DpError } from '@dp/ports'
 import {
   buildRshArgv as buildSshRshArgv,
@@ -37,9 +8,6 @@ import {
 
 /**
  * 多跳的两种形态。
- *
- * 选 `proxy-jump` 的理由不只是"更短"：它是唯一**不含空白**的形态，
- * 因此唯一能原样交给 rsync `-e` 的形态。
  */
 export type HopMode =
   /** `-J a,b`（OpenSSH 7.3+），走 direct-tcpip 转发 */
@@ -51,28 +19,17 @@ export type HopMode =
 
 /**
  * 连接阶段的兜底超时（**秒**），写进 ssh 的 `-o ConnectTimeout=`。
- *
- * 为什么必须由我们显式给：ssh 自己默认**无限等** TCP 连接。目标机不可达时它卡在
- * 连接上且没有任何输出 —— 既不会超时也不会失败，在 CI 里就是永久挂起。
- *
- * 为什么单位是秒而不是毫秒：这个值直接作为 ssh 选项的值落进 argv，单位由 ssh 定。
- * 换成毫秒就得多一个换算点，而换算点一多就会漏（漏掉的形状是 `ConnectTimeout=15000`）。
  */
 export const DEFAULT_CONNECT_TIMEOUT_SEC = 15
 
 /**
  * 造 `--rsh` / `-e` 需要的 ssh 选项。
- *
- * 字段与 `@dp/ssh` 的 ssh argv 同源，但**只收这一处用得到的**：多收一个字段就等于
- * 承诺会把它正确送进 rsync 的 `-e`，而 `-e` 是按空白拆分的（见文件头），
- * 多一个含空白的值就会在目标机上静默连错，且不报错。
  */
 export interface RshOptions {
   /** 本地 ssh 可执行文件的绝对路径（来自 facts.tools.ssh） */
   readonly sshPath: string
   /**
-   * 认证方式。key/agent 才会带 `BatchMode=yes` —— 密码类不能带，
-   * 因为 BatchMode 会关掉 SSH_ASKPASS 靠的那个询问（@dp/ssh argv.ts 注释）。
+   * 认证方式。key/agent 才会带 `BatchMode=yes` —— 密码类不能带，因为 BatchMode 会关掉 SSH_ASKPASS 靠的那个询问（@dp/ssh argv.ts 注释）。
    */
   readonly authKind: SshAuthKind
 
@@ -92,15 +49,11 @@ const hasWhitespace = (s: string): boolean => /[\s]/.test(s)
 /**
  * 构造 `--rsh` 的 argv 前缀。
  *
- * **返回的 argv 不含主机名，也不含 `rsync --server`** —— 那半截是 rsync 自己追加的
- * （实测样本 `ARGC=8 [-l][dpuser][dp-target][rsync][--server]...`）。
- * 写上主机名会变成"连错两次"。
- *
  * @param options ssh 路径、认证方式、主机密钥策略、跳板链等。`hops` 顺序即到达顺序，
- *   **最后一跳是目标机**，所以它不进 `-J`
+ * **最后一跳是目标机**，所以它不进 `-J`
  * @returns `--rsh` 的 argv 前缀，**不含主机名**，也不含 `rsync --server` 那半截
  * @throws DpError DP.CONFIG.INVALID：ProxyCommand 形态收到多跳（它只表达一跳）、
- *   跳板标识含空白或为空（无法作为单个 argv）、ConnectTimeout 不是正整数秒
+ * 跳板标识含空白或为空（无法作为单个 argv）、ConnectTimeout 不是正整数秒
  */
 export function buildRshArgv(options: RshOptions): readonly string[] {
   const hops = options.hops ?? []
@@ -166,18 +119,10 @@ export function buildRshArgv(options: RshOptions): readonly string[] {
 /**
  * 把 rsh argv 压成 rsync `-e` 接受的那个**单字符串**。
  *
- * 这里额外做一件事：rsync 按空白拆分 `-e`，所以含空白的 argv 元素（典型就是
- * ProxyCommand 形态）**不能**这么用。@dp/ssh 的 `rshOptionValue` 会抛一个纯
- * 事实性错误；我们把它翻译成可执行的下一步。
- *
- * 为什么把「不能这么用」做成显式断言而不是照常拼字符串：拼出来的字符串在 rsync 侧
- * 会被按空白切成几段，于是 ssh 收到一堆错位的参数 —— 它不会报「你的 -e 有问题」，
- * 而是报一个和目标机毫无关系的用法错误，排障方向直接错。
- *
  * @param argv `buildRshArgv` 的返回值（不含主机名）
  * @returns 可以直接交给 rsync `-e` 的单字符串
  * @throws DpError DP.CONFIG.INVALID：argv 里有含空白的元素（典型是 ProxyCommand 形态），
- *   hint 里给出两条出路（改 `-J` 形态 / 走 dp-rsh 助手）
+ * hint 里给出两条出路（改 `-J` 形态 / 走 dp-rsh 助手）
  */
 export function rshValueForRsync(argv: readonly string[]): string {
   try {

@@ -1,16 +1,3 @@
-/**
- * native-ssh 驱动 —— spawn 系统 `ssh` 二进制。
- *
- * 排第一的理由只有一个，但它不可替代（/S2 实测）：
- * **只有它能协商抗量子 KEX**。本地 OpenSSH 10.3 默认就协商出
- * mlkem768x25519-sha256；ssh2 传这个算法直接抛 Unsupported algorithm。
- *
- * 三条硬约束（与 packages/local/src/exec.ts 同源）：
- *  1. 永不经过 shell —— `spawn(argv[])`，`shell` 恒 false
- *  2. 永不交互 —— 密码走 SSH_ASKPASS + stdin ignore；输出里嗅探到 prompt 立即杀
- *  3. 永不无限等待 —— 每次执行都有 timeout，超时**杀进程树**（ssh 会 fork 出
- *     ssh-agent/askpass 子进程，只 kill 父进程会留下孤儿）
- */
 import { spawn } from 'node:child_process'
 import { accessSync, closeSync, constants as fsConstants, openSync, readSync } from 'node:fs'
 import { delimiter, extname, join, resolve as resolvePath } from 'node:path'
@@ -30,38 +17,26 @@ import { createAskpassHelper, type AskpassHelper } from './askpass.js'
 import { classifySshError, hostKeyHint, truncateOutput } from './parse.js'
 import { detectPrompt, promptHint } from './prompt.js'
 
-// ------------------------------------------------------------
 // 可执行文件解析
-// ------------------------------------------------------------
 
 /**
- * 解析 ssh 的绝对路径。**必须解析** —— 不能把 `ssh` 原样交给 spawn：
- * Windows 上 `PATH` 里可能先命中别的东西，而 exec 里我们也不再走 shell
- * 去找 .cmd/.bat（那正是 local/exec.ts 里 `buildCmdArgv` 存在的原因，
- * 而我们**不应该**为 ssh 引入 cmd.exe 这一层）。
+ * 解析 ssh 的绝对路径。**必须解析** —— 不能把 `ssh` 原样交给 spawn：Windows 上 `PATH` 里可能先命中别的东西，而 exec 里我们也不再走 shell去找 .cmd/.bat（那正是 local/exec.ts 里 `buildCmdArgv` 存在的原因，而我们**不应该**为 ssh 引入 cmd.exe 这一层）。
  */
 /**
- * 包装脚本后缀。`.cmd`/`.bat`/`.ps1` 不是可执行文件，必须借 `cmd.exe` /
- * PowerShell 才能跑 —— 而我们**从不**经过 shell（`spawn` 的 `shell` 恒为
- * false，local/exec.ts 里那套 `buildCmdArgv` 对我们是刻意不引入的）。
- * 与其让它在 spawn 时报一个难以理解的 EINVAL，不如在这里就拒。
+ * 包装脚本后缀。`.cmd`/`.bat`/`.ps1` 不是可执行文件，必须借 `cmd.exe` /PowerShell 才能跑 —— 而我们**从不**经过 shell（`spawn` 的 `shell` 恒为false，local/exec.ts 里那套 `buildCmdArgv` 对我们是刻意不引入的）。
  */
 const WRAPPER_EXT = /\.(cmd|bat|ps1)$/i
 
 /**
  * 解析结果必须是**原生可执行文件**。返回原路径，或抛 `DP.SSH.TOOL_MISSING`。
  *
- * 除了包装后缀，还检查「无扩展名但带 shebang」的脚本：在 Windows 上无扩展名的
- * 文件根本不会被当程序执行；在 POSIX 上若 PATH 里恰好有同名脚本，它会让「不过
- * shell」的 argv 语义失效。
- *
  * @param path 待检查的路径。**不检查它存不存在** —— 存在性由 resolveTool 用 X_OK 判，
- *   这里只判形状，免得把「权限不足」误说成「这是个脚本」
+ * 这里只判形状，免得把「权限不足」误说成「这是个脚本」
  * @param name 工具名（`ssh` / `sftp`…）。只用于错误消息，让用户知道该动哪个工具
  * @returns **原样返回**同一个路径字符串。规范化相对路径请在调用前做完 ——
- *   悄悄改写调用方给的路径会让日志里出现的命令与实际执行的不是一个
+ * 悄悄改写调用方给的路径会让日志里出现的命令与实际执行的不是一个
  * @throws DpError `DP.SSH.TOOL_MISSING` 且带 hint：它是包装脚本或带 shebang 的脚本。
- *   **不降级**成「换个工具试试」—— 找到了却不能用，与没找到是两种不同的配置问题
+ * **不降级**成「换个工具试试」—— 找到了却不能用，与没找到是两种不同的配置问题
  */
 export function assertNativeExecutable(path: string, name: string): string {
   const isWrapper = WRAPPER_EXT.test(path)
@@ -93,20 +68,13 @@ function hasShebang(path: string): boolean {
 /**
  * 在 PATH 里解析一个**原生可执行文件**。
  *
- * 自己走 PATH 而不靠 `spawn` 的解析：Windows 上我们 `shell: false`，
- * spawn 不会去找 `.cmd`/`.bat`，但也**不会**告诉我们它跳过了什么 ——
- * 于是「ssh 明明装了却连不上」会变成一条毫无线索的 ENOENT。
- *
- * 传入 env 而不是直接读 `process.env`：测试要能在不污染真实环境的前提下
- * 构造一条假的 PATH。
- *
  * @param name 工具名。**含 `/` 或 `\` 时按路径处理**，不走 PATH 查找 ——
- *   这样调用方可以给绝对路径，而 `PATH` 里的顺序不再对它有影响
+ * 这样调用方可以给绝对路径，而 `PATH` 里的顺序不再对它有影响
  * @param env 环境变量。只读 `PATH` / `Path`（Windows 大小写不敏感，两种拼法都认）
  * @returns 第一个**能执行且是原生程序**的绝对路径；全部候选都不合格时返回 `null`。
- *   `null` 表示「没找到」，而"找到了但不能用"会抛 DpError —— 两者必须能区分
+ * `null` 表示「没找到」，而"找到了但不能用"会抛 DpError —— 两者必须能区分
  * @throws DpError 候选中存在包装脚本 / 带 shebang 的脚本（见 {@link assertNativeExecutable}）。
- *   读不动文件（权限不足）**不算**这种错，按"没找到"继续找下一个候选
+ * 读不动文件（权限不足）**不算**这种错，按"没找到"继续找下一个候选
  */
 export function resolveTool(
   name: string,
@@ -132,7 +100,6 @@ export function resolveTool(
         return assertNativeExecutable(candidate, name)
       } catch (err) {
         // 包装脚本要**继续往上抛**（它"找到了"但不能用）；
-        // 单纯的权限不足/不存在则继续试下一个扩展名
         if (err instanceof DpError) throw err
       }
     }
@@ -142,19 +109,13 @@ export function resolveTool(
 
 const sshCandidates = (): readonly string[] => (process.platform === 'win32' ? ['ssh', 'ssh.exe'] : ['ssh'])
 
-// ------------------------------------------------------------
 // 杀进程树
-// ------------------------------------------------------------
 
 /**
  * 杀掉子进程**及其后代**。
  *
- * 只 `child.kill()` 杀的是 ssh 本身；它拉起的 askpass / ssh-agent / ProxyJump
- * 子 ssh 会变成孤儿继续跑，在 Windows 上更明显（没有进程组概念）。
- * Windows 用 `taskkill /T /F`，POSIX 用进程组（spawn 时 detached:true）。
- *
  * @param pid 目标进程号。`undefined`（进程还没起来 / 已经退了）直接返回 ——
- *   这不是错误，超时路径上它出现得太常见，为它抛错只会把真错误挤掉
+ * 这不是错误，超时路径上它出现得太常见，为它抛错只会把真错误挤掉
  */
 export function killProcessTree(pid: number | undefined): void {
   if (pid === undefined) return
@@ -181,18 +142,10 @@ export function killProcessTree(pid: number | undefined): void {
   }
 }
 
-// ------------------------------------------------------------
 // 驱动
-// ------------------------------------------------------------
 
 /**
- * 走系统 `ssh` 二进制的驱动。
- *
- * 它在偏好链里排第一只有一个理由，但它不可替代：**只有它能协商抗量子 KEX**。
- *
- * 构造期**不抛错**：找不到 ssh 或只找到包装脚本时把原因记下来，
- * 由 `available()` 报出去。构造期抛错会让「这一条不可用、下一条可能可用」
- * 没法表达 —— 偏好链还没开始就已经结束了。
+ * 优先于内嵌实现：复用系统 known_hosts 与 agent
  */
 export class NativeSshDriver implements SshDriver {
   readonly kind: SshDriverKind = 'native-ssh'
@@ -213,7 +166,6 @@ export class NativeSshDriver implements SshDriver {
         if (found !== null) return found
       } catch (err) {
         // 找到的是包装脚本 → 记下原因，让 available() 报得具体；
-        // 构造期不该因为 PATH 里的怪东西而崩掉整条偏好链
         if (err instanceof DpError) {
           this.sshReject = err.message
           this.sshRejectHint = err.hint
@@ -241,10 +193,6 @@ export class NativeSshDriver implements SshDriver {
 
   /**
    * `knownHosts: off` 的告警**不在这里发**。
-   *
-   * 早先这里有个 `warnIfOff()`，往一个 `warnings` 数组里 push 之后再没人读过 ——
-   * 死代码，而且会让人误以为告警由驱动负责。真正的告警在 `connect.ts`：
-   * 只有那里有 logger，且它属于「建立会话」这一个事件。驱动层不重复发。
    */
 
   private sshArgvBase(setEnv?: Readonly<Record<string, string>>): SshArgvOptions {
@@ -300,13 +248,6 @@ export class NativeSshDriver implements SshDriver {
     if (askpass !== undefined) Object.assign(env, askpass.env)
 
     // 远端环境变量走 OpenSSH 的 `-o SetEnv=K=V`（OpenSSH 7.6+）。
-    //
-    // 这里**不再**往子进程环境里塞 `DP_ENV_*` —— 那个前缀没有任何远端脚本会读，
-    // 是一条静默失效的路径（它曾经让"给远端加环境变量"看起来能用）。
-    // 代价要说清楚：sshd 的 `AcceptEnv` 没放行这个名字时，ssh 会**静默忽略**
-    // SetEnv。所以这仍然是「目标机配了才生效」的能力，setEnvOptions 的注释与
-    // 这里的注释都写明了这一点，不假装它必然生效。
-    // 凭据永远不走这里。
     const argv = [
       ...buildSshArgv({ ...this.sshArgvBase(req.env), remoteArgv: req.argv }),
       hostTarget(this.options.host, this.options.user),
@@ -319,7 +260,6 @@ export class NativeSshDriver implements SshDriver {
     }
   }
 
-  // ------------------------------------------------------------
 
   private spawn(
     argv: readonly string[],
@@ -393,7 +333,6 @@ export class NativeSshDriver implements SshDriver {
         const exitCode = code ?? -1
 
         // 主机密钥类失败**永远**归成结构化错误，不当普通非零退出码返回 ——
-        // 上层不能拿到一个"失败了但不知道为什么不匹配"的 exec 结果
         if (exitCode !== 0) {
           const failure = classifySshError(stderr, exitCode)
           if (
@@ -419,13 +358,9 @@ export class NativeSshDriver implements SshDriver {
     })
   }
 
-  // ------------------------------------------------------------
 
   /**
    * 给 rsync 的 `--rsh` 前缀。
-   *
-   * **不含 host、不含 `%h`** —— rsync 自己会追加 `[-l user] host rsync --server ...`
-   * （实测）。前置 host 会连错两次；写 `%h` 会把字面量传给 ssh。
    */
   async openTunnel(): Promise<Tunnel> {
     if (this.sshPath === null) {
@@ -542,13 +477,11 @@ export class NativeSshDriver implements SshDriver {
 }
 
 /**
- * 偏好链的工厂。**函数而不是 class 导出**：ssh2 走的是按需加载，
- * 让调用方只在真正轮到那条驱动时才 import 它，
- * 免得一个没装 ssh2 的机器在 import 阶段就炸掉。
+ * 偏好链的工厂。**函数而不是 class 导出**：ssh2 走的是按需加载，让调用方只在真正轮到那条驱动时才 import 它，免得一个没装 ssh2 的机器在 import 阶段就炸掉。
  *
  * @param options 与偏好链选出来的那条相同的连接配置
  * @returns 一条**尚未校验可用性**的驱动；能不能用要问它的 `available()`。
- *   工厂不做任何 IO
+ * 工厂不做任何 IO
  */
 export function createNativeDriver(options: SshConnectionOptions): SshDriver {
   return new NativeSshDriver(options)

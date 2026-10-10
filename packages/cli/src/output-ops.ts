@@ -1,13 +1,3 @@
-/**
- * status / verify / rollback 的渲染层。**纯函数**。
- *
- * 与 output.ts 里的 apply 渲染分开但形状一致：apply 的结果带 releaseId /
- * filesWritten / steps，而这三个命令不带 —— 把它们塞进同一个 interface
- * 只会逼出 `filesWritten: 0` 这种「为了填字段而编的数」。
- *
- * 信封规则沿用 apply：**永远是恰好一个 JSON 文档**，单目标平铺、多目标读
- * `results`。调用方不需要猜（铁律：--json 时 stdout 只有 JSON）。
- */
 import { EXIT_CODE_ROWS } from './output.js'
 
 export type OpsCommand = 'status' | 'verify' | 'rollback'
@@ -32,8 +22,6 @@ export interface StatusResult {
   readonly reason?: string
   /**
    * `compose ps` 读到的服务状态。**只有真正读到才有**（哪怕读到的是空数组）——
-   * 「没配 docker」「ps 跑失败」「读到 0 个服务」是三件不同的事，混成同一个
-   * 空值就等于让读结果的人自己猜 compose 到底有没有被查过
    */
   readonly services?: ReadonlyArray<{ service: string; state: string; status: string; health: string }>
   /** ps 确实读到了（哪怕是空的）。用来把「读到了 0 个服务」与「没读」区分开 */
@@ -68,8 +56,7 @@ export interface RollbackResult {
 export type OpsResult = StatusResult | VerifyResult | RollbackResult
 
 /**
- * ok 的判定只看有没有 error。**不**把「status 查到不健康」算成失败：
- * status 的职责是报告事实，让它因为查到坏消息就变红就等于把报警器关掉。
+ * ok 的判定只看有没有 error。**不**把「status 查到不健康」算成失败：status 的职责是报告事实，让它因为查到坏消息就变红就等于把报警器关掉。
  */
 export function renderOpsJson(command: OpsCommand, results: readonly OpsResult[]): string {
   const single = results.length === 1 ? results[0] : undefined
@@ -89,8 +76,6 @@ export function renderOpsPretty(command: OpsCommand, result: OpsResult): string 
   const lines: string[] = [`${command} · ${result.project} → ${result.host}`]
 
   // 三个结果类型**都**有 warnings / error，直接读联合类型上的公共字段即可。
-  // 用 `as StatusResult & VerifyResult & RollbackResult` 交叉断言是骗编译器：
-  // 它让「某个类型其实没有这个字段」这类错在编译期消失
   if (command === 'status') {
     const s = result as StatusResult
     lines.push(`  发布根:     ${s.releaseRoot}`)
@@ -129,7 +114,6 @@ export function renderOpsPretty(command: OpsCommand, result: OpsResult): string 
     if (result.error.hint !== undefined) lines.push(`  下一步：${result.error.hint}`)
   }
   // 只有前两条是纯只读。rollback 真的动了 current，写同一句就成了假话 ——
-  // 用户据此以为环境没变化，而事实相反
   if (command !== 'rollback') {
     lines.push('', '（只读查询：没有切换 current、没有回滚、没有清理版本）')
   } else {

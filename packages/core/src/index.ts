@@ -1,9 +1,3 @@
-/**
- * @dp/core —— 编排的核心：plan()。
- *
- * 铁律：`plan(config + facts) → steps` 是**纯函数**，没有任何 IO。
- * 这是整套设计可测试性的来源：不需要机器就能断言"将会执行什么"。
- */
 import { INCOMING_SUFFIX, RELEASES_DIR_NAME, type Facts, type Layout, type Step } from '@dp/ports'
 import { DEFAULT_KEEP, type ProjectConfig } from '@dp/schema'
 import {
@@ -17,8 +11,7 @@ export * from './paths.js'
 export * from './detect.js'
 
 /**
- * plan 的输入。**全字段注入**（含源清单与 releaseId）：
- * 零 IO 才能在没有目标机的机器上断言「这一步会执行什么」。
+ * plan 的输入。**全字段注入**（含源清单与 releaseId）：零 IO 才能在没有目标机的机器上断言「这一步会执行什么」。
  */
 export interface PlanInput {
   /** 项目名，进路径与模板 */
@@ -34,10 +27,7 @@ export interface PlanInput {
 }
 
 /**
- * plan 的产物。
- *
- * 纯数据是刻意的：它的全部价值就是「不需要任何机器就能断言」，
- * 混进一个函数或时间戳就再也断言不了步骤序列了。
+ * 布局、发布根、步骤与告警，全为纯数据
  */
 export interface Plan {
   readonly layout: Layout
@@ -49,13 +39,6 @@ export interface Plan {
 
 /**
  * 编排：配置 + 事实 → 步骤序列。
- *
- * 纯函数是这里唯一不可让步的约束：它让「将要执行什么」在没有目标机时可断言，
- * 而步骤顺序（nginx 的 install → deploy → activate、docker 的 deploy → install → activate）
- * 恰恰是最容易在两个目标之间抄错的地方 —— 一次断言就能抓住，一次线上事故才发现就太贵了。
- *
- * `warnings` 与错误是两种出口：能力缺口（如未开 linger）不阻断部署，
- * 只提前告知；判据不成立（0 命中、并列）才抛错。
  *
  * @param input 注入的配置、目标机事实、版本号与源清单
  * @returns 布局、发布根、候选判定、步骤序列与告警；全是纯数据，无 IO

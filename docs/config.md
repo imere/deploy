@@ -5,7 +5,7 @@
 原则：
 
 1. **约定优于配置**：绝大多数字段有安全默认值，能推导的一律推导。**写高级能力不该增加基础用法的复杂度。**
-2. **单一真源**：所有字段只在一个 zod schema 里定义；TS 类型、运行时校验、**JSON Schema**（给编辑器提示）全部由它派生。手写第二份类型视为缺陷。
+2. **单一真源**：所有字段只在 `@dp/schema` 的一份自研 DSL 里定义（零依赖）；TS 类型、运行时校验、**JSON Schema**（给编辑器提示）全部由它派生。手写第二份类型视为缺陷。
 3. **就近覆盖**：profiles 覆盖 defaults，project 覆盖 profile，CLI `--set` 覆盖一切。但**不允许跨层猜测**。
 4. **默认值宁保守不激进**：默认不做破坏性动作（`--delete`、覆盖非托管文件、清理旧版本都需要显式开关）。
 
@@ -15,7 +15,7 @@
 
 ```ts
 // deploy.config.ts
-import { defineConfig } from '@dp/config'
+import { defineConfig } from '@dp/schema'
 
 export default defineConfig({
   projects: {
@@ -57,17 +57,7 @@ hosts:
 
 `dp schema` 会导出 JSON Schema。把它写进 `$schema` 那一行，**编辑器就能做字段名补全、类型校验、悬停文档** —— 这就是「ts/json/schema 保证参数提示」的具体落地。
 
-你也可以不用文件，直接在代码里当库用：
-
-```ts
-import { deploy } from '@dp/core'
-const result = await deploy({
-  projects: { web: { source: './dist', host: 'prod', to: '/var/www/web' } },
-  hosts: { prod: { ssh: 'deploy@10.0.0.7' } },
-})
-```
-
-对象与文件走同一套 schema，不存在「文件里能写的比对象里多」。
+文件与对象走同一份 schema：`defineConfig()` 就是配置文件的编程式入口，不存在「文件里能写的比对象里多」。
 
 ---
 

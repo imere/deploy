@@ -1,13 +1,3 @@
-/**
- * 目标机事实的获取 —— `plan` 与 `facts` 两个命令共用。
- *
- * 这是本包**唯一**组装具体实现的地方：core / local /
- * ssh 都互不认识，只有 CLI 知道「local 主机走 probeLocalFacts，ssh 主机走
- * connectSsh」。
- *
- * 铁律 0 落在两处：连接一定带 timeout；ssh 连接的认证只从**已存在的**密钥材料
- * 或 agent 推断，绝不弹窗 —— 推断不出来就报错，不猜。
- */
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { existsSync, promises as fs } from 'node:fs'
@@ -22,17 +12,6 @@ export const DEFAULT_CONNECT_TIMEOUT_MS = 30_000
 
 /**
  * 展开某个项目名在**当前平台的所有布局**下的发布根候选。
- *
- * 为什么必须做这一步：probeLocalFacts 默认探测的是 /srv、/opt 这类**通用**目录，
- * 而 pickReleaseRoot 查的是 `canWrite[<root>/<name>]` —— 展开后的具体路径。
- * 不补这一次探测，plan 在任何没显式写 release.root 的项目上都会报
- * 「没有可写的发布目录」，而这恰恰是最常见的情况。
- *
- * **只展开当前平台的候选**：RELEASE_ROOT_CANDIDATES 是按 platform 分组的，
- * 在 Windows 上展开 `/srv/<name>` 会退化成 `F:\srv\<name>`，于是
- * nearestExistingDir 一路冒到盘符根，去探测 `F:\` 能不能写 —— 既慢（实测 2.4s/个，
- * 一次 plan 因此多花 20s），又会在结果里塞进一堆毫无意义的 POSIX 路径，
- * 让「发布根候选」这一栏变成噪音。
  */
 export function releaseRootCandidates(
   name: string,
@@ -59,8 +38,7 @@ export interface FactsRequest {
   /** 配置里显式写的 release.root：它优先于候选，必须单独实测 */
   readonly releaseRoot?: string
   /**
-   * 连接实现。默认真的 `connectSsh`；测试注入假的才能断言「推导出来的 hops
-   * 真的被送到了连接层」—— 否则推导对了却忘了往下传，测试照样全绿。
+   * 连接实现。默认真的 `connectSsh`；测试注入假的才能断言「推导出来的 hops真的被送到了连接层」—— 否则推导对了却忘了往下传，测试照样全绿。
    */
   readonly connect?: typeof connectSsh
 }
@@ -72,14 +50,6 @@ export interface FactsResult {
   readonly close: (() => Promise<void>) | undefined
   /**
    * 已连上的那台机器的 Runner —— **只有 ssh 路径有**。
-   *
-   * 为什么单独交出来而不是让 apply 自己再连一次：探测要跑十几条命令，
-   * 重复连接既慢又可能因为主机密钥/瞬时抖动而第二次失败。复用同一条连接
-   * 也保证了「探测看到的机器」与「写入的机器」物理上就是同一台。
-   *
-   * 刻意保持可选且可缺省：local 路径**不**填（Runner 由调用方按需用
-   * createLocalRunner(facts) 现造，不需要 IO），plan/facts 两条只读命令也
-   * 完全不读这个字段 —— 所以既有调用方一行都不用改。
    */
   readonly runner?: Runner
 }
@@ -89,20 +59,7 @@ export { parseSshTarget }
 
 
 /**
- * 认证方式。**只认非交互来源**：
- *  - DP_SSH_KEY 指向的密钥文件 → key
- *  - 否则 ~/.ssh 下存在的常规私钥 → key
- *  - 都没有 → agent（交给系统 ssh 决定；没有 agent 时它会立刻失败，不会等输入）
- *
- * 导出：apply 的传输层要构造自己的 ssh argv（rsync 的 -e / tar 的远端命令），
- * 必须用**同一套**判定 —— 另立一套就会出现「探测用密钥 A、传输用 agent」
- * 这种探测成功但传输要密码的死锁。
- *
- * 判定是**全局**的：不按 host 区分。此前这里有个 `path` 参数（调用方传进来的是
- * `hosts.<id>.ssh` 这类按主机区分的路径），但实现从来没读过它 —— 留着等于让调用方
- * 以为「每台机器可以有自己的密钥」，而实际上所有主机走同一个 DP_SSH_KEY / ~/.ssh。
- * 与其留一个什么都不做的参数，不如把这句限制写在签名上：要支持按主机区分，
- * 改的就是这个函数，而不是某个调用点。
+ * 认证方式。**只认非交互来源**：- DP_SSH_KEY 指向的密钥文件 → key- 否则 ~/.ssh 下存在的常规私钥 → key- 都没有 → agent（交给系统 ssh 决定；没有 agent 时它会立刻失败，不会等输入）导出：apply 的传输层要构造自己的 ssh argv（rsync 的 -e / tar 的远端命令），必须用**同一套**判定 —— 另立一套就会出现「探测用密钥 A、传输用 agent」这种探测成功但传输要密码的死锁。
  */
 export function resolveAuth(env: NodeJS.ProcessEnv): SshConnectionOptions['auth'] {
   const explicit = env['DP_SSH_KEY']
@@ -130,12 +87,6 @@ export function nearestExistingDir(path: string): string {
 
 /**
  * 探测「能不能把发布根建出来」。
- *
- * probeWritable 只能测已存在的目录，而 pickReleaseRoot 查的是 canWrite[<root>/<name>]，
- * 那个路径多数时候还不存在。所以这里退一步：路径不存在就测它最近的已存在祖先
- * —— 祖先可写即意味着这条路径可被创建。
- *
- * 保守性：只沿**祖先**回退，不跨盘符判断，也不假设中间目录都已存在。
  */
 export async function probeCreatable(
   paths: readonly string[],
@@ -158,9 +109,6 @@ export async function probeCreatable(
 
 /**
  * 未回收的探测文件必须变成**用户看得见**的一行字。
- *
- * 静默过一次的后果是实测过的：残留悄悄攒了上千个，这台机器上所有候选目录随后被判
- * 不可写，部署跑不动，而日志里没有任何东西指得到真正的原因。
  */
 function leftoverNotes(leftovers: readonly string[]): string[] {
   if (leftovers.length === 0) return []
@@ -172,10 +120,6 @@ function leftoverNotes(leftovers: readonly string[]): string[] {
 
 /**
  * 一台远端主机的连接目标。
- *
- * `hops` 存在时它就是**整条链**（含目标机），不是「跳板们」—— 驱动需要完整链条
- * 才能判断哪一跳是目标、哪些该进 `-J`。两份 `hops` 语义若各写一份，迟早一边
- * 少传一跳而测试全绿。
  */
 export interface SshEndpoint {
   readonly host: string
@@ -185,15 +129,7 @@ export interface SshEndpoint {
 }
 
 /**
- * `HostConfig` → 连接目标。**本包唯一的推导入口** —— `acquireFacts`（探测）
- * 与 `apply`（传输）必须从同一份结论出发，否则会出现「探测直连、传输走跳板」
- * 这种每一步都成功但连的是两台机器的组合。
- *
- * 纯函数，零 IO：认证由调用方 `resolveAuth` 后经 `targetAuth` 注入。
- *
- * 为什么 `ssh` 与 `hops` 同时出现要在**这里**再拒一次：配置层已互斥，但本函数
- * 会被不经过 schema 的路径调用（测试夹具、`--facts` 旁路），「二选一」得在代码
- * 里也成立，否则两条连接路径会同时成立而没有一条报错。
+ * `HostConfig` → 连接目标。**本包唯一的推导入口** —— `acquireFacts`（探测）与 `apply`（传输）必须从同一份结论出发，否则会出现「探测直连、传输走跳板」这种每一步都成功但连的是两台机器的组合。
  */
 export function resolveSshEndpoint(host: HostConfig, path: string, targetAuth?: AuthConfig): SshEndpoint {
   const hops = host.hops !== undefined && host.hops.length > 0 ? host.hops : undefined
@@ -214,7 +150,6 @@ export function resolveSshEndpoint(host: HostConfig, path: string, targetAuth?: 
     const lastAuth = last.auth !== undefined ? hopAuthConfig(last.auth) : targetAuth
     const chain: HopSpec[] = hops.map((hop, i) => {
       // 中间跳的 auth 绝不兜底：继承意味着把目标机的凭据发给跳板机。
-      // 缺 auth 时留空，由 planHopChain 在碰网络之前报错。
       const auth = i === hops.length - 1 ? lastAuth : hop.auth !== undefined ? hopAuthConfig(hop.auth) : undefined
       return {
         ssh: hop.ssh,
@@ -248,11 +183,6 @@ export function resolveSshEndpoint(host: HostConfig, path: string, targetAuth?: 
 
 /**
  * schema 的逐跳 auth → 驱动的 `AuthConfig`。
- *
- * 为什么显式转一手而不靠结构兼容：schema 那一层的 `type` 是可缺省的（`withDefault`
- * 只在**校验后**补值，类型上仍是 `type?`），直接塞进驱动会在「没写 type」时拿到
- * 一个既不是 key 也不是 agent 的空壳 —— 那是「凭据类型未知」而不是「用 agent」，
- * 猜错等于把私钥路径当成空值传下去。
  */
 function hopAuthConfig(auth: NonNullable<NonNullable<HostConfig['hops']>[number]['auth']>): AuthConfig {
   if (auth.type === 'key') {
@@ -266,9 +196,6 @@ function hopAuthConfig(auth: NonNullable<NonNullable<HostConfig['hops']>[number]
 
 /**
  * 串里的端口与 `port` 字段同时给出且不一致 → 报错。
- *
- * 与 hop-chain/validateHops 同一约定：静默取一个会让用户以为连的是自己写的
- * 那一台，而那次连接**往往还是成功的**。
  */
 function resolvedHopPort(
   hop: { readonly port?: number },
@@ -313,8 +240,6 @@ export async function acquireFacts(request: FactsRequest): Promise<FactsResult> 
       return { facts, probeNotes: leftoverNotes(baseLeftovers), close: undefined }
     }
     // 补测发布根：只加 key，不覆盖 probeLocalFacts 已给出的结论。
-    // 写了显式 release.root 时**只测它一个** —— pickReleaseRoot 见到 explicitRoot 就短路，
-    // 候选列表根本不会被读，此时再展开十几个候选去逐个建文件，纯属白干。
     const targets =
       request.releaseRoot === undefined
         ? releaseRootCandidates(request.projectName, base.homedir, base.env, base.platform)
@@ -364,9 +289,7 @@ export async function acquireFacts(request: FactsRequest): Promise<FactsResult> 
 }
 
 /**
- * 读 `--facts <file>`。存在的意义就是让 CI 能把 `dp facts --json > facts.json`
- * 存下来，之后 `dp plan --facts facts.json` 完全离线跑 —— 复现问题与单元测试
- * 都靠它，且顺带避免了测试环境里真的去连目标机。
+ * 读 `--facts <file>`。存在的意义就是让 CI 能把 `dp facts --json > facts.json`存下来，之后 `dp plan --facts facts.json` 完全离线跑 —— 复现问题与单元测试都靠它，且顺带避免了测试环境里真的去连目标机。
  */
 export async function readFactsFile(path: string): Promise<Facts> {
   let text: string

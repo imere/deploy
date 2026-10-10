@@ -1,15 +1,3 @@
-/**
- * 远端事实探测 —— 与 packages/local/src/probe.ts 同一套哲学：
- * **能力一律实证，不推断。**
- *
- * `command -v su` 返回了路径，但 `su` 本身可能是坏的（实测
- * busybox su 缺 suid 位，`su -c 'id' root` 直接失败）。所以：
- *  - 工具路径 = `command -v`（只能说明"存在"）
- *  - 能力     = 真做一次（建临时文件再删、真 bind 一次端口、真 `sudo -n`）
- *
- * 每一条探测命令都带超时；单条失败**不影响整体** —— 那一条记安全默认值，
- * 并在 `probeNotes` 里说明「哪项没探到、为什么」。静默降级比报错更危险。
- */
 import type { Arch, Capabilities, Facts, InitSystem, Platform } from '@dp/ports'
 import { DpError, POSIX_WRITE_CANDIDATES } from '@dp/ports'
 import type { SshDriver } from './driver.js'
@@ -48,16 +36,12 @@ const TOOLS_TO_PROBE = [
 ] as const
 
 /**
- * 与 `@dp/local` 共用同一份候选（`@dp/ports` 的那张表），只多一个 `/tmp`：
- * 本地探测有 `os.tmpdir()` 可用，远端没有，只能把它列进候选里实测。
- * 这张表**不许**在这里另写一份 —— 两份 facts 的语义必须可比。
+ * 与 `@dp/local` 共用同一份候选（`@dp/ports` 的那张表），只多一个 `/tmp`：本地探测有 `os.tmpdir()` 可用，远端没有，只能把它列进候选里实测。
  */
 const DEFAULT_WRITE_PATHS = [...POSIX_WRITE_CANDIDATES, '/tmp'] as const
 
 /**
- * 探测的开关。**全可选、且都有对应的"默认值来源"**：
- * 工具表与候选目录见本文件顶部，环境变量由 `resolveTimeoutMs` 兜底，
- * 没有任何一项需要调用方自己算一遍。
+ * 探测的开关。**全可选、且都有对应的"默认值来源"**：工具表与候选目录见本文件顶部，环境变量由 `resolveTimeoutMs` 兜底，没有任何一项需要调用方自己算一遍。
  */
 export interface ProbeOptions {
   /** 要探测的工具名。给空数组则**一个都不探**，而不是退回默认表 —— 想省往返的调用方要能说清自己在省什么 */
@@ -74,10 +58,6 @@ export interface ProbeOptions {
 
 /**
  * 探测结果。
- *
- * `probeNotes` 与 `facts` 同等重要：facts 里那些 `unknown` / `null` 是**保守默认值**，
- * 而 note 是"这个默认值是怎么来的"。少了 note，一份全是 unknown 的 facts
- * 与一台真的什么都没装的机器长得一模一样，两者的处置完全不同。
  */
 export interface ProbeResult {
   readonly facts: Facts
@@ -108,20 +88,13 @@ function tagFields(stdout: string, tag: string): readonly string[] {
 }
 
 /**
- * 一次远端事实探测。**一条复合脚本拿完所有字段** ——
- * 每次 exec 都要穿整条连接（多跳时每多一跳就多一次往返），
- * 把 20 次往返合并成 1 次，比把脚本写得多漂亮都值。
- *
- * 探不到的字段一律取**保守默认值 + 一条 note**，不抛错：
- * 探测失败不该让整个部署停下来 —— 有些部署（只读检查、纯用户态）
- * 在 facts 不全的情况下也能跑，而把它们一起拦掉是过度反应。
- * 真正的硬要求由 `makePlan()` 在 facts 之上判定，那才是该报错的地方。
+ * 一次远端事实探测。**一条复合脚本拿完所有字段** ——每次 exec 都要穿整条连接（多跳时每多一跳就多一次往返），把 20 次往返合并成 1 次，比把脚本写得多漂亮都值。
  *
  * @param driver 已建立的驱动。**只用它 exec，不开第二条连接** ——
- *   探测用的凭据若与实际执行用的那条不是同一条，探出来的可写性就说明不了任何事
+ * 探测用的凭据若与实际执行用的那条不是同一条，探出来的可写性就说明不了任何事
  * @param options 见 {@link ProbeOptions}
  * @returns 事实与全部说明。`facts` 里每个保守默认值都必然在 `probeNotes` 里有一条对应记录，
- *   两者不是各自独立的产出
+ * 两者不是各自独立的产出
  */
 export async function probeFacts(driver: SshDriver, options: ProbeOptions): Promise<ProbeResult> {
   const notes: string[] = []
@@ -136,7 +109,6 @@ export async function probeFacts(driver: SshDriver, options: ProbeOptions): Prom
   try {
     const res = await driver.exec({
       // 一条复合脚本拿完平台/身份/工具/可写性 —— 每次 exec 都要穿整条连接
-      // （多跳环境里往返就是钱）
       argv: ['sh', '-c', compositeProbe(toolNames, writePaths)],
       timeoutMs,
     })
@@ -244,7 +216,6 @@ function detectInitFromProbe(pid1: string, tools: Readonly<Record<string, string
 
 /**
  * canChown：**真的 chown 一次**到别的身份。
- * 无 root 时通常返回空数组 —— 那就是事实，不是缺陷。
  */
 async function probeCanChown(
   driver: SshDriver,
@@ -299,8 +270,6 @@ async function probeSystemdScope(
 
 /**
  * canBindPrivilegedPort：**真 bind 一次** 80/443。
- * 「uid 是不是 0」这种推断在容器、macOS、网络命名空间里都会失真
- * （ 明确禁止）。
  */
 async function probePrivilegedPort(
   driver: SshDriver,
@@ -341,10 +310,6 @@ async function probePrivilegedPort(
 
 /**
  * sudoAllowlist：`sudo -n -l`。
- *
- * **绝不用 `sudo -S` 探测** —— 它会从 stdin 读密码，没有密码时挂在那里，
- * 而铁律 0 禁止任何等待。`-n` 是唯一安全的探测形式（实测：
- * `sudo -n id` 退出 1 并报 "a password is required"，这正是我们要的结论）。
  */
 async function probeSudoAllowlist(
   driver: SshDriver,
@@ -365,13 +330,10 @@ async function probeSudoAllowlist(
   }
 }
 
-// ------------------------------------------------------------
 // 提权实证
-// ------------------------------------------------------------
 
 /**
- * 提权的实证结论。`available: false` **不是一个错误**，是一个可以被 plan 用来
- * 改方案的正常结论 —— 部署到用户可写目录本来就不需要提权。
+ * 提权的实证结论。`available: false` **不是一个错误**，是一个可以被 plan 用来改方案的正常结论 —— 部署到用户可写目录本来就不需要提权。
  */
 export interface CanElevateResult {
   /** 能不能真的提权。由远端跑一次 `id -un` 得出，不由配置声明 */
@@ -385,19 +347,13 @@ export interface CanElevateResult {
 /**
  * 提权能不能成 —— **实证**（`sudo -n true`），不推断。
  *
- * 这正是的教训：`command -v su` 有，但它缺 suid 位，
- * 实际调用会失败。所以每种 become 都要真跑一次。
- *
- * 探测时**强制** `nonInteractive`：这一步自己绝不能是第一个去等密码的地方 ——
- * 它跑在 plan 之前，那时候还没有任何机制能给它喂密码，也没人看着。
- *
  * @param driver 已建立的驱动
  * @param become 配置里的提权方式。`none` 不做任何提权，只跑一次 `id -un`
- *   确认"普通用户身份确实可用" —— 连这都失败的话，后面每一次 exec 都会失败
+ * 确认"普通用户身份确实可用" —— 连这都失败的话，后面每一次 exec 都会失败
  * @param options 只留超时。**没有**"允许交互"这类开关：需要密码的探测
- *   在这个位置永远是错的
+ * 在这个位置永远是错的
  * @returns 结论。`reason` 在可用与不可用时都非空：可用时它记录的是"实证通过 + 拿到了什么身份"，
- *   这句话会进报告，读者需要能复核而不是只能看到一个 true
+ * 这句话会进报告，读者需要能复核而不是只能看到一个 true
  */
 export async function canElevate(
   driver: SshDriver,

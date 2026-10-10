@@ -1,19 +1,6 @@
 #!/usr/bin/env node
 /**
  * 假测试扫描器 —— 找「跑着是绿的、但什么也没验证」的用例。
- *
- * 静态扫描只能抓「断言写坏了」，抓不到「断言写对了但夹具区分不出正确与错误的实现」。
- * 所以本脚本只报信号、不下结论：每一条都要人眼过一遍再决定修不修。
- *
- * 分级：
- *   P0 致命  零断言用例 / 形同虚设的 assert.throws / 被忽略的校验形参 / 恒等断言（退出码非 0）
- *   P1 提示  弱存在性 assert.ok / 被 skip 的用例 / 空 catch
- *
- * 另有一类「断言常量字面量」：右值是常量的 assert 是完全正常的写法，它占全部命中的
- * 九成以上。逐条铺开时真正要改的十几条会被埋掉 —— 报告工具自己有噪声，它的输出就没人看。
- * 所以默认折叠（`--verbose` 展开），且不计入 P0。判据一次没少，只是不占默认屏。
- *
- * 只用 Node 内置模块，正则 + 括号配平扫描 .ts 源码（不是 build 产物 —— 源码才是人改的）。
  */
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname, relative } from 'node:path'
@@ -28,7 +15,6 @@ const AS_JSON = argv.includes('--json')
 // 关掉类型收窄豁免，用来对比判据本身有没有起作用（不然没人知道豁免是真判对了还是判据写空了）
 const NARROW_EXEMPT = !argv.includes('--no-narrow-exempt')
 // 展开「断言常量字面量」那一大段。默认折叠的理由写在文件头：它信噪比极低，
-// 铺开会把真正要改的那十几条埋掉。折叠只影响默认输出，不影响任何判据与退出码。
 const VERBOSE = argv.includes('--verbose')
 
 /* ---------------------------------------------------------------- 词法遮罩 */
@@ -37,7 +23,6 @@ const PAIRS = { '(': ')', '[': ']', '{': '}' }
 
 /**
  * 把字符串 / 模板 / 注释 / 正则字面量的内容替换成空格（换行保留），长度不变。
- * 不遮罩就没法可靠配平括号 —— 仓库里到处是 `${x}`、`/\d{2}/`、`// 注释`。
  */
 function mask(src) {
   const out = src.split('')
@@ -169,8 +154,6 @@ const helperRe = [
 
 /**
  * 找出「形参被忽略」的 throw/reject helper。
- * 只看名字带 throw/reject 的 —— 那是「声称在校验错误」的那一类，
- * 形参被丢掉就等于「抛什么都算过」。
  */
 const ignoredHelpers = []
 const assertingHelpers = new Set()
@@ -189,8 +172,6 @@ for (const file of srcFiles) {
       if (close < 0) continue
 
       // 函数体定位：函数声明是 `name(...): T { }`，箭头是 `name(...) => { }` 或 `=> expr`。
-      // 两种都得认，否则 `function caughtThrows(...){...}` 整个漏掉 ——
-      // 漏掉的 helper 会被当成「没有断言」，于是它的每个调用点都变成假 P0。
       const after = masked.slice(close + 1, close + 60)
       let bodyStart, bodyEnd
       if (/^\s*=\s*>/.test(after)) {
@@ -220,12 +201,10 @@ for (const file of srcFiles) {
       if (/\bassert\.\w+|throw\s+new\s+Error/.test(body)) assertingHelpers.add(name)
 
       // 只有「声称在校验错误」的 helper 才有形参可丢：名字必须带 throw/reject。
-      // 别的 helper 形参没用上不是 P0（多半是压根不接那个参数）。
       if (!/throw|reject/i.test(name)) continue
       const params = splitArgs(masked, open, close)
       params.forEach(([a, b], idx) => {
         // 形参写法很杂：`fn: T` / `_ctor?: unknown` / `ctor: Function = Cli` / `...rest`。
-        // 可选形参恰好是最该被查的那类（`caughtThrows(fn, _ctor?)`），不能因为一个 `?` 就丢掉。
         const pname = src.slice(a, b).trim()
           .replace(/^\.\.\./, '')
           .split('=')[0]
@@ -244,9 +223,6 @@ for (const file of srcFiles) {
 }
 
 // 调用处：helper 形参被丢了，调用方却传了值 —— 那处「断言错误类型」是假的
-// 只在 helper 所在文件内找调用处：同名 helper 在别的文件里可能是另一个实现
-// （本仓 args.test.ts 的 caughtThrows 真校验了 ctor，targets.test.ts 的没校验，
-//  按名字跨文件归因会把好的算成坏的）。
 for (const h of ignoredHelpers) {
   for (const file of testFiles) {
     if (rel(file) !== h.file) continue
@@ -311,7 +287,6 @@ for (const file of testFiles) {
 
     if (kind === 'describe') {
       // describe 只登记 skip，不吃掉块体：里面的 it() 还要继续扫。
-      // 本仓几乎每个文件都把全部用例包在一个 describe 里，跳过块体 = 漏报全仓。
       if (modifier === 'skip' || modifier === 'todo') {
         add(P1, 'P1', fileRel, line, name, `describe.${modifier}：整块不跑，里面的用例不提供任何保障`)
       }

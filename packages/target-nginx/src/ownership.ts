@@ -1,11 +1,3 @@
-/**
- * 所有权保护 —— 只覆盖带标记的文件。
- *
- * 存在的理由是：同名 conf 可能是**用户自己写的**，
- * 部署工具凭自己的需要把它覆盖掉，等于替用户删掉他没打算删的配置。
- * 所以判定必须落在纯函数上 —— 「这个文件是不是我们的」应该在 plan 期能算出来，
- * 而不是等远端 `cat` 完再决定要不要报错。
- */
 import { DpError } from '@dp/ports'
 
 /** 标记本体。渲染时写进 conf 头部，判定时在文件里找它 */
@@ -16,10 +8,6 @@ const MARKER_TEXT = MANAGED_MARKER.slice(1).trim()
 
 /**
  * 只看前几行。
- *
- * 不是「只看首行」：用户往往会在 dp 生成的标记上面再加自己的注释。
- * 也不是全文搜：conf 正文是 nginx 的有效配置，让正文里出现标记字样
- * （比如某条 `add_header` 的内容）就把这份文件认领成 dp 的，等于开了误判通路。
  */
 const SCAN_LINES = 5
 
@@ -32,9 +20,9 @@ function isMarkerComment(line: string): boolean {
  * 内容里是否带标记。空文件返回 false —— 它不可能是 dp 写的。
  *
  * @param content 目标机上那份 conf 的完整内容。读不到就让它抛错，**不要**拿空串顶替
- *   ——「读不了」被当成「不存在」，后面就直接是一次覆盖
+ * ——「读不了」被当成「不存在」，后面就直接是一次覆盖
  * @returns true 只说明「头部注释自称由 dp 管理」，不说明内容真是 dp 写的；
- *   所以即便为 true，覆盖前仍要备份
+ * 所以即便为 true，覆盖前仍要备份
  */
 export function isManaged(content: string): boolean {
   return content.split(/\r?\n/).slice(0, SCAN_LINES).some(isMarkerComment)
@@ -42,10 +30,6 @@ export function isManaged(content: string): boolean {
 
 /**
  * 覆盖判定的结论。三种取值都是**正常结果**、不是异常。
- *
- * 做成返回值而不是直接抛错，是因为 `dp plan` 与 `--dry-run` 都要把它当数据读：
- * 一个只为真实部署存在的 throw，会让这两个出口看不到「这个文件不是你的」这条信息，
- * 用户只能在真正开始覆盖的那一刻才第一次听说它。
  */
 export interface OverwriteDecision {
   readonly action: 'create' | 'replace' | 'abort'
@@ -57,9 +41,6 @@ export interface OverwriteDecision {
 
 /**
  * 判定的可调项。**默认不 force**。
- *
- * 默认取「拒绝」而不是「覆盖」：同名未标记的 conf 绝大多数是用户自己写的，
- * 而误判成 dp 的代价是静默删掉别人没有打算删的配置 —— 这类损失没有任何报错能补救。
  */
 export interface OverwriteOptions {
   readonly force?: boolean
@@ -69,9 +50,6 @@ export interface OverwriteOptions {
 
 /**
  * 判定能不能覆盖。纯函数，不抛错 —— 调用方要能把三种结果都当数据用。
- *
- * `force` 只影响「能不能覆盖」，不影响「覆不备份」：强制覆盖同样是在覆盖
- * 一个可能含无价配置的文件，备份是唯一的后悔药。
  *
  * @param existing 目标机上现有 conf 的内容。**只有 `null` 算不存在**，空串算「存在且为空」
  * @param options force 与出错时的配置项路径；省略即按最保守的一档判定

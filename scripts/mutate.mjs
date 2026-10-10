@@ -1,22 +1,3 @@
-/**
- * 变异测试 harness：往构建产物里注入一个变异 → 跑该包测试 → 判定「杀死（变红）」还是
- * 「存活（仍绿）」。**存活 = 这段实现被改坏了测试却没反应 = 假测试的藏身处。**
- *
- * 为什么所有写都被隔离到 .tmp/mutate：
- *   曾经手工做变异，六个变异注入后产物没还原，最后靠删掉 build + 全量重建才救回来。
- *   这里用结构而不是靠小心来防这件事：
- *     1. 目标包的 packages/<pkg>/build 被**只读复制**成 .tmp/mutate/packages/<pkg>/build
- *        （连 package.json 与 src 一起），副本目录结构保持一致；
- *     2. @dp/* 交叉引用用 junction 指回副本 —— 否则 `import '@dp/x'` 会解析到真产物，
- *        变异悄悄失效，然后被记成「存活」（一种纯属噪声的假信号）；
- *     3. 一切落盘都过 writeInside()：先确认路径在 .tmp/mutate 下，再顺着链接问一次
- *        落点的真身，所以「写进 packages 的 build」在这份代码里不是纪律问题而是不可达分支；
- *     4. 跑之前和之后对 packages 各包的 build 做文件数+字节数快照，不一致就是红线被踩；
- *     5. try/finally + 信号处理器兜住中断，临时目录一定删。
- *
- * 为什么每个变异都要先 `node --check`：改崩语法会让测试以 import 失败变红，
- * 那不是「测试抓到了」，是被误判成杀死。语法不成立的一律不计入统计。
- */
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve as resolvePath, relative, sep } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -60,7 +41,6 @@ function realpathOfExisting(abs) {
 function writeInside(abs, data) {
   if (!inside(abs, TMP)) throw new Error(`拒绝写入临时目录之外的路径：${abs}`)
   // 路径落在临时根内 ≠ 落点是副本：临时根里放的是指向真目录的 junction（docs、非目标包），
-  // 顺着它写出去照样污染仓库。再跑一次 realpath 问清「落点的真身在哪」才放行。
   const real = realpathOfExisting(abs)
   if (!inside(real, TMP)) throw new Error(`拒绝穿过链接写入临时目录之外：${abs}（真身 ${real}）`)
   writeFileSync(abs, data)
@@ -81,7 +61,6 @@ function parseArgs(argv) {
     if (a === '--max') {
       const raw = value(i, a)
       // `all` 是「跑完整个候选池」。用 0 表达「不限」会被读成「一个都不跑」——
-      // 同一个位置上两种完全相反的意思，是这类开关最容易咬人的写法。
       if (raw === 'all') {
         opts.max = Infinity
         i += 1
@@ -95,7 +74,6 @@ function parseArgs(argv) {
     }
     if (a === '--json') { opts.json = true; continue }
     // 不看豁免清单地跑一遍：清单是对代码的判断，不是对被豁免者的免检证件。
-    // 想复核「某处的杀不死」到底成不成立时用它，得到的是没减过的原始数字。
     if (a === '--no-exempt') { opts.exempt = false; continue }
     if (a === '--fail-over') {
       const n = Number(value(i, a))
@@ -180,14 +158,7 @@ function linkDir(target, link) {
 }
 
 /**
- * 副本与 junction 的分工（这条决定了跑一次的开销）：
- *   - 目标包：真正复制 build（只留 .js —— .map/.d.ts 不参与执行，带上它们会让临时文件数翻三倍，
- *     而删一个临时文件的成本远高于复制它）+ src（ssh 的 hygiene 用例要回头读源码）+ package.json；
- *   - 非目标包、以及仓库根的其余条目：用 junction 指到真目录，只读、零复制。
- *     它们之所以能安全地指回真物，是因为 writeInside 会把「落点真身」问清楚再放行。
- *
- * 少了根条目的镜像，ports 那条 `new URL('../../../docs/failures.md', import.meta.url)`
- * 就会指空，基线变红 —— 基线红的时候任何变异判定都没有意义。
+ * 副本与 junction 的分工（这条决定了跑一次的开销）：- 目标包：真正复制 build（只留 .js —— .map/.d.ts 不参与执行，带上它们会让临时文件数翻三倍，而删一个临时文件的成本远高于复制它）+ src（ssh 的 hygiene 用例要回头读源码）+ package.json；- 非目标包、以及仓库根的其余条目：用 junction 指到真目录，只读、零复制。
  */
 const COPY_FILTER = (p) => !/\.(map|d\.ts)$/.test(p)
 
@@ -239,7 +210,6 @@ function runNode(args, timeoutMs) {
     timeout: timeoutMs,
     windowsHide: true,
     // 子进程的 stdin 必须关掉：一是铁律 0（永不等人类输入），二是在受限环境里
-    // 建这条管道会因为权限报 EBUSY，让整个 harness 开不了工
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, NODE_NO_WARNINGS: '1' },
   })
@@ -277,9 +247,6 @@ function parsesAsEsm(src) {
 
 /**
  * 等长遮盖字符串/模板字面量与行注释。
- *
- * 为什么不能直接对原行做替换：改字符串内容不改变行为，会被记成「测试没抓到」，
- * 而它根本不是实现的一部分 —— 那是本 harness 最想要避免的噪声来源。
  */
 function maskLiterals(line) {
   let res = ''
@@ -318,8 +285,7 @@ const lineStarts = (src) => {
 }
 
 /**
- * 单文件候选点。每处是独立的一次变异（每次只改一处，改完还原），
- * 所以同一行可以产出多个候选，但它们从不同时生效。
+ * 单文件候选点。每处是独立的一次变异（每次只改一处，改完还原），所以同一行可以产出多个候选，但它们从不同时生效。
  */
 function collectCandidates(pkg, file, rel) {
   const src = readFileSync(file, 'utf8')
@@ -407,10 +373,6 @@ const applyMutation = (src, m) => `${src.slice(0, m.start)}${m.text}${src.slice(
 /**
  * 读入 `scripts/mutate-exempt.json`（等价变异名单）。
  *
- * 格式不对时**整体停手**而不是跳过：跳过意味着那一批等价变异重新回到存活分子里，
- * 每周报告会一直顶在阈值边缘，而看报告的人并不知道清单压根没读进去 ——
- * 那比清单写错更难发现。
- *
  * @param {boolean} enabled `--no-exempt` 会给 false
  * @returns {object[] | null} 校验通过的条目；格式不对或未启用时为空数组；不可用返回 null
  */
@@ -454,7 +416,6 @@ function main() {
 
   const exemptions = loadExemptions(opts.exempt)
   // null = 清单读不出来或格式不对，此时 loadExemptions 已经把原因打出来了。不停手的话
-  // 那一批等价变异会静默回到存活分子里，报告看起来「变差了」而原因没人知道。
   if (exemptions === null) return { exitCode: 2 }
 
   const targets = opts.pkg ? [opts.pkg] : allPkgs
@@ -547,7 +508,6 @@ function main() {
         writeInside(m.file, original)
       }
       // `file` 是给 matchExemption 看的（清单记的是产物相对路径），`rel`/`kind`
-      // 是给报告看的 —— 两边都从同一个 m 取，不会再出现「清单写对了却一次都没匹配上」
       const mutation = { file: m.rel, pkg: m.pkg, rel: m.rel, line: m.line, kind: m.kind, label: m.label }
       const ex = matchExemption(exemptions, mutation)
       if (ex) usedKeys.add(ex.key)
@@ -577,17 +537,12 @@ function main() {
     const decided = killed + survivors.length
     const rate = decided === 0 ? 0 : (survivors.length / decided) * 100
     // 「清单里的条目一次都没命中」与「命中了却被杀」要说成两件事：前者多半是产物行号变了，
-    // 后者是清单在替一处已经被守住的代码说话。同一处若两种情形都成立，只报后者 —— 它更紧迫。
-    //
-    // 只对本轮参与的**那些包**清单条目做「没用上」的统计：清单是全仓共享的，跑 core 时
-    // 属于 schema 的那几条自然匹配不到，报出来会让人以为它们失效了。
     const staleKeys = new Set(stale.map((m) => `${m.rel}:${m.line} ${m.label}`))
     const relevant = exemptions.filter((e) => targets.includes(pkgOfArtifactPath(e.file)))
     const idle = unusedExemptions(relevant, usedKeys).filter((e) => !staleKeys.has(`${e.file}:${e.line} ${e.label}`))
 
     if (opts.json) {
       // 豁免 / 过期 / 落空与存活一起输出：只给存活数字的报告会被读成「测试写得好」，
-      // 而真实原因可能是清单在替一处已经守不住的代码说话。
       out(JSON.stringify({
         summary: {
           total: decided,
@@ -618,7 +573,6 @@ function main() {
         for (const m of invalid) out(`  ${m.rel}:${m.line}  ${m.kind} ${m.label} —— ${m.note}`)
       }
       // 豁免 / 过期 / 落空这三件事必须出现在同一份报告里：它们解释的是「为什么这个数字
-      // 是这样」，缺了它们的人会把「少了两个存活」当成测试写得好。
       if (exempted.length > 0) {
         out('')
         out(`豁免 ${exempted.length} 个（登记在案的等价变异 —— 改了行为完全相同，见 scripts/mutate-exempt.json 的理由）：`)
@@ -641,8 +595,6 @@ function main() {
 
     if (rate > opts.failOver) exitCode = 1
     // 清单过期也算红：条目留着不会让存活率失真（它仍计为杀死），但会让清单慢慢烂掉 ——
-    // 下一次有人照着清单去判断「这处本来就该豁免」时，读到的就是过期结论。周跑一次，
-    // 删条目的成本远低于排查一份没人维护的清单。
     if (stale.length > 0) exitCode = 1
     return { exitCode }
   } finally {

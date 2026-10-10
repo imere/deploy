@@ -1,14 +1,3 @@
-/**
- * 零配置需要的那几项「cwd 到底是什么样」—— **读盘**，但只读不写、也不起子进程。
- *
- * 与 `zero-config.ts` 分成两个文件是硬约束：那边必须保持零 IO，否则
- * `deriveZeroConfig()` 的纯函数测试就不成立了。合并两边的后果是探测函数开始
- * 依赖真实文件系统，于是「给一组 entries 就能断言结论」这件事再也做不到 ——
- * 而那正是最值得反复断言的部分。
- *
- * 同步 API 是刻意的：调用方只有一处（deploy 命令），异步化只会多一层 await
- * 而没有任何并发收益。
- */
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { DpError } from '@dp/ports'
@@ -19,18 +8,11 @@ const MAX_ENTRIES = 2000
 
 /**
  * 这两个目录永远不是源根候选，也不是源内容。
- *
- * `node_modules` 是依赖树（几十万条目，且里面确实有 `index.html` 之类的文件 ——
- * 留着它会让探测看到一个与你的项目无关的 static 证据）；`.git` 同理。
  */
 const EXCLUDED_DIRS: ReadonlySet<string> = new Set(['node_modules', '.git'])
 
 /**
  * 零配置装配需要的全部「cwd 到底是什么样」。
- *
- * 字段与 `zero-config.ts` 的输入**逐个对应**且不多不少：多一个字段就得在
- * 纯函数那边加一个必填项，少一个则探测结论少一块证据 —— 两边不对齐时
- * 编译期毫无提示，只在「改了探测却忘了改装配」之后表现为一次诡异的部署。
  */
 export interface ProjectFacts {
   readonly projectName: string
@@ -44,10 +26,6 @@ export interface ProjectFacts {
 
 /**
  * 项目名 = cwd 的 basename。
- *
- * 推不出来就报错：拿 `''` 当项目名会让下游的路径、compose 项目名、release
- * 目录名全部变成一个不可见的空串，错误要等到远端某条命令的参数为空时才炸，
- * 那时已经没有任何线索指回「你的 cwd 没有名字」。
  */
 function projectNameOf(cwd: string): string {
   const abs = resolve(cwd)
@@ -80,13 +58,6 @@ function toRelative(root: string, abs: string): string {
 
 /**
  * 递归列出源根下的**文件**（不含目录条目）。
- *
- * 目录条目不进清单：探测只看文件名，而 `SourceEntry` 的目录条目由 apply 那层
- * 按 relativePath 补齐（见 apply.ts 的 withParentDirs）—— 这里补一份等于
- * 造第二个来源。
- *
- * 软链不进清单也不递归：`Dirent.isDirectory()` 对软链返回 false，所以软链目录
- * 会被整体跳过。跟随它可能绕成环，递归一次就是一个挂住的进程。
  */
 function entriesUnder(cwd: string, root: string, projectName: string): readonly string[] {
   const out: string[] = []
@@ -102,7 +73,6 @@ function entriesUnder(cwd: string, root: string, projectName: string): readonly 
       out.push(toRelative(root, abs))
       if (out.length > MAX_ENTRIES) {
         // 截断会让探测基于一部分证据下结论，而那比报错更难查：
-        // 「以为它是 static」与「它是 compose」只差一个没被看到的文件名
         throw new DpError('DP.CONFIG.INVALID', `源目录条目超过 ${MAX_ENTRIES} 个：${root}`, {
           path: `projects.${projectName}.source`,
           hint:
@@ -118,9 +88,6 @@ function entriesUnder(cwd: string, root: string, projectName: string): readonly 
 
 /**
  * package.json 的 scripts 键名。
- *
- * 解析失败**报错**而不是当成「没有 scripts」：scripts 里的 `deploy` 是一条
- * delegate 证据，静默吞掉解析错误等于让探测少看一个信号却不告诉任何人。
  */
 function packageScriptsOf(cwd: string): readonly string[] {
   const path = join(cwd, 'package.json')
@@ -144,11 +111,7 @@ function packageScriptsOf(cwd: string): readonly string[] {
 }
 
 /**
- * 读齐零配置装配需要的全部事实。**读盘，不写盘，不起子进程。**
- *
- * 找不到源根时**不**在这里报错：`entries` 就是空的，源根由 `deriveZeroConfig`
- * 用同一张候选表去挑并给出带候选名的错误 —— 两处各挑一次就会有两份「源根在哪」
- * 的判据，而它们迟早会不一致。
+ * 读齐零配置装配需要的全部事实。**读盘，不写盘，不起子进程。**找不到源根时**不**在这里报错：`entries` 就是空的，源根由 `deriveZeroConfig`用同一张候选表去挑并给出带候选名的错误 —— 两处各挑一次就会有两份「源根在哪」的判据，而它们迟早会不一致。
  *
  * @param cwd 起点目录；项目名取它的 basename
  * @returns 项目名、cwd 下的一层目录名、源根下的文件清单、package.json 的 scripts 名

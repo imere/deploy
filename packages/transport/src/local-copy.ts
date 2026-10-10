@@ -1,12 +1,3 @@
-/**
- * 本地复制 —— **不经过任何网络，也不起任何子进程**。
- *
- * 走注入的 `Runner` 而不是 `node:fs`：本包依赖里没有 `@dp/local`（只有
- * ports/log/ssh/core），而且 CLI 手里已经有 `createLocalRunner()` 建好的那个
- * Runner。复用它等于"只有一个本地真相来源"，也不会出现两份探测事实打架。
- *
- * 同样做**空源拒绝**：空清单会让"部署成功"变成一句无法证伪的话。
- */
 import { join } from 'node:path'
 import { DpError, type Runner } from '@dp/ports'
 import type { TransferRequest, TransferResult } from './types.js'
@@ -16,16 +7,8 @@ const rel = (root: string, relativePath: string): string => join(root, ...relati
 /**
  * 本地复制：**不起任何子进程，也不碰网络**。
  *
- * 逐条经 `Runner` 写而不是 `cp -r`：本地目标与远端目标要共用同一套「写文件」的语义，
- * 各走一条路的话，「本地成功、远端失败」的差异里有一半是两套实现本身的差异，
- * 排障时根本分不清。
- *
- * 目录按**条目的祖先链**建，不按文件名猜：靠「名字里有没有点」判断目录，会把
- * `README`、`Makefile` 这类无扩展名的文件建成目录，而真正的父目录反而没建，
- * 随后 writeFile 直接 ENOENT。判断「哪些是目录」不该靠文件名。
- *
  * @param req 传输声明。`entries` 为空直接报 DP.SOURCE.EMPTY —— 空清单会让
- *   「部署成功」变成一句无法证伪的话
+ * 「部署成功」变成一句无法证伪的话
  * @param runner 落盘通道，由调用方注入（本包零依赖 @dp/local，只认 ports 的 Runner 接口）
  * @returns 复制结果。`command` 是一行**给人看的说明**，不是 argv —— 本地没有 argv
  * @throws DpError DP.SOURCE.EMPTY；写失败由注入的 Runner 抛（DP.PATH.NOT_WRITABLE）
@@ -59,10 +42,6 @@ export async function copyLocal(
   let files = 0
   const warnings: string[] = []
   // 逐条 writeFile 不会隐式补父目录，所以**按条目的祖先链**去建。
-  //
-  // 之前这里是「名字里没有点就算目录」的猜测，两个错：① `README`、`Makefile`
-  // 这类无扩展名文件会被当成目录建出来；② 真正的父目录（`sub/a.js` 的 `sub`）
-  // 反而没建，writeFile 直接 ENOENT。判断「哪些是目录」不该靠文件名猜。
   const ensured = new Set<string>()
   const ensureDir = async (relativeDir: string): Promise<void> => {
     if (relativeDir === '' || ensured.has(relativeDir)) return

@@ -1,15 +1,3 @@
-/**
- * conf 渲染 —— 结构化配置 → nginx conf 文本。
- *
- * 三条贯穿全程的判断：
- *
- * 1. **变量一律走 `@dp/template`。** 自己写一套 `${}` 解析会让错误码分叉成两套，
- *    而且丢掉「空值同缺值处理」这类已经想清楚的结论。
- * 2. **断言只管「安全」与「结构」两层。** `assertSafe` 是字符级闸门（挡换行、
- *    控制字符），它**不挡 `;` 与 `{`** —— 而这两个恰好是 conf 的语法边界，
- *    能被拼进去就等于往 conf 里注入了一条指令。结构判定必须自己来，两层不能互相顶替。
- * 3. **纯函数。** 不读环境、不起子进程、不碰文件系统，两次渲染逐字相同。
- */
 import { DpError } from '@dp/ports'
 import { assertSafe, renderString, type RenderContext, type Usage } from '@dp/template'
 import { MANAGED_MARKER } from './ownership.js'
@@ -59,12 +47,6 @@ interface RenderOptions {
 
 /**
  * 渲染单个值。
- *
- * `usage` 按**这个值最终落在 conf 的哪个位置**选，不按「它像什么」选：
- * 路径类（root）拼进的是文件系统路径，进 `path` 档；其余（server_name / upstream /
- * location 路径 / try_files）只是 conf 文本，进 `conf` 档。
- * location 路径虽然带 `/`，但它不是文件系统路径 —— 拿 `path` 档去卡它会把
- * 合法写法（`~ \.php$` 里的 `$`、前缀里的 `= `）误杀成事故。
  */
 function value(
   raw: string,
@@ -84,8 +66,6 @@ function value(
   }
 
   // 模板层只校验**被变量替换进去的那个值**，配置里直接敲进去的换行它是看不见的
-  // （没有 `${}` 就没有值需要校验）。而「一个换行」正是把一条指令拆成两条的最短路径，
-  // 所以这里对最终值再过一次闸 —— 这是本层与模板层职责的分界，不是重复校验。
   try {
     assertSafe(rendered, usage, path)
   } catch (err) {
@@ -119,9 +99,6 @@ function assertNoWhitespace(rendered: string, what: string, path: string | undef
 
 /**
  * 允许**单个**空格分隔的参数，但不允许多余空白。
- *
- * `listen 443 ssl` 这类写法本身就是「地址 + 修饰符」，空格是它的一部分，直接禁掉会误伤；
- * 而连续的空格、首尾空格、换行、制表符会让同一个 token 变成两个空参数。
  */
 function assertSingleSpaced(rendered: string, what: string, path: string | undefined): void {
   if (/^\S+(?: \S+)*$/.test(rendered)) return
@@ -186,9 +163,6 @@ function renderSeconds(value_: number, field: string): string {
 
 /**
  * 反代指令。
- *
- * 默认头是 要求的「默认正确而不是记得才写」：少写 `X-Forwarded-For`
- * 的后果是后端拿不到真实来源 IP，而这件事在日志里看不出来。
  */
 function proxyDirectives(proxy: ReverseProxy, ctx: RenderContext, base: string | undefined, out: (line: string) => void): void {
   const upstream = renderUpstream(proxy, ctx, base)
@@ -215,7 +189,6 @@ function renderLocation(loc: Location, ctx: RenderContext, base: string | undefi
   assertNoConfBoundary(renderedPath, 'location.path', path)
 
   // 修饰符与路径之间**必须**留一个空格（`= /healthz` 是 nginx 的正规写法），
-  // 所以空白检查落在剥掉修饰符之后：只禁路径部分里的空白，否则上面那种合法写法被误杀。
   const modifier = /^(?:\/|=|\^~|~\*|~)/.exec(renderedPath)
   const bare = renderedPath.slice(modifier?.[0].length ?? 0).trimStart()
   if (/\s/.test(bare)) {
@@ -227,8 +200,6 @@ function renderLocation(loc: Location, ctx: RenderContext, base: string | undefi
   }
 
   // 没有匹配前缀的 location 会被 nginx 当成普通前缀，参数直接落进路径匹配 ——
-  // 这类 typo 不会报错，只会让某个路径永远匹配不上，所以在这里就拒。
-  // `/` 后面本来就是空的，所以「路径部分为空」只对修饰符形式（`=` / `~`）才算错。
   if (modifier === null || (bare === '' && modifier[0] !== '/')) {
     throw confInvalid(
       `location.path 缺少合法的匹配前缀：${renderedPath}`,
@@ -301,8 +272,6 @@ function renderServerNames(
   const path = child(base, 'serverName')
 
   // 省略与 `[]` 是两件事：省略 = 不按域名分流（`_` 正是这个意思）；
-  // 显式 `[]` = 「我声明了但没填」，替它选一个默认值就是在替用户做决策 ——
-  // 静默变成 `_` 会让这个 server 变成 catch-all，可能盖掉同一端口上的其他 vhost。
   if (serverName === undefined) {
     out(`server_name ${CATCH_ALL}`)
     return [CATCH_ALL]
@@ -345,7 +314,6 @@ function renderServer(block: ServerBlock, ctx: RenderContext, base: string | und
     const rootPath = child(base, 'root')
     const rendered = value(block.root, ctx, 'path', rootPath)
     // `path` 档只挡控制字符与跨平台的非法字符，`;` / `{}` 不在其中 ——
-    // 而 root 是被拼进 `root <值>;` 的，值里带一个分号就多出一条指令。
     assertNoConfBoundary(rendered, 'root', rootPath)
     emit(`root ${rendered}`)
   }
@@ -376,12 +344,9 @@ function renderServer(block: ServerBlock, ctx: RenderContext, base: string | und
   for (const line of block.extra ?? []) push(line)
 
   // 「有内容来源」按来源数而不是按行数判定：listen 有几条与这个判断无关，
-  // 靠 `body.length` 去反推一旦将来多渲染一行固定指令就会静默失效。
   const hasContent = block.root !== undefined || (block.locations?.length ?? 0) > 0 || block.reverseProxy !== undefined || (block.extra?.length ?? 0) > 0
   if (!hasContent) {
     // 只有默认的 listen / server_name / index，没有任何内容来源。
-    // 它不会让 `nginx -t` 失败，却会按 nginx 的默认 root 找文件 —— 线上表现是
-    // "服务起来了但返回一堆 404"，几乎不可能被联想到是 conf 里少了一行 root。
     throw confInvalid(
       'server 块里没有任何内容来源（无 root / locations / reverseProxy）',
       base,
@@ -401,7 +366,6 @@ function assertNoConflictingNames(entries: readonly { readonly base?: string; re
   for (const entry of entries) {
     for (const name of entry.names) {
       // 用 has 而不是 `get(...) !== undefined`：base 本身就是 undefined 时
-      // 「首次出现」与「没有出现过」分不开，冲突就永远检不出来
       if (seen.has(name)) {
         const owner = seen.get(name)
         throw confInvalid(
@@ -433,15 +397,8 @@ function assertNoDuplicateLocations(block: ServerBlock, ctx: RenderContext, base
 /**
  * 渲染成一份完整 conf。**结尾带换行**，两次同输入逐字相同。
  *
- * 标记放在文件头而不是每个 server 块里：所有权保护判的是「这个文件是不是 dp 的」，
- * 一份文件里放几个 server 不影响这个判断。
- *
- * 「逐字相同」不是洁癖，是 `verify` 的判据。渲染里混进时间戳或遍历顺序，
- * verify 就会把「这个文件没人动过」报成不一致 —— 而一个每次都出现的假告警，
- * 很快就让人养成不再看 verify 结论的习惯，那时它就再也拦不住真正的漂移了。
- *
  * @param server 一个或多个 server 块；多块共用一份 conf，域名冲突在渲染期就报，
- *   不会留到 `nginx -t` 才发现
+ * 不会留到 `nginx -t` 才发现
  * @param ctx 变量取值表（`${release.current}` 等）。由调用方注入，本包不读 process.env
  * @param options 错误定位用的基准配置路径。缺省不影响结果，但报错时少一层「在哪个字段上」
  * @returns 完整 conf 文本，以换行结尾，可直接写入
@@ -479,20 +436,8 @@ export function renderConf(
 /**
  * 影子主配置 —— `nginx -t -c <它>` 的输入。
  *
- * 它存在的全部意义是**不拿生产 conf 做实验**：候选文件要在真正被换上去之前
- * 先让 nginx 解析一遍。跳过这一步直接换，一次坏 conf 的代价就从一个
- * 报错的部署变成一次已经发生的用户可见故障。
- *
- * `includes` 必须是**排除掉待替换文件之后**的真实 confd 清单：候选文件与旧文件
- * 同时被 include 会得到两份抢同一端口/域名的 server，`nginx -t` 必然报冲突，
- * 于是「替换」永远过不了第一步校验。列目录是 IO，由执行器算出后传进来。
- *
- * 刻意不照抄生产主配置（mime.types、默认 server、日志格式一概不管）：
- * 校验范围收在「新文件本身能否被解析」上，多 include 一样东西就多一类
- * 与本次改动无关的失败，而它们会盖掉真正的错误信息。
- *
  * @param options `includes` 是排除目标文件、影子目录与中间产物后的 confd 清单，
- *   `candidate` 是候选 conf 的绝对路径，`path` 只用于错误定位
+ * `candidate` 是候选 conf 的绝对路径，`path` 只用于错误定位
  * @returns 影子主配置文本，供 `nginx -t -c` 解析
  * @throws DpError include 路径含空白或 `;` `{` `}` —— 逐行进主配置，这些字符会破坏结构
  */

@@ -1,20 +1,3 @@
-/**
- * nginx 目标 —— 执行器。
- *
- * plan 侧（target.ts）已经把顺序、argv 与补偿动作算好了，这里只负责三件事：
- * 把 Step 变成真的 IO、任何一步失败时把**已经做过**的有副作用动作按 undo 收回去、
- * 以及在报错时说清「第几步挂的、前面做过什么、现在机器是什么状态」。
- *
- * 三条不变量贯穿全程：
- *
- *  1. **不重排步骤。** 每一步的 argv 都从计划的 `detail.argv` 里取，不在执行器里
- *     另写一份 —— 两份 argv 各改各的，症状是「计划说校验影子主配置，真跑的是 -t
- *     生产树」，而那一步正是为了在碰生产目录之前发现问题。
- *  2. **判定先于副作用。** 所有权判定排在任何 mkdir/writeFile 之前：影子目录默认就在
- *     confd 之下，判定放在写候选之后就变成「已经动过 confd 才告诉用户这个文件不该动」。
- *  3. **失败必须留痕。** 补偿失败不许吞掉原错误：原错误是主因，补偿失败作为附加信息
- *     一起报出来（`DpError.cause` 里的 NginxExecFailure）。
- */
 import {
   DpError,
   type DpErrorCode,
@@ -30,10 +13,6 @@ import type { NginxTargetConfig } from './types.js'
 
 /**
  * 默认命令超时。
- *
- * `nginx -t` 要解析整棵 include 树并打开每个证书与私钥（慢盘上光 RSA 私钥就要几百毫秒），
- * 30s 远高于任何正常值，又不至于让一次挂死的命令永远占着部署锁。
- * 不设上限等于把铁律 0 明令禁止的「静默挂起」换回来。
  */
 const DEFAULT_TIMEOUT_MS = 30_000
 
@@ -44,20 +23,12 @@ const SHADOW_DIR_MODE = 0o700
 const CONF_MODE = 0o644
 
 /**
- * 执行器的一个阶段。与 `@dp/ports` 的 `StepKind` **不是一套东西**：
- * StepKind 描述「做了哪类动作」（prepare / install / activate…），
- * 阶段描述「调用的是哪个入口函数」。一个入口会连跑好几种 StepKind
- * （activate 里就有 backup / validate / reload），合成一个枚举的话，
- * 失败信息里就只剩一句「activate 挂了」，看不出是其中哪一步。
+ * 执行器的一个阶段。与 `@dp/ports` 的 `StepKind` **不是一套东西**：StepKind 描述「做了哪类动作」（prepare / install / activate…），阶段描述「调用的是哪个入口函数」。一个入口会连跑好几种 StepKind（activate 里就有 backup / validate / reload），合成一个枚举的话，失败信息里就只剩一句「activate 挂了」，看不出是其中哪一步。
  */
 export type NginxPhase = 'install' | 'activate' | 'verify' | 'rollback'
 
 /**
  * 四个入口共用的入参。
- *
- * 合成一份而不是各写一份：四个入口的差别只在**跑哪个 plan**，输入完全一样 ——
- * 分成四份之后每加一个字段（比如 dryRun）都要记得改四处，漏掉的那处
- * 表现为「某个阶段无视了 dryRun，照样把生产 conf 覆盖了」。
  */
 export interface NginxExecInput {
   /** 目标机通道。`nginx -t` 与 reload 也经它发出，本包不直接起子进程 */
@@ -69,22 +40,17 @@ export interface NginxExecInput {
   /** 逐步回调，供 CLI 打实时日志 */
   readonly onStep?: (step: Step) => void
   /**
-   * 命令超时。必须显式传：铁律 0 要求每条子进程都有 timeout 兜底，
-   * 缺省值只在调用方确实没意见时兜底，且它是个上限而不是「等它结束」。
+   * 命令超时。必须显式传：铁律 0 要求每条子进程都有 timeout 兜底，缺省值只在调用方确实没意见时兜底，且它是个上限而不是「等它结束」。
    */
   readonly timeoutMs?: number
   /**
-   * 只算不写。`dp apply --dry-run` 用：走完渲染、所有权判定与影子校验，
-   * 但不写 confd、不 rename、不 reload。
+   * 只算不写。`dp apply --dry-run` 用：走完渲染、所有权判定与影子校验，但不写 confd、不 rename、不 reload。
    */
   readonly dryRun?: boolean
 }
 
 /**
  * 一步的执行轨迹。这个类型存在的理由是 `skipped` 字段，见它自己的说明。
- *
- * 与计划产出的 `Step` 分开：那一份是「打算做什么」，这一份是「做完什么」。
- * 合成一份的话，计划期就必须填 ok / skipped，于是还没执行的步骤只能被填成假值。
  */
 export interface NginxStepTrace {
   /** 计划的 step id。失败信息里的 step 靠它与用户手上的 plan 输出对上 */
@@ -94,22 +60,13 @@ export interface NginxStepTrace {
   /** 跑完且结论为真；失败一律抛错，不会带着 `ok: false` 的轨迹返回 */
   readonly ok: boolean
   /**
-   * 该步骤**在机器上没有留下作用**：dryRun 下没执行、无事可做（本来就没有上一份
-   * 可备份）、或执行过但产物已随补偿撤销。
-   *
-   * 判据是「留下没留下」，不是「跑没跑」—— dryRun 的影子校验真的跑了，
-   * 它给出的结论是真的，所以它是 ran；而它写进去的候选已被删掉，写候选那步就是
-   * skipped。这个区分是 dryRun 报告唯一有用的地方：报「已备份」而磁盘上没有，
-   * 比不做备份更难发现。
+   * 该步骤**在机器上没有留下作用**：dryRun 下没执行、无事可做（本来就没有上一份可备份）、或执行过但产物已随补偿撤销。
    */
   readonly skipped: boolean
 }
 
 /**
  * 一个阶段跑完后的结论。`ok` 是字面量 `true` —— 失败不返回，一律抛错。
- *
- * 刻意不给 `ok: false` 留位置：一旦它可以是 false，调用点旁边就必须补一个分支，
- * 而那类分支的默认写法是「打个警告继续往下走」—— 部署失败却报告成功就是这么来的。
  */
 export interface NginxExecResult {
   /** 恒为 true。要处理失败请 catch `DpError` 并读 `cause` 上的 NginxExecFailure */
@@ -125,15 +82,11 @@ export interface NginxExecResult {
   /** 所有权判定结果。install / activate 会做判定，verify / rollback 不做 */
   readonly ownership?: OverwriteDecision
   /**
-   * 是否 dryRun。为 true 时**磁盘上什么都没留下**（影子目录已撤、confd 未碰），
-   * 调用方不得拿它当「已经生效」的依据继续往下走。
+   * 是否 dryRun。为 true 时**磁盘上什么都没留下**（影子目录已撤、confd 未碰），调用方不得拿它当「已经生效」的依据继续往下走。
    */
   readonly dryRun: boolean
   /**
    * 本次**真的发出过** reload 且成功。
-   *
-   * 与 `dryRun` 分开是必须的：reload 被配成 `false`（由外部机制重载）时同样没发命令，
-   * 把它算成「已重载」会让调用方以为线上已经换配置了 —— 而它其实还在跑旧的那份。
    */
   readonly reloaded: boolean
   /** 非致命但必须让人看到的事：补偿未完全成功、影子目录清理失败一类 */
@@ -169,9 +122,7 @@ export interface UnwindReport {
   readonly errors: readonly string[]
 }
 
-// ------------------------------------------------------------
 // 失败信息组装
-// ------------------------------------------------------------
 
 /** 截断长输出：8MB 的 stderr 塞进异常既刷屏又会把真正有用的首行挤走 */
 function excerpt(text: string): string {
@@ -183,8 +134,7 @@ function excerpt(text: string): string {
 }
 
 /**
- * nginx 的原话必须进错误信息。只报「校验失败」等于让用户自己上机器重跑一遍才能知道原因，
- * 而他多半还得靠猜（改哪个文件、加什么 include）。stderr 优先，没有才看 stdout。
+ * nginx 的原话必须进错误信息。只报「校验失败」等于让用户自己上机器重跑一遍才能知道原因，而他多半还得靠猜（改哪个文件、加什么 include）。stderr 优先，没有才看 stdout。
  */
 function nginxOutput(result: ExecResult): string {
   const err = excerpt(result.stderr)
@@ -200,16 +150,10 @@ function describeError(err: unknown): string {
   return String(err)
 }
 
-// ------------------------------------------------------------
 // 路径与计划
-// ------------------------------------------------------------
 
 /**
  * confd / shadowDir 必须是绝对路径且不含 `..`。
- *
- * 相对路径不会立刻失败：它会解析到 ssh 或 nginx 进程当时的工作目录下，
- * 于是部署「成功」了而 conf 写到了一个没人找得到的地方。歧义靠拒绝（铁律 2），
- * 这里拒绝的成本是一次字符串检查，不拒绝的成本是一次查不出原因的生产事故。
  */
 function assertAbsoluteRemotePath(kind: string, path: string, configPath: string): void {
   const escaped = path.split('/').some((segment) => segment === '..')
@@ -239,15 +183,12 @@ function stepAt(plan: readonly Step[], id: string): Step {
   const found = plan.find((step) => step.id === id)
   if (found !== undefined) return found
   // 计划与执行器不同步是代码错误，不是部署失败。说清楚是哪一步，
-  // 别让上层拿到 undefined 然后在别处炸成一个与原因无关的异常。
   throw new DpError('DP.NGX.CONF_INVALID', `计划里没有步骤 ${id}`, {
     hint: '改 target.ts 的步骤时必须同步改执行器：少走一步在这里的表现是「部署看起来成功了」',
   })
 }
 
-// ------------------------------------------------------------
 // 一次执行的上下文
-// ------------------------------------------------------------
 
 class Session {
   readonly L: Layout
@@ -290,9 +231,6 @@ class Session {
 
   /**
    * 唯一的 exec 出口：timeoutMs 必填，stdin 永不带。
-   *
-   * 不喂 stdin 时子进程的 stdin 立即关闭（见 @dp/local exec.ts）—— 目标机吐出
-   * `Password:` 而我们没在等，就是「静默挂起」，CI 里表现为部署永远不结束。
    */
   async exec(argv: readonly string[]): Promise<ExecResult> {
     return this.runner.exec(argv, { timeoutMs: this.timeoutMs })
@@ -372,7 +310,6 @@ class Session {
 
   result(phase: NginxPhase, plan: readonly Step[], ownership?: OverwriteDecision): NginxExecResult {
     // 计划里有的步骤必须都被走一遍（dryRun 下也产出 skipped 的那条）。
-    // 少走一步是这里唯一一种「看起来完全成功」的事故。
     const planned = plan.map((step) => step.id)
     const ran = new Set(this.steps.map((step) => step.id))
     const missing = planned.filter((id) => !ran.has(id))
@@ -396,27 +333,13 @@ class Session {
   }
 }
 
-// ------------------------------------------------------------
 // IO 小工具
-// ------------------------------------------------------------
 
 /**
  * 读现有 conf，不存在返回 null。
- *
- * 存在与否一律走 stat：`readFile` 在文件不存在时是抛错的，而把「读不了」（EACCES、
- * 目录被换成了文件）当成「不存在」，会直接演变成一次覆盖 —— 这里是全流程最容易
- * 酿成生产事故的误判，所以读失败就让它往上抛。
  */
 /**
  * 建目录，并把**最外层那级原本不存在的目录**登记成撤销目标。
- *
- * `recursive: true` 会一次建出整条链（`.dp-shadow` 与它下面的 releaseId 子目录），
- * 而撤销只删最里面那级会把 `.dp-shadow` 这个空目录留在 confd 里 —— dryRun 承诺的
- * 是「confd 里零残留」，空目录也是残留，而且它正好是下一轮 include 排除逻辑要
- * 处理的东西，留在现场会让人以为上一轮真的跑过。
- *
- * 只收 confd **之下**的路径：confd 自己是 nginx 的目录，轮不到本包删它
- * （何况它可能本来就在，只是这条链上更深的那几级是新的）。
  */
 async function mkdirTracked(session: Session, dir: string): Promise<void> {
   const confd = session.config.confd.replace(/\/+$/, '')
@@ -432,9 +355,6 @@ async function mkdirTracked(session: Session, dir: string): Promise<void> {
   }
   await session.runner.mkdir(dir, { recursive: true, mode: SHADOW_DIR_MODE })
   // 只收 confd **之下**的路径：confd 自己是 nginx 的目录，本包不负责删它 ——
-  // 哪怕它正是本轮刚建出来的（nginx 没装、或 confd 路径写错），删一个 nginx 的
-  // 目录也越过了「往 confd 里放一份配置」这份授权。那种情况下退回到 confd 之下的
-  // 第一级（就是 .dp-shadow），既不留空目录链，也不动 confd。
   const under = missing.filter((p) => p.startsWith(`${confd}/`))
   const firstUnderConfd = dir.startsWith(`${confd}/`)
     ? `${confd}/${dir.slice(confd.length + 1).split('/')[0]}`
@@ -457,16 +377,6 @@ function overwriteOptions(session: Session): { force?: boolean; path: string } {
 
 /**
  * 影子主配置要 include 的清单 = confd 的真实内容，减去四样东西。
- *
- * 减去它们不是为了好看，每一样都会让 `nginx -t` 撞出与真实故障无关的失败：
- *  - 目标文件本身：候选与旧文件同时被 include = 同一端口/域名两份 server；
- *  - 影子目录及其内容：它默认就在 confd 之下，不排除的话**第二次部署**会把上一轮
- *    留在影子目录里的候选一起 include 进来，于是替换永远过不了第一步校验；
- *  - `.dp-backup` / `.dp-new`：上一轮或上一条失败路径留下的中间产物，内容是旧 conf，
- *    include 进来等于让新旧两份同时生效。
- *
- * 排序：nginx 靠 include 顺序决定冲突时谁赢，固定顺序让「同一份 confd 两次校验
- * 逐字相同」成立，否则影子校验的失败无法复现。
  */
 async function collectIncludes(runner: Runner, confd: string, L: Layout): Promise<readonly string[]> {
   const trailing = confd.replace(/\/+$/, '')
@@ -485,15 +395,11 @@ async function collectIncludes(runner: Runner, confd: string, L: Layout): Promis
 
 /**
  * 还原上一份 conf，并重新 `-t` 确认确实回到了原状。
- *
- * 只 rename 不复验不够：「还原成功」与「还原之后 nginx 仍然能解析」是两件事，
- * 而后者才是用户真正在意的。复验失败作为补偿失败上报（`errors`），不静默。
  */
 async function restoreConf(session: Session, liveArgv: readonly string[]): Promise<void> {
   const { runner, L } = session
   if ((await runner.stat(L.backup)) === null) {
     // 首次部署没有上一份。此时正确的收场不是「留一个 nginx 拒绝的坏文件」，
-    // 而是把这次写进去的删掉，让 confd 回到调用前的状态。
     await runner.remove(L.file)
   } else {
     await runner.rename(L.backup, L.file)
@@ -505,25 +411,17 @@ async function restoreConf(session: Session, liveArgv: readonly string[]): Promi
   }
 }
 
-// ------------------------------------------------------------
 // ① install：渲染 + 影子校验，**完全不碰生产文件**
-// ------------------------------------------------------------
 
 /**
  * ① install：渲染 → 写影子候选 → 影子校验，**完全不碰生产文件**。
  *
- * 影子目录默认就在 confd 之下，所以「判定先于副作用」在这里不是洁癖：
- * 判定排在写入之后的话，用户会先看到 confd 被建出来、再被告知这个文件不该动。
- *
- * dryRun 下影子校验**照跑**（它给出的结论是真的），跑完再把整个影子目录撤掉 ——
- * 净效果零副作用，而不是「跳过校验报个成功」。
- *
  * @param input 见 NginxExecInput；本阶段只读输入，不改 ctx
  * @returns 阶段结论；影子目录留在现场（便于下次 include 时排除），ownership 带判定结果
  * @throws DpError `DP.NGX.NOT_MANAGED` —— 目标 conf 存在、不带 managed 标记、也没 force。
- *   此时尚未写过任何东西，confd 仍是部署前的内容
+ * 此时尚未写过任何东西，confd 仍是部署前的内容
  * @throws DpError `DP.NGX.TEST_FAILED` —— 候选过不了 `nginx -t`。候选从未写进 `<confd>/<filename>`，
- *   同样不需要手工回滚；nginx 的原话在 hint 里
+ * 同样不需要手工回滚；nginx 的原话在 hint 里
  */
 export async function installNginx(input: NginxExecInput): Promise<NginxExecResult> {
   const session = new Session(input, 'install')
@@ -531,7 +429,6 @@ export async function installNginx(input: NginxExecInput): Promise<NginxExecResu
   const plan = nginxTarget.planInstall(session.ctx, session.config)
 
   // 判定排在任何写入之前。planInstall 内部的渲染是本地纯计算，不产生目标机副作用，
-  // 所以它先跑不违背这条。
   const existing = await readConfIfExists(session)
   const ownership = assertOverwritable(existing, overwriteOptions(session))
   const content = renderFor(session.config)
@@ -556,7 +453,6 @@ export async function installNginx(input: NginxExecInput): Promise<NginxExecResu
     { mode: CONF_MODE },
   )
   // dryRun 下这一步真的写了，但紧接着就被撤销，净效果为零 → 记 skipped。
-  // 真正给出结论的是下面那条影子校验，它记 ran：它跑出来的结果是真的。
   if (session.dryRun) session.skip(writeStep)
   else session.pass(writeStep)
 
@@ -577,40 +473,27 @@ export async function installNginx(input: NginxExecInput): Promise<NginxExecResu
 
   if (session.dryRun) {
     // dryRun 承诺的是「不写 confd」。而影子校验必须有盘上的文件才能跑（`nginx -t` 只读，
-    // 但它读的就是文件），所以这里跑完真实的 -t 再把整个影子目录撤掉 ——
-    // 净效果是零副作用，而不是「跳过校验报个成功」。
     const report = await session.unwind()
     for (const err of report.errors) session.warnings.push(`影子目录清理失败（dryRun 应无残留）：${err}`)
   } else {
     // 影子目录留着。它就是下一次部署 include 清单里最容易漏排除的东西，
-    // 留在现场比事后推断有用。
     session.commit()
   }
 
   return session.result('install', plan, ownership)
 }
 
-// ------------------------------------------------------------
 // ② activate：备份 → 原子替换 → 复验 → reload
-// ------------------------------------------------------------
 
 /**
  * ② activate：备份 → 原子替换 → 复验 → reload。这是**唯一会动生产 conf** 的阶段。
  *
- * 两阶段的失败语义相反，处置也因此不同：
- *
- *  - 复验失败 → **还原**：conf 已经上盘但 nginx 不接受，把坏文件留在生产目录等于
- *    下一台机器（或者下一次 `nginx -t`）替我们踩同一个坑。还原之后还要再验一次 ——
- *    只 rename 不复验，报出来的「已还原」可能仍是个坏树。
- *  - reload 失败 → **不回滚**：盘上的 conf 已经过了 `-t`，nginx 只是没收到信号，
- *    重跑一次 reload 就收敛；换回旧文件只会制造第二次不一致。
- *
  * @param input 见 NginxExecInput
  * @returns 阶段结论；`reloaded` 为 true 只在真发过 reload 且成功时成立
  * @throws DpError `DP.NGX.TEST_FAILED` —— 复验不过。已把备份 rename 回原位并重新
- *   `-t` 确认；首次部署没有备份，此时 `<confd>/<filename>` 被删除，confd 回到部署前
+ * `-t` 确认；首次部署没有备份，此时 `<confd>/<filename>` 被删除，confd 回到部署前
  * @throws DpError `DP.NGX.RELOAD_FAILED` —— **不回滚**，盘上的 conf 是好的，
- *   nginx 跑的还是替换前那份。修好重载机制后手动重跑同一条 reload 命令即可
+ * nginx 跑的还是替换前那份。修好重载机制后手动重跑同一条 reload 命令即可
  */
 export async function activateNginx(input: NginxExecInput): Promise<NginxExecResult> {
   const session = new Session(input, 'activate')
@@ -621,8 +504,6 @@ export async function activateNginx(input: NginxExecInput): Promise<NginxExecRes
   const ownership = assertOverwritable(existing, overwriteOptions(session))
 
   // 与影子校验那份**逐字相同**：renderConf 是纯函数，重新渲染不依赖影子目录是否还在。
-  // 依赖影子目录会让「install 成功但中间有人清了临时目录」变成一次写进生产目录的失败，
-  // 而正确内容就在配置里。
   const content = renderFor(session.config)
   const liveArgv = argvOf(stepAt(plan, 'nginx.validate-live'))
 
@@ -631,13 +512,10 @@ export async function activateNginx(input: NginxExecInput): Promise<NginxExecRes
   session.begin(backupStep)
   if (ownership.backup && !session.dryRun) {
     // 备份只留上一份，不留历史链：回滚要的是「上一次生效的那份」，
-    // 而每次替换都会覆盖同名备份，链式备份会让「回滚一次」到底回哪一版变成猜。
     await session.runner.rename(L.file, L.backup)
     session.pass(backupStep)
   } else {
     // dryRun 与「本来就没有上一份」都记 skipped：这一步在机器上没留下任何东西。
-    // 记成 ran 会让 dryRun 的报告看起来像是真的备份过 —— 那是**报告了一个没有
-    // 发生的副作用**，比不做备份更难发现（用户会照着报告去 `ls` 那个备份）。
     session.skip(backupStep)
   }
 
@@ -645,7 +523,6 @@ export async function activateNginx(input: NginxExecInput): Promise<NginxExecRes
   const replaceStep = stepAt(plan, 'nginx.replace')
   session.begin(replaceStep)
   // 登记必须在动手**之前**：备份一被 rename 走，磁盘上就没有那份 conf 了，
-  // 之后任何一步失败都只能靠这条 undo 把它放回去。
   session.pushUndo(
     ownership.backup ? `还原 ${L.backup} → ${L.file}` : `删除首次部署写入的 ${L.file}`,
     () => restoreConf(session, liveArgv),
@@ -681,8 +558,6 @@ export async function activateNginx(input: NginxExecInput): Promise<NginxExecRes
   }
 
   // 复验通过 = 这份 conf 被 nginx 接受了，替换到此落定。
-  // 之后失败（reload）不再回滚：盘上的 conf 是好的，nginx 只是没收到信号，
-  // 重跑一次 reload 就收敛；把好文件换回旧文件只会制造第二次不一致。
   session.commit()
 
   // ④ reload
@@ -711,20 +586,10 @@ export async function activateNginx(input: NginxExecInput): Promise<NginxExecRes
   return session.result('activate', plan, ownership)
 }
 
-// ------------------------------------------------------------
 // ③ verify：读回来逐字比对
-// ------------------------------------------------------------
 
 /**
  * ③ verify：把 confd 里的内容读回来，与本次渲染结果**逐字**比对。
- *
- * 两类不一致的处置不同，这是本阶段唯一值得记住的规则：
- *  - **文件不存在** → 抛错。那是确凿的事故。
- *  - **内容不一致** → 只报警告，不回滚、不覆盖。那份内容本身可能完全合法
- *    （有人手改过，或这台机器的配置来自另一次部署），为一次注释改动把能用的
- *    配置换成另一份，损失比漂移本身大。
- *
- * 只读：不写文件、不 reload，也就不存在「verify 顺手把线改好了」这种惊喜。
  *
  * @param input 见 NginxExecInput
  * @returns 阶段结论；内容不一致时 `ok` 仍为 true，差异写在 warnings 里
@@ -747,8 +612,6 @@ export async function verifyNginx(input: NginxExecInput): Promise<NginxExecResul
   }
   if (actual !== expected) {
     // 内容不一致只报警告、不回滚：那份内容本身可能完全合法（有人手改过，
-    // 或另一次部署写了别的版本），为一次注释改动把能用的配置换成另一份，
-    // 损失比漂移本身大。缺文件才是确凿的事故，上面已经处理。
     session.warnings.push(
       `DP.VERIFY.FAILED: ${L.file} 与本次渲染结果不一致（线上 ${actual.length} 字节 / 本次 ${expected.length} 字节）。` +
         '文件存在且可能被 dp 之外的东西改过，或是这台机器上的配置来自另一次部署。确认要接管就重新 apply 一次覆盖它',
@@ -759,33 +622,23 @@ export async function verifyNginx(input: NginxExecInput): Promise<NginxExecResul
   return session.result('verify', plan)
 }
 
-// ------------------------------------------------------------
 // ④ rollback：还原备份 + 复验 + reload
-// ------------------------------------------------------------
 
 /**
  * ④ rollback：把备份 rename 回原位 → 复验 → reload。
- *
- * **不回退 release 目录**：本包只管 conf 这一半，版本目录由 target-static 负责。
- * 两件不同的事塞进一个「回滚」里，出问题时说不清到底是 conf 坏了还是版本坏了 ——
- * 而这两种的处置完全不同（前者改配置，后者换版本号重新部署）。
- *
- * 复验失败不回退备份：它已经被 rename 掉了，磁盘上**没有第二份可退**。
- * 这时候说「回滚失败但还能再回滚一次」是假的。
  *
  * @param input 见 NginxExecInput；`ctx.previousReleaseId` 缺省时计划期就抛错
  * @returns 阶段结论；reload 被配成 `false` 时只跑完还原与复验即返回
  * @throws DpError `DP.NGX.NO_PREVIOUS` —— 备份文件不存在。**不会**返回「回滚成功」这种假结果
  * @throws DpError `DP.NGX.TEST_FAILED` —— 还原后仍过不了 `-t`，说明**上一份 conf 本身**
- *   或它同树的其它文件就是坏的（它当初替换上来时未必被验过）
+ * 或它同树的其它文件就是坏的（它当初替换上来时未必被验过）
  * @throws DpError `DP.NGX.RELOAD_FAILED` —— 还原已落盘且过了 `-t`，只是 nginx 还没加载。
- *   修好重载机制后手动重跑同一条 reload 即可，不必再动文件
+ * 修好重载机制后手动重跑同一条 reload 即可，不必再动文件
  */
 export async function rollbackNginx(input: NginxExecInput): Promise<NginxExecResult> {
   const session = new Session(input, 'rollback')
   const { L } = session
   // planRollback 在 previousReleaseId 缺失时直接抛 NO_PREVIOUS：
-  // 「没有上一版可回滚」不是执行期发现，是配置期就能判定的事。
   const plan = nginxTarget.planRollback(session.ctx, session.config)
 
   const restoreStep = stepAt(plan, 'nginx.restore-backup')
@@ -857,12 +710,9 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 /**
  * 读 `DpError.cause` 里的结构化失败信息用这个，而不是 cast。
  *
- * 执行器失败时保证挂上它；调用方拿到别的东西说明错误不是本包抛的 ——
- * 那就该当成「没有可用的失败现场」处理，而不是把读不出来的字段当成空数组。
- *
  * @param value 待判定的 `unknown`，通常是 catch 到的 `DpError.cause`
  * @returns true 仅表示这几个字段齐备、可以安全按 NginxExecFailure 读；**不表示**它是本包抛的
- *   —— 同样形状的 cause 也可能来自别的包，判定时请以 `phase` 的取值一并核对
+ * —— 同样形状的 cause 也可能来自别的包，判定时请以 `phase` 的取值一并核对
  */
 export function isNginxExecFailure(value: unknown): value is NginxExecFailure {
   const record = asRecord(value)

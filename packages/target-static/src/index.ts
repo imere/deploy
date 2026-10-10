@@ -1,15 +1,3 @@
-/**
- * static 目标 —— 通用目录投放。
- *
- * 三条原则贯穿全程：
- *
- *  1. **永不覆盖正在使用的文件。** 版本号目录 + 切换指向，就意味着 releasing 时
- *     旧版本的进程仍持有它自己的那份文件。想靠"覆盖文件"做发布，就必然会遇到
- *     文件被占用（在册的 `DP.FILE.LOCKED`）。
- *  2. **交换必须原子。** staging → rename → 换软链，任一步失败都不会留下半份版本。
- *  3. **每一步都能说清撤销动作是什么。** 每步自带 `undo`，plan 阶段就把回滚计划算出来，
- *     不是出事了才想办法。
- */
 import {
   CURRENT_LINK_NAME,
   DpError,
@@ -27,21 +15,12 @@ const TMP_SUFFIX = '.dp-tmp'
 
 /**
  * static 目标的全部可配置项 —— 也就是**只有健康检查这一项**。
- *
- * 刻意这么少：发布根、版本目录名、current 软链名都已经在 `@dp/ports` 里定死成
- * 全仓唯一的常量。在这里再给它们开一个入口，结果就是同一件事有了两个值，
- * 而这种分叉不会报错 —— 它表现为 prune 去清理的目录根本不是服务读的那一个，
- * 直到某次回滚找不到版本才暴露。
  */
 export interface StaticTargetConfig {
   /** 激活后必须存在的相对路径；缺省校验当前 release 非空 */
   readonly healthcheck?: {
     /**
      * 相对 release 目录的路径，逐个 stat 判定存在。
-     *
-     * 缺省退回「目录非空」而不是「不校验」：目录非空挡不住「dist 建出来了、
-     * 里面还是上一次构建的残留」这类事故，而后者要到切 current 之后、
-     * 现场已经没了的时候才暴露。
      */
     readonly fileExists?: readonly string[]
   }
@@ -109,9 +88,6 @@ async function writeJson(runner: Runner, file: string, index: ReleaseIndex): Pro
 
 /**
  * 创建软链，Windows 无特权时自动退化。
- *
- * 退化**不是**静默的：会写进 warning 列表并在结果里返回 ——
- * 「看着部署成功了，其实策略被换掉了」是最难排查的一类失败。
  */
 async function linkWithFallback(
   runner: Runner,
@@ -164,10 +140,6 @@ async function copyInto(runner: Runner, from: string, to: string): Promise<void>
 
 /**
  * 一步的**实测**轨迹。
- *
- * 与 `@dp/ports` 的 `Step` 分成两个类型而不是合成一个：那份是计划（还没发生，
- * 可以当纯数据断言），这份是执行后的观测（带 ok）。合成一个的结果是计划期也得填 ok，
- * 于是「还没跑的步骤」只能被填成假值 —— 填 true 是假成功，填 false 是假失败。
  */
 export interface StepTrace {
   /** 对应计划里的 step id，用于把轨迹与 plan 输出对齐 */
@@ -176,40 +148,26 @@ export interface StepTrace {
   readonly kind: Step['kind']
   /**
    * 这一步在目标机上真跑完且结论为真。
-   *
-   * 恒为 true：deploy() 中途失败一律抛错，轨迹只随成功结果一起返回。
-   * 失败那一步的去向是错误的补偿报告，不是这条 ok: false。
    */
   readonly ok: boolean
 }
 
 /**
  * 一次部署的结果。**只有成功才有这个东西**，失败一律走抛错。
- *
- * 不给 `ok: false` 留位置是有原因的：失败时机器上可能什么都没改、可能改了版本目录、
- * 也可能已经切了 current —— 这三种状态的处置方式完全不同，而一个布尔量会把它们
- * 压成同一个 false。失败现场在错误里，不在这里。
  */
 export interface DeployResult {
   /** 本次生效的版本号，与 TargetContext 相同，原样带回便于日志对账 */
   readonly releaseId: string
   /**
    * 部署前生效的版本；首次部署为 undefined。
-   *
-   * 可能与 `ctx.previousReleaseId` 不同：那个字段是调用方的认知（通常来自 plan），
-   * 这里给的是**盘上索引读出来的**事实 —— 中间被别人部署过一次时，调用方的认知就过时了。
    */
   readonly previousReleaseId?: string
   /**
-   * 实际落盘的文件数。传输钩子报多少就是多少，本包**不再**去 stat 核对一遍：
-   * 核对会把「传输层谎报成功」变成一次静默的部署失败，而谎报本该在传输层就报错。
+   * 实际落盘的文件数。传输钩子报多少就是多少，本包**不再**去 stat 核对一遍：核对会把「传输层谎报成功」变成一次静默的部署失败，而谎报本该在传输层就报错。
    */
   readonly filesWritten: number
   /**
    * 非致命但绝不能吞掉的事，比如本地无法建软链、current 退化成复制目录。
-   *
-   * 健康检查不过**不在**这里 —— 那条路径直接抛错（见 deploy 的 @throws），
-   * 因为它已经动过 current，报告成功或只留一句 warning 都会让人以为线上没事。
    */
   readonly warnings: readonly string[]
   /** 逐步轨迹，只含跑成的部分；失败那一步见抛出的错误 */
@@ -218,9 +176,6 @@ export interface DeployResult {
 
 /**
  * deploy() 的输入。**目标机的一切都经注入的 runner**，本包没有第二处 IO。
- *
- * 没有「可选的隐式全局」是有代价换来的：凭空多一条读环境或读时钟的路径，
- * e2e 就再也测不了，而 e2e 恰恰是「换一种传输方式还跑不跑得动」的唯一证据。
  */
 export interface DeployInput {
   /** 目标机通道。全部 IO 走它，本包内部不直接调 fs */
@@ -228,22 +183,17 @@ export interface DeployInput {
   /** 发布上下文：root / releaseId / keep 均已由上层按实测能力选好，这里不再推导 */
   readonly ctx: TargetContext
   /**
-   * 逐条落盘用的源清单。**给了 `transfer` 就不看它** —— 两个都填不会报错，
-   * 只会让传输钩子那份静默生效，排查时得先猜「到底是谁搬的文件」。
+   * 逐条落盘用的源清单。**给了 `transfer` 就不看它** —— 两个都填不会报错，只会让传输钩子那份静默生效，排查时得先猜「到底是谁搬的文件」。
    */
   readonly entries: readonly SourceEntry[]
   /**
-   * 健康检查。不给即按「release 目录非空」判定：缺省必须等价于一个能跑的判定，
-   * 而不是「什么都不查」。
+   * 健康检查。不给即按「release 目录非空」判定：缺省必须等价于一个能跑的判定，而不是「什么都不查」。
    */
   readonly config?: StaticTargetConfig
   /** 逐步回调，供 CLI 打实时日志 */
   readonly onStep?: (step: Step) => void
   /**
    * 由调用方提供的「把源搬到 staging 目录」的实现。
-   * 不提供时走现在的逐条 writeFile（本地、小目录都够用）。
-   * 返回值里的 filesWritten 同样要过「空版本拒绝」—— 传输出了 0 个文件
-   * 与 source 为空是同一类事故（current 指向空目录 = 线上 404）。
    */
   readonly transfer?: (
     stagingDir: string,
@@ -253,18 +203,14 @@ export interface DeployInput {
 /**
  * 真实执行：stage → commit → activate → verify → prune。
  *
- * 顺序不可调换的两处：**verify 必须在换向之后**（不切过去就没法证明线上那份能用），
- * **索引必须在最后写**（先写索引就会留下「记录说生效了、其实 current 没换」的状态，
- * 而索引是回滚时唯一的依据）。
- *
  * @param input 部署输入。`transfer` 缺省时按 `entries` 逐条 writeFile（小目录够用）；
- *   给了它就只由它搬文件，本函数仍然负责 commit / 换向 / verify / prune
+ * 给了它就只由它搬文件，本函数仍然负责 commit / 换向 / verify / prune
  * @returns 本次生效的版本、落盘文件数与逐步轨迹
  * @throws DpError `DP.SOURCE.EMPTY` —— 一个文件都没落盘。发布空版本等于把 current
- *   指向空目录（线上直接 404），所以拒绝而不是告警了事；抛之前会删掉 staging，
- *   保证没有副作用残留
+ * 指向空目录（线上直接 404），所以拒绝而不是告警了事；抛之前会删掉 staging，
+ * 保证没有副作用残留
  * @throws DpError `DP.VERIFY.FAILED` —— 健康检查不过。抛之前已自动把 current 换回上一版，
- *   坏版本留在 releases 里待查（不删：删了就把现场也一起弄没了）
+ * 坏版本留在 releases 里待查（不删：删了就把现场也一起弄没了）
  */
 export async function deploy(input: DeployInput): Promise<DeployResult> {
   const { runner, ctx } = input
@@ -290,14 +236,9 @@ export async function deploy(input: DeployInput): Promise<DeployResult> {
   let filesWritten = 0
   if (input.transfer !== undefined) {
     // 钩子拿到的是**一个已存在的目录**。不先建好就指望 rsync / tar 自己造目录，
-    // 等于把「目标目录在不在」这个前提藏进各传输工具的实现细节里：rsync 造得了
-    // 最后一层、tar 的远端解包未必造得了，于是「同样的 deploy 换个传输方式就失败」。
-    // 前提在调用方显式建立，传输工具只管往里放文件。
     await runner.mkdir(staging, { recursive: true, mode: DIR_MODE })
 
     // 传输钩子只负责把源搬进 staging；commit/切 current/verify/prune 一律仍由
-    // 本函数做 —— 否则「换向」与「搬文件」会各自带一套补偿逻辑，
-    // 中途失败时就没人说得清环境到底处在哪个状态。
     const moved = await input.transfer(staging)
     filesWritten = moved.filesWritten
     if (moved.warnings !== undefined) warnings.push(...moved.warnings)
@@ -315,7 +256,6 @@ export async function deploy(input: DeployInput): Promise<DeployResult> {
 
   if (filesWritten === 0) {
     // 发布一个空版本 = 把 "current" 指向空目录 = 线上直接变 404。
-    // 这几乎一定是 source 写错了（构建产物目录不对），所以**拒绝**而不是告警了事。
     await runner.remove(staging)
     throw new DpError('DP.SOURCE.EMPTY', `source 里没有任何文件：${ctx.root}`, {
       path: 'projects.*.source',
@@ -383,22 +323,13 @@ export async function verifyRelease(
 }
 
 /**
- * 回退到上一版。索引里没有上一版就明确报错，不做"看起来成功"的操作
- *
- * 目标优先取**盘上索引**（releases 的倒数第二位）而不是 `ctx.previousReleaseId`：
- * 上一次部署未必是这次调用方做的，用它的认知回退会退到一个可能从未在这台机器上
- * 生效过的版本。索引读不出来时才退回 ctx —— 那是「索引丢了但调用方知道」的降级。
- * 前提是 current 就在 releases 的末尾（deploy() 写索引时正是这么排的）；
- * 若索引被裁剪到 current 不在末尾，这套「倒数第二」与 readReleaseState 按位置取的
- * 做法就会给出不同的上一版。
- *
- * 只换向、只写索引，**不碰 release 目录** —— 回退不是删除，好版本还得留着再次上线。
+ * 回退到上一版。索引里没有上一版就明确报错，不做"看起来成功"的操作目标优先取**盘上索引**（releases 的倒数第二位）而不是 `ctx.previousReleaseId`：上一次部署未必是这次调用方做的，用它的认知回退会退到一个可能从未在这台机器上生效过的版本。索引读不出来时才退回 ctx —— 那是「索引丢了但调用方知道」的降级。
  *
  * @param runner 目标机通道
  * @param ctx 发布上下文；只用 root 与 previousReleaseId（后者仅在索引不可用时兜底）
  * @returns 实际生效的版本号，调用方据此更新自己的状态
  * @throws DpError `DP.VERIFY.FAILED` —— 没有可回退的版本。复用已登记的码是因为处置方式
- *   确实是同一类（「先处理这个再重来」），而不是这里漏了新码
+ * 确实是同一类（「先处理这个再重来」），而不是这里漏了新码
  */
 export async function rollback(runner: Runner, ctx: TargetContext): Promise<string> {
   const L = layout(ctx.root)
@@ -421,18 +352,17 @@ export async function rollback(runner: Runner, ctx: TargetContext): Promise<stri
 }
 
 /**
- * 保留最近 keep 个版本。**当前版本与上一版永不被清理** ——
- * 清理掉上一版等于把回退这条路炸了。
+ * 保留最近 keep 个版本。**当前版本与上一版永不被清理** ——清理掉上一版等于把回退这条路炸了。
  *
  * @param runner 目标机通道
  * @param root 发布根；releases / current 路径一律由它推导，不接受外部拼好的目录名
  * @param keep 期望保留的版本数。小于 1 会被抬成 1 —— 保留集为空的话，除受保护的那两个
- *   之外全部删掉，那不是「少留几版」而是清空历史
+ * 之外全部删掉，那不是「少留几版」而是清空历史
  * @param currentId 当前生效的版本号，受保护
  * @param previousId 上一版，同样受保护；缺省即只保护当前版本
  * @returns 盘上剩下的**全部**版本（含落在保留集之外、但因受保护而留下的那些），
- *   由调用方写进索引。只返回保留集的话，被保留下来的上一版不会进索引，
- *   下一轮 rollback 就找不到它了
+ * 由调用方写进索引。只返回保留集的话，被保留下来的上一版不会进索引，
+ * 下一轮 rollback 就找不到它了
  */
 export async function prune(
   runner: Runner,
@@ -457,19 +387,10 @@ export async function prune(
   return all.filter((id) => !doomed.includes(id))
 }
 
-// ------------------------------------------------------------
 // Target 契约实现（plan 侧，纯函数）
-// ------------------------------------------------------------
 
 /**
  * Target 契约的 plan 侧。**纯函数，不碰 runner**。
- *
- * 计划与执行分家不是为了好看：deploy() 从 planInstall 的产出里取 id 与 kind 来填轨迹，
- * 所以改这里的步骤就等于改部署日志的输出 —— 两边各写一份的话，
- * 用户会看到「计划说 install / 实际轨迹里是别的名字」而查不出是哪边变了。
- *
- * 顺序在这里定死：install 的两步必须都早于 activate 的换向，
- * 因为写进去的版本要先被证明可用，才允许让 current 指过去。
  */
 export const staticTarget: Target<StaticTargetConfig> = {
   type: 'static',
@@ -540,15 +461,10 @@ export const staticTarget: Target<StaticTargetConfig> = {
   },
 }
 
-// ------------------------------------------------------------
 // 只读观测 —— status / verify 的数据来源
-// ------------------------------------------------------------
 
 /**
  * 只读观测出来的发布状态。**没有的字段就是没有**，不用空串 / -1 顶替。
- *
- * 缺省必须与「值为空」分得开：`dp status` 要能说「尚未部署过」，
- * 而一个被填成空串的 current 会让它改口说「当前版本是空字符串」。
  */
 export interface ReleaseState {
   /** 索引里的当前版本；没部署过为 undefined */
@@ -564,18 +480,9 @@ export interface ReleaseState {
 /**
  * 读发布状态。**只读**：不建目录、不写索引、不切 current。
  *
- * 索引不存在 / 损坏时返回空状态而不是抛错 —— 「还没部署过」是正常的初始状态，
- * 不是错误。抛错会让 `dp status` 在全新机器上直接失败，而它恰恰应该报告
- * 「尚未部署过」然后退出 0。
- *
- * `previous` 取的是 **current 在 releases 数组里的前一个位置**，不是倒数第二个：
- * releases 是被 prune 裁剪过的历史，不保证以 current 结尾（裁剪规则只保护
- * current 与上一版，更早的版本随时可能排在 current 前面以外的任何位置）。
- * 按位置取才不会在 current 后面还排着新版本时，回退到一个从没生效过的东西。
- *
  * @param runner 目标机通道；整条链路只读一次索引文件
  * @param root 发布根；索引路径由它推导，不接受外部直接传入索引路径 ——
- *   传入的话「索引在哪」就有了第二个答案，与 deploy 写的那份可能不是同一个
+ * 传入的话「索引在哪」就有了第二个答案，与 deploy 写的那份可能不是同一个
  * @returns current / previous / releases / history 的快照；从未部署过时是全空状态而非报错
  */
 export async function readReleaseState(runner: Runner, root: string): Promise<ReleaseState> {

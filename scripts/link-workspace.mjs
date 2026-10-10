@@ -1,14 +1,3 @@
-/**
- * 用 junction 链接 workspace 包到 node_modules/@dp/*。
- *
- * 为什么需要：
- *   本地未开启 Windows 开发者模式 → 创建 symlink 报 EPERM（junction 则可用）。
- *   pnpm 12.6.0 在本地不会回退到 junction，isolated 布局的顶层链接会**静默缺失**，
- *   于是 `import '@dp/ports'` 解析不到。详见 docs/troubleshooting.md。
- *
- * 幂等：链接已存在且指向正确目标时跳过。
- * 开启开发者模式后可删除本脚本与 package.json 里的 postinstall。
- */
 import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, readlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'

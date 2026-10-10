@@ -1,14 +1,3 @@
-/**
- * nginx 目标 —— 步骤规划（纯函数侧）。
- *
- * 生效顺序是 定的：**写候选 → 校验 → 原子替换 → 复验 → reload**。
- * 两步 `-t` 看着傻：前者只验「新文件本身能解析」，后者验「换上去之后整棵树能解析」。
- * 只留后者的话，一次坏 conf 会先被写进生产目录才被发现 —— 而 `nginx -t` 通过、
- * reload 也成功之后，故障会以「服务起来了但行为变了」的形式出现，那时现场已经没了。
- *
- * 本轮只做 plan：所有 `argv[]` 都排好了但**不执行**。执行器依赖渲染与步骤
- * 先定型，理由是失败时的补偿动作要跟着步骤一起定型，事后补的补偿必然是错的。
- */
 import { DpError, type Step, type Target, type TargetContext } from '@dp/ports'
 import { renderString } from '@dp/template'
 import { renderConf } from './render.js'
@@ -23,8 +12,6 @@ function joinPath(...parts: readonly string[]): string {
   return parts.filter((p) => p !== '').join('/')
 }
 
-/** 导出给执行器：路径表必须**只有一份**。计划里印的路径与真正写文件的路径一旦分叉，
- * 用户看到的是「计划说备份了 A，实际覆盖了 B」 */
 export interface Layout {
   /** confd 里的目标文件名 */
   readonly file: string
@@ -59,15 +46,11 @@ export function layout(ctx: TargetContext, config: NginxTargetConfig): Layout {
 }
 
 /**
- * 文件名默认取项目名。它**不是**配置项而是推导结果：文件名会出现在 confd 里，
- * 猜错的结果是同名的两份 conf 同时被 include，或者旧的那份永远不再更新。
+ * 文件名默认取项目名。它**不是**配置项而是推导结果：文件名会出现在 confd 里，猜错的结果是同名的两份 conf 同时被 include，或者旧的那份永远不再更新。
  */
 function resolveFilename(ctx: TargetContext, config: NginxTargetConfig): string {
   if (config.filename !== undefined) {
     // 走模板层而不是直接 trim：默认文件名是 `<项目名>.conf`，用户照着写
-    // `${project}.conf` 时必须得到同样的结果，否则「默认值」和「显式写出来的值」
-    // 会指向两个不同的文件（旧的那个从此不再更新，且不会有人注意到）。
-    // 先渲染再校验：变量名本身不带分隔符，渲染出来的才可能带。
     const rendered = renderString(config.filename, config.render, {
       usage: 'conf',
       path: 'projects.*.target.nginx.filename',
@@ -79,7 +62,6 @@ function resolveFilename(ctx: TargetContext, config: NginxTargetConfig): string 
       })
     }
     // 它是 confd 里的**一个名字**，不是路径。带分隔符就能写到 confd 之外去，
-    // 那已经越过「往 confd 里放一份配置」的授权范围了。
     if (rendered.includes('/') || rendered.includes('\\') || rendered === '.' || rendered === '..') {
       throw new DpError('DP.NGX.CONF_INVALID', `filename 不是单个文件名：${rendered}`, {
         path: 'projects.*.target.nginx.filename',
@@ -99,10 +81,7 @@ function resolveFilename(ctx: TargetContext, config: NginxTargetConfig): string 
 }
 
 /**
- * shell 元字符。Runner 只有 `exec(argv[])`，中间没有 shell，这些字符在 argv 里
- * 是**字面量** —— 但正因为如此，把 `nginx -s reload; rm -rf /` 写成字符串传下去
- * 只会得到一条名字很怪、参数里带分号的 nginx 调用，与写它的人期待的完全不是一回事。
- * 照传等于静默改变语义，所以宁可报错让人写成 argv 数组。
+ * shell 元字符。Runner 只有 `exec(argv[])`，中间没有 shell，这些字符在 argv 里是**字面量** —— 但正因为如此，把 `nginx -s reload; rm -rf /` 写成字符串传下去只会得到一条名字很怪、参数里带分号的 nginx 调用，与写它的人期待的完全不是一回事。
  */
 const SHELL_META = /[ \t;|&$><`'"\n\r(){}[\]\\*?!#~]/
 
@@ -133,8 +112,6 @@ function assertReloadArgv(argv: readonly string[]): readonly string[] {
 const NGINX_T = 'nginx'
 const NGINX_TEST: readonly string[] = [NGINX_T, '-t']
 
-/** 导出给执行器：候选内容与计划标题里的行数必须出自同一次渲染，
- * 否则「计划说 12 行、实际写下去 13 行」这类不一致会一直留在纸面上 */
 export function renderFor(config: NginxTargetConfig): string {
   const project = config.render.project
   return renderConf(config.server, config.render, {
@@ -146,17 +123,6 @@ const READ_ONLY_UNDO = '无需补偿：只解析或只读，不改任何文件'
 
 /**
  * nginx 目标的 plan 侧。**纯函数**：不碰 runner、不发命令、不写文件。
- *
- * 计划的产出有两个消费者，形状是被它们共同决定的：
- *  一是给人看的步骤与 argv；执行器**逐字取用** `detail.argv`，不在自己这边再写一份 ——
- *  两份 argv 各改各的，症状是「计划说校验影子主配置、真跑的是 `-t` 生产树」，
- *  而那一步存在的全部意义就是在碰生产目录之前发现问题。
- *  二是失败时的补偿动作：它必须与步骤一起定型，事后补的补偿必然是错的
- *  （真的出问题的那一步往往正是当时没想到需要补偿的那一步）。
- *
- * 四个 plan 的分界不容改：**install 全程不碰生产目录，activate 才动它**。
- * 两者合成一个之后就没有「装好了但还没切」这个状态了，
- * 用户也就失去了「先验后切」这个选项。
  */
 export const nginxTarget: Target<NginxTargetConfig> = {
   type: 'nginx',
@@ -191,7 +157,6 @@ export const nginxTarget: Target<NginxTargetConfig> = {
         detail: {
           argv: [...NGINX_TEST, '-c', L.mainConfig],
           // 旧文件必须排除：候选与旧文件同时被 include 会撞出 conflicting server name，
-          // 于是「替换」永远过不了第一步校验。列目录是 IO，由执行器做。
           includeListFrom: config.confd,
           exclude: L.file,
         },
@@ -221,9 +186,6 @@ export const nginxTarget: Target<NginxTargetConfig> = {
             ? `删除 ${L.file}（首次部署，无备份可还原）`
             : `把 ${L.backup} rename 回 ${L.file}，然后按 nginx.reload-conf 重新 reload`,
         // 不写「把候选 rename 过去」：shadowDir 允许配到 confd 之外，
-        // 那时跨文件系统的 rename 直接 EXDEV，原子替换变成部署失败。
-        // 候选留在影子目录里（已被影子校验证明能解析），往 confd 里写一份再 rename，
-        // 原子性只依赖 confd 自己那一个文件系统。
         detail: { via: L.newFile, to: L.file, backup: L.backup },
       },
       {
@@ -260,9 +222,6 @@ export const nginxTarget: Target<NginxTargetConfig> = {
 
   /**
    * 复验 confd 里的内容就是本次渲染的那份。
-   *
-   * 只做只读比对：写完 reload 完就宣布成功的话，
-   * 「文件被别的进程/别的部署工具改掉了」这件事会一直藏到下一次 404 才暴露。
    */
   planVerify(ctx, config): readonly Step[] {
     const L = layout(ctx, config)
@@ -281,9 +240,6 @@ export const nginxTarget: Target<NginxTargetConfig> = {
 
   /**
    * 还原上一份 conf + 复验 + reload。
-   *
-   * **不回退 release**：本包负责 conf 这一半，release 目录的回退由 target-static 负责。
-   * 两件不同的事放在一个「回滚」里，出问题时说不清到底是 conf 错了还是版本错了。
    */
   planRollback(ctx, config): readonly Step[] {
     if (ctx.previousReleaseId === undefined) {

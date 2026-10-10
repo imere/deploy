@@ -1,29 +1,3 @@
-/**
- * 覆盖率阈值门禁：解析 `build/coverage/lcov.info`，按包统计行覆盖率并按门槛判定。
- *
- * 为什么只认 `packages/<pkg>/build/**`：测试跑的是 `tsc -b` 的产物而不是源码，
- * 把 build 之外的同名文件算进来会让同一个文件被数两遍、数字虚高；反过来
- * 把源码目录算进来则是拿没被执行的东西稀释分母。
- *
- * 为什么 lcov 缺失时失败而不是当 0% 或 100%：0% 会把门禁变成一次稳定的红，
- * 100% 会变成一次稳定的绿 —— 两者都不是测出来的，是编出来的。没数据就报没数据。
- *
- * 为什么「盘上有产物、lcov 里却没记录」要判未达标：`node --test` 只给被加载过的
- * 文件出记录，一个产物连记录都没有，意味着没有任何测试碰到它 —— 比「测了但没覆盖」
- * 更该拦，而放过它会让包在缺文件的情况下照样显示 100%。
- *
- * 为什么「编译后没有任何可执行语句」的产物反过来不判缺口：类型在 verbatimModuleSyntax
- * 下被整体擦除，一个只剩 `import type` / `export interface` 的源文件编出来是
- * `export {};` 加一行 sourceMappingURL —— 它连一行执行体都没有，为它写测试既不可能
- * 也没意义，把它算进缺记录却会让受门禁包永远修不红。但它也不被静默丢弃：这类产物
- * 单独列一份账（`typeOnlyArtifacts`），一旦有人往里塞了真代码，同一次判定会立刻把它
- * 翻回缺口 —— 规则每次都按盘上产物重算，不缓存结论。
- *
- * 分层：参数解析（`parseArgs`）、lcov 解析（`parseLcov`）、产物分类
- * （`hasExecutableStatements` / `classifyArtifacts`）、门槛判定（`evaluateCoverage`）
- * 都是纯函数，IO 只留在入口 `main` —— 门禁脚本自己的判定逻辑因此可被 `node --test`
- * 直接断言，不必去构造整棵仓库树。
- */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, resolve as resolvePath, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -69,10 +43,7 @@ export function parseLcov(text) {
 export const pkgOf = (file) => /^packages\/([^/]+)\/build\//.exec(file)?.[1] ?? null
 
 /**
- * 测试产物是脚手架，不是被测对象：它自己不被任何东西覆盖，把它算进分母等于
- * 「多写测试就掉覆盖率」。两侧必须同口径 —— 盘上扫描与 lcov 记录用同一个判据，
- * 只在一侧排除的话，门禁的松紧会随覆盖率怎么采集而漂移（glob 换种展开方式
- * 就会撞出来），那时同一份源码在本地绿、在 runner 上红。
+ * 测试产物是脚手架，不是被测对象：它自己不被任何东西覆盖，把它算进分母等于「多写测试就掉覆盖率」。两侧必须同口径 —— 盘上扫描与 lcov 记录用同一个判据，只在一侧排除的话，门禁的松紧会随覆盖率怎么采集而漂移（glob 换种展开方式就会撞出来），那时同一份源码在本地绿、在 runner 上红。
  */
 export const isTestArtifact = (file) => file.endsWith('.test.js')
 
@@ -99,15 +70,6 @@ function skipString(text, open, quote) {
 
 /**
  * 产物里是否还有可执行语句。只看产物本身 —— 源码路径不是这个判定的输入域。
- *
- * 做法是「反过来数」：把注释与字符串字面量整体跳过，剩下的 token 里除分号与空导出标记
- * 外只要还有东西，就判为有可执行行。于是这几种编译输出形态都被容忍：
- *   `export {};` + `//# sourceMappingURL=…`   类型擦除后的空模块
- *   `"use strict";` + `export {};`             指令序言（各包的编译输出形态略有差异）
- *   纯注释或空文件
- * 而任何认不出的形状（未闭合的注释或字符串、模板串、`import {} from '…'` 这类仍会
- * 触发副作用的导入）一律判为**有**可执行行 —— 判不出来时倾向当有，宁可多报一次缺口，
- * 也不让真代码从缺记录里溜过去。
  */
 export function hasExecutableStatements(text) {
   let i = 0
@@ -162,8 +124,6 @@ const readSafe = (readText, p) => {
 
 /**
  * 把盘上产物分成两类：`typeOnly` 不参与覆盖判定，`noRecord` 才是真缺口。
- * 判定顺序是「先看有没有执行体，再看 lcov 有没有记录」：一个连执行体都没有的文件
- * 无论有没有记录都不是缺口，而有执行体又没记录的比「测了没覆盖」更该拦。
  */
 export function classifyArtifacts(paths, { hasRecord, readText }) {
   const typeOnly = []
@@ -184,8 +144,7 @@ export function classifyArtifacts(paths, { hasRecord, readText }) {
 const rate = (hit, total) => (total > 0 ? (hit / total) * 100 : null)
 
 /**
- * 门禁的全部判定。IO 由调用方注入（`readText`），因此可以在只有几个字符串的
- * 夹具上跑完整条链路。
+ * 门禁的全部判定。IO 由调用方注入（`readText`），因此可以在只有几个字符串的夹具上跑完整条链路。
  */
 export function evaluateCoverage({ lcovText, onDisk, readText, thresholds = GATED, gated = GATED }) {
   const seen = new Set()
@@ -290,7 +249,6 @@ export function parseArgs(argv) {
     } else if (arg.startsWith('--threshold=')) {
       spec = arg.slice('--threshold='.length)
       // 等号写法也得记下标：它同样是一个「已认过的参数」，漏记会让下面的游离参数校验
-      // 把它当未知参数，等号写法就永远走不到生效那一步
       consumed.add(i)
     } else {
       continue

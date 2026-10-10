@@ -1,14 +1,3 @@
-/**
- * 目标类型探测（TargetResolver 的「探测 + 仲裁」半边）—— **纯函数**，零 IO。
- *
- * 零 IO 是这里的硬约束：源清单由调用方注入（`DetectInput.entries`），package.json
- * 的 scripts 也由调用方读好塞进来。本文件不 import `node:fs`、不碰 `process.env`、
- * 不起子进程 —— 它一旦开始读盘，`makePlan()` 就不再是纯函数，plan 也就没法在
- * 没有任何机器的情况下断言。
- *
- * 仲裁刻意保守：**猜错的代价是「部署到了错误的目标类型」**，
- * 而那通常表现为一次线上事故，所以拿不准一律报错 + 列出候选 + 给出排除办法。
- */
 import { DpError } from '@dp/ports'
 
 /** 对应 `targetSchema.pick`。不设默认值：调用方必须显式传，默认值由 schema 那一层给 */
@@ -16,17 +5,11 @@ export type TargetPick = 'auto' | 'fail'
 
 /**
  * 本仓**已实现**的目标类型。
- *
- * 刻意不等于 `TARGET_KINDS`：schema 里还有 `systemd` / `process`，但它们没有执行器
- * （systemd 目标只有 unit 渲染的规则，尚未接线）。两处都叫「目标类型」但
- * 含义不同，把 schema 的枚举直接当「已实现」用，错误信息就会把用户指向一个跑不了的选项。
  */
 export const IMPLEMENTED_KINDS: readonly string[] = ['static', 'nginx', 'docker']
 
 /**
- * 探测的输入。**没有**「源目录」字段，只有展开后的条目名：
- * 探测关心的是「有没有 compose 文件」，不是「文件在哪」——
- * 给了路径就得关心它从哪来，纯函数的前提随即破掉。
+ * 探测的输入。**没有**「源目录」字段，只有展开后的条目名：探测关心的是「有没有 compose 文件」，不是「文件在哪」——给了路径就得关心它从哪来，纯函数的前提随即破掉。
  */
 export interface DetectInput {
   /**
@@ -35,17 +18,12 @@ export interface DetectInput {
   readonly entries: readonly string[]
   /**
    * `package.json` 里的 scripts 名字（如 `['build', 'deploy']`）。
-   * 由调用方读好再注入 —— 探测函数自己不读盘，否则它就不是纯函数了。
    */
   readonly packageScripts?: readonly string[]
 }
 
 /**
  * 一个候选目标类型。
- *
- * 三个字段共同构成「可解释」：kind 是什么、凭什么这么认为（evidence）、
- * 能不能真跑（implemented）。少了 evidence，CLI 就答不出「为什么判定成 docker」，
- * 用户只能靠猜去改配置。
  */
 export interface DetectCandidate {
   /** 命中的目标类型。`caddy` / `k8s` 也要能报出来（它们是「看到了但还没实现」） */
@@ -60,9 +38,6 @@ export interface DetectCandidate {
 
 /**
  * 仲裁的结论。
- *
- * `rejected` 不是可选的调试信息，而是**对外契约的一部分**：
- * `pick: auto` 的每一次自动选择都必须能回答「还有谁、凭什么被排除」。
  */
 export interface DetectResult {
   readonly kind: string
@@ -73,23 +48,10 @@ export interface DetectResult {
   readonly reason: string
 }
 
-// ------------------------------------------------------------
 // 置信度档位
-// ------------------------------------------------------------
 
 /**
  * 档位 = 证据有多难被巧合凑出来。
- *
- * 90 compose 文件：这个项目**就是**一个 compose 项目，文件名几乎不可能出现在无关项目里
- * 80 nginx.conf：同层级的强信号，但项目同时用 nginx 与别的东西并不罕见
- * 60 systemd / pm2：**刻意同档**。两者都是「项目自带一份进程监管配置」，强度相当；
- *    仓库里同时出现 `.service` 与 `ecosystem.config.js` 时没有任何依据偏向谁，
- *    这个「撞档」是同分报错分支的真实入口 —— 档位表若全互不相同，那条分支就是死代码
- * 50 Dockerfile 且无 compose：单镜像比 compose 弱一档（compose 顺带定义了编排关系，
- *    单镜像只说明「有个镜像」），且本仓只做 remote-cli，认它也没有可跑的东西
- * 45 Caddyfile / 40 delegate / 30 Chart.yaml：辅助信号
- * 20 index.html：几乎每个前端产物都有，是**兜底档而不是强信号**。它排最后不是因为不重要，
- *    而是因为它最容易被无关文件顺带满足 —— 排前面就会把 compose 项目判成 static
  */
 const CONF = {
   dockerCompose: 90,
@@ -102,9 +64,7 @@ const CONF = {
   static: 20,
 } as const
 
-// ------------------------------------------------------------
 // 路径匹配
-// ------------------------------------------------------------
 
 const COMPOSE_EXACT = new Set(['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'])
 /** `docker-compose.*.yml`：中间那截必须非空，`docker-compose..yml` 不是合法文件名 */
@@ -143,17 +103,14 @@ function isDelegateScriptPath(segs: readonly string[]): boolean {
   return segs.some((seg, i) => seg === '.deploy' && segs[i + 1] === 'scripts' && i + 2 < segs.length)
 }
 
-// ------------------------------------------------------------
 // 探测器
-// ------------------------------------------------------------
 
 function sortUnique(paths: readonly string[]): readonly string[] {
   return [...new Set(paths)].sort()
 }
 
 /**
- * 列出候选。**一个 kind 最多一个候选** —— docker 的两条证据（compose / Dockerfile）
- * 合并成同一个候选，见 docker 那一支。
+ * 列出候选。**一个 kind 最多一个候选** —— docker 的两条证据（compose / Dockerfile）合并成同一个候选，见 docker 那一支。
  *
  * @param input 注入的源条目与 package scripts 名字
  * @returns 候选列表，按置信度从高到低；同一 kind 只会出现一次
@@ -189,7 +146,6 @@ export function detectCandidates(input: DetectInput): readonly DetectCandidate[]
   }
 
   // compose 存在时 docker 即为已实现（remote-cli 有东西可跑）；否则只有 Dockerfile
-  // 只是一个没实现的单镜像 —— 不能因为它叫 docker 就让用户以为 dp 会去构建镜像。
   if (composeFiles.length > 0) {
     out.push({
       kind: 'docker',
@@ -229,9 +185,7 @@ export function detectCandidates(input: DetectInput): readonly DetectCandidate[]
   return out
 }
 
-// ------------------------------------------------------------
 // 仲裁
-// ------------------------------------------------------------
 
 function summarize(c: DetectCandidate): string {
   const ev = c.evidence.slice(0, 3).join('、')
@@ -255,14 +209,6 @@ function describeSeen(input: DetectInput): string {
 
 /**
  * 探测 + 仲裁。**不读盘**。
- *
- * 0 命中 → 报错并列出它看到了哪些文件，绝不假装 static
- * 1 命中 → 用它（未实现则报错，说明还差什么）
- * 多命中 → `fail` 报错；`auto` 取最高档，同档位报错
- *
- * 「未实现不参与取最高」有一条边界：单个未实现的强信号**不许**否决一个已实现的候选
- * （否则源里躺一个 `Caddyfile` 就得报「不支持」），但两个**强度相同**的信号撞档
- * 仍然是歧义 —— 那时报错，报的是「无法判定」，不是「不支持」。
  */
 function noEvidenceError(input: DetectInput): DpError {
   return new DpError('DP.CONFIG.INVALID', '探测不到目标类型：源里没有任何可识别的证据', {
@@ -275,12 +221,6 @@ function noEvidenceError(input: DetectInput): DpError {
 
 /**
  * 仲裁：候选 → 唯一的 target.kind。
- *
- * 比探测更保守，四条都不给「自动降级」的余地：
- *  1. 0 命中报错（并列出它看到的文件）—— 不假装成 static
- *  2. 命中未实现的类型直接报错，不退回已实现的那个
- *  3. `auto` 下最高分**并列**即报错 —— 并列还靠数组顺序选就是暗选
- *  4. 未实现的候选不参与取最高 —— 否则源里躺一个 `Caddyfile` 就能否决一个 compose 项目
  *
  * @param input 注入的探测输入
  * @param pick 'auto' 按置信度选（并列报错）/ 'fail' 只接受唯一命中

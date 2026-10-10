@@ -1,13 +1,3 @@
-/**
- * fake spawn —— **测试专用**，零真实子进程。
- *
- * 存在的理由：测试不许起真进程、不许连网络。而 `runRsync` 的价值
- * 全在"退出码 → 结论"这条映射上，用真 rsync 去测它既不稳定（本地根本没 rsync）
- * 也测不全（23/24/255 这些码没法自然制造）。
- *
- * 刻意**不实现** pid：`killProcessTree(undefined)` 直接返回，于是测试不会在
- * Windows 上真的拉起 taskkill。进程树被杀的断言落在 `kill()` 的记录上。
- */
 import type { SpawnImpl, SpawnedProcess } from './types.js'
 
 export interface FakeProcessRecord {

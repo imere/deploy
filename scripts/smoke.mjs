@@ -1,16 +1,3 @@
-/**
- * 发布产物 smoke 门禁：验证各包的 build 产物能被别人真正 import 起来。
- *
- * 为什么要有它：源码能编译、单测能过，都不能证明发出去的包能用。真正会炸的是
- * 「路径写错 / exports 漏了子路径 / 构建把开发机路径编进去了 / 依赖没声明」这一类，
- * 而它们在源码侧与单测侧全都看不见 —— 单测跑的是仓库内的相对路径，
- * 真实消费方走的是包名解析。这是唯一能覆盖那条路径的检查。
- *
- * 判死与只报的分工在扫描段：import / 导出面 / 凭据判死，绝对路径只报 ——
- * 不是漏了判据，是那一类的判据在静态上不成立（理由写在那里，不在文件头）。
- *
- * 不做重建：只读现成产物。构建归 `pnpm build`，smoke 只回答「产物能不能用」。
- */
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -33,8 +20,6 @@ const emit = (line) => {
 }
 
 // ── 总超时兜底 ──────────────────────────────────────────────────────────────
-// 单个 import 超时只解决「这次 import 挂住」。若某个顶层副作用让**整个事件循环**
-// 停摆（同步死循环、无出口的 await），上面的竞态也会跟着失效，只能靠这个闸。
 const watchdog = setTimeout(() => {
   process.stderr.write(
     `smoke: 总超时 ${TOTAL_TIMEOUT_MS}ms —— 某个产物的顶层副作用挂住了。` +
@@ -68,8 +53,7 @@ function listJsFiles(dir) {
 }
 
 /**
- * import 加超时。挂住的动态 import 无法真正取消（没有 API），
- * 所以这里只是「不再等它」，最终兜底是顶层的总超时闸。
+ * import 加超时。挂住的动态 import 无法真正取消（没有 API），所以这里只是「不再等它」，最终兜底是顶层的总超时闸。
  */
 async function importWithTimeout(spec, ms) {
   let timer
@@ -119,7 +103,6 @@ for (const name of listPackageDirs()) {
   record.entry = entry
 
   // 入口声明与实际文件必须对得上。这是「exports 指向一个不存在的文件」的唯一
-  // 能在不 import 的情况下抓住的时刻 —— import 失败时报的是解析错，不是「你写错了 exports」。
   const entryAbs = resolve(pkgDir, entry)
   if (!existsSync(entryAbs)) {
     const rel = relative(root, entryAbs)
@@ -144,7 +127,6 @@ for (const name of listPackageDirs()) {
   record.exports = keys
 
   // 入口活着但什么也没导出：import 不报错，功能全丢。这是最阴的一种坏，
-  // 所以单独判，而不是让「import 成功」顺带把它算过。
   if (keys.length === 0) {
     const rel = relative(root, entryAbs)
     record.problems.push({ kind: 'empty-exports', file: rel, reason: '模块对象可枚举导出为空' })
@@ -158,8 +140,6 @@ for (const name of listPackageDirs()) {
 }
 
 // ── 检查 4–5：产物内容扫描 ──────────────────────────────────────────────────
-// 两类扫描、两种判据。凭据是硬判据，绝对路径不是 —— 不是因为它不重要，
-// 而是因为判据本身在静态上不成立。
 const secretHits = [] // 命中即失败
 const absPathHits = [] // 只报告，永不影响判失败
 const unreadable = [] // 只报告（与改动前一致：不参与判失败）
@@ -187,8 +167,6 @@ for (const name of listPackageDirs()) {
 }
 
 // 命中回灌到包维度：包「失败」必须对应会判死的东西。绝对路径不回灌 ——
-// 让只报信号的一类参与失败判定，会出现「包红了但没有任何可执行的修法」。
-// 读盘失败排在命中判定之前，所以不可读的产物不进这里，也一样不影响判失败。
 const gateFailures = [...secretHits, ...absPathHits].filter((hit) => isGateFailure(hit) === 'fail')
 for (const hit of gateFailures) {
   const owner = packageResults.find((p) => p.name === pkgOf(hit.file))
@@ -234,7 +212,6 @@ if (jsonMode) {
       `${secretHits.length} 处命中${secretHits.length ? '（命中即失败）' : ''}`,
   )
   // 报告类命中单独成段并写明为什么它不判失败：一条不判失败的检查不解释理由，
-  // 下一个人只会以为它坏了，然后去放宽真正的判据。
   if (absPathHits.length) {
     emit(
       `[报告] 绝对路径 ${absPathHits.length} 处 —— 只报不判。判据在这里不成立：` +
@@ -255,7 +232,4 @@ clearTimeout(watchdog)
 const code = failed.length > 0 ? 1 : 0
 process.exitCode = code
 // 显式退出：产物 import 后可能留下句柄（socket、定时器、stdin 监听），
-// 只设 exitCode 的话进程会吊在句柄上 —— 门禁挂起比门禁失败更难查。
-// 用 unref 的零延时而不是直接 process.exit()：直接退出会截断管道上的 stdout。
-// 事件循环还活着 → 定时器照常触发 → 强制退；已经空了 → 进程自然退出并带上 exitCode。
 setTimeout(() => process.exit(code), 0).unref()

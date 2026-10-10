@@ -1,13 +1,3 @@
-/**
- * docker 目标（remote-cli）—— 步骤规划，纯函数侧。
- *
- * 与 nginx 目标同一条纪律：**每条 argv 只在 compose.ts 里写一次**，本文件只负责
- * 决定「哪一步、什么顺序、失败了怎么撤」。执行器从 `detail.argv` 取，不另写一份。
- *
- * 顺序上刻意只有 pull → up：先拉镜像再起容器。反过来 up 之后才 pull，
- * 拉下来的新镜像要等下一次部署才生效，而本次的健康检查验的是**旧镜像** ——
- * 「验过了」与「跑的是刚部署的版本」两件事会悄悄分开。
- */
 import { DpError, type Step, type Target, type TargetContext } from '@dp/ports'
 import { pullArgv, psArgv, releaseDir, resolveCompose, upArgv, type ResolvedCompose } from './compose.js'
 import type { DockerTargetConfig } from './types.js'
@@ -27,24 +17,12 @@ function upUndo(ctx: TargetContext): string {
 
 /**
  * docker 目标（remote-cli）的 Target 实现 —— 只算计划，不碰机器。
- *
- * 四个方法都是纯函数：吃 ctx 与 config，吐 Step[]。每个方法各自调一次
- * `resolveCompose` 而不是让调用方把解析结果传进来 —— 上层可以只调 `planVerify`
- * 打印一段验收计划，而不必先知道「必须先算 compose」这条内部顺序。
- *
- * **`dp apply` 里本包的顺序是 deploy → install → activate，与 nginx 相反**：
- * compose 文件随 release 上传，而 install 做的只是 stat 确认 —— 排在传输之前，
- * 它要么永远失败（查一个还没传上来的文件），要么什么也没证明（stat 到上一轮留下的旧文件）。
  */
 export const dockerTarget: Target<DockerTargetConfig> = {
   type: 'docker',
 
   /**
    * install 只做两件事：确认 compose 文件都在、确认 envFile 在。
-   *
-   * **不搬文件** —— 搬运是 @dp/transport 的职责，docker 包里重造一套就等于
-   * 有了两条上传路径，而「文件到底传没传上去」这件事会开始有两个答案。
-   * 所以这里出的是「需要存在」清单，由传输层保证，执行器在动手前先核一遍。
    */
   planInstall(ctx, config): readonly Step[] {
     const resolved = resolveCompose(ctx, config, CONFIG_PATH)
@@ -68,7 +46,6 @@ export const dockerTarget: Target<DockerTargetConfig> = {
         host: ctx.host,
         undo: READ_ONLY_UNDO,
         // envFile 缺失时 compose 报的是 `Couldn't find env file` —— 不指向「这个文件
-        // 没上传」，而是让人去查 compose 文件的写法
         detail: { requireFiles: [resolved.envFile], envFile: resolved.envFile },
       })
     }
@@ -106,9 +83,6 @@ export const dockerTarget: Target<DockerTargetConfig> = {
 
   /**
    * ps → 解析 → 断言。
-   *
-   * 用 `compose ps` 而不是 `docker ps`：后者列的是这台机器上**所有**
-   * 容器，与本项目是否健康无关；前者给的是 compose 级别的期望状态。
    */
   planVerify(ctx, config): readonly Step[] {
     const resolved = resolveCompose(ctx, config, CONFIG_PATH)
@@ -148,9 +122,6 @@ export const dockerTarget: Target<DockerTargetConfig> = {
 
   /**
    * 回滚 = 用上一版 release 目录里的 compose 文件重新 up。
-   *
-   * 没有上一版就显式报错。首次部署报「回滚成功」是本仓最不能接受的一种假结果：
-   * 用户会据此认为线上有东西在跑，而实际状态是「什么都没起」。
    */
   planRollback(ctx, config): readonly Step[] {
     if (ctx.previousReleaseId === undefined) {

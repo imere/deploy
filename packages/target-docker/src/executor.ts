@@ -1,13 +1,3 @@
-/**
- * docker 目标（remote-cli）—— 执行器。
- *
- * 与 nginx 执行器同一条纪律，核心只有一条：**计划说跑什么，就跑什么**。argv 全部从
- * `detail.argv` 取（compose.ts 是唯一构造点），执行器里不拼第二条命令 —— 一旦这里
- * 另写一份，症状是「计划里写着 pull 再 up、真跑的是裸 up」，而浮动 tag 的镜像会
- * 静默沿用上一轮那份，健康检查还全绿。
- *
- * 失败时**不自动补偿**，这是本文件最重要的一个决定，理由写在 activateDocker 里。
- */
 import {
   DpError,
   type DpErrorCode,
@@ -22,10 +12,6 @@ import type { DockerTargetConfig } from './types.js'
 
 /**
  * 默认命令超时。
- *
- * pull 要走网络、up --wait 要等容器健康，冷启动慢网上几分钟是真实的。但它是**上限**
- * 不是「等它结束」：不设上限等于把铁律 0 明令禁止的静默挂起换回来 —— 卡住的 pull
- * 表现为部署永远不结束，而 CI 里没有任何东西会叫醒它。
  */
 const DEFAULT_TIMEOUT_MS = 300_000
 
@@ -34,19 +20,11 @@ const OUTPUT_LIMIT = 2000
 
 /**
  * 执行器的四个阶段，与 `target.ts` 的四个 plan 方法**一一对应**。
- *
- * 用联合类型而不是 string：四者的失败后续完全不同（activate 失败交给 healing、
- * verify 失败交给上层判要不要回滚），松散的字符串会让分派写成一串 if，
- * 漏掉一种就静默掉进默认分支。
  */
 export type DockerPhase = 'install' | 'activate' | 'verify' | 'rollback'
 
 /**
  * 执行器的输入。
- *
- * 刻意接的是 `ctx + config` 而不是调用方算好的 `Step[]`：计划由 target.ts 重算，
- * 「执行用的是哪份计划」就只有这一个答案。改成接外部步骤，「报告跑的是 A、真跑的是 B」
- * 这种最难复现的事故就有了入口。
  */
 export interface DockerExecInput {
   /** 目标机的执行入口。全部 IO 走它 —— 本包自己不起子进程、不读 process.env */
@@ -57,8 +35,7 @@ export interface DockerExecInput {
   /** 逐步回调，供 CLI 打实时日志 */
   readonly onStep?: (step: Step) => void
   /**
-   * 命令超时。必须显式传：铁律 0 要求每条子进程都有 timeout 兜底，
-   * 缺省值只在调用方确实没意见时兜底，且它是个上限而不是「等它结束」。
+   * 命令超时。必须显式传：铁律 0 要求每条子进程都有 timeout 兜底，缺省值只在调用方确实没意见时兜底，且它是个上限而不是「等它结束」。
    */
   readonly timeoutMs?: number
   /** 只算不写：不 pull、不 up。ps 这类只读步骤照跑 —— 它给出的结论是真的 */
@@ -67,38 +44,24 @@ export interface DockerExecInput {
 
 /**
  * 一步的执行痕迹。
- *
- * 计划里有这一步，结果里就必然有它的一条记录（成功、跳过或失败）—— 少一条说明
- * 那一步被静默跳过了，而这是「部署完全成功」的报告里唯一查不出来的事故，
- * 所以 `result()` 会专门核一遍 id 集合。
  */
 export interface DockerStepTrace {
   /** 步骤 id，取自 target.ts 的 plan；CLI 按它把实时日志与最终报告对上 */
   readonly id: string
   /**
-   * 所属阶段，取自 @dp/ports 的 StepKind。它**不等于** DockerPhase：install 那两步的 kind
-   * 是 `prepare`（只做 stat，不动机器），而 phase 记的是「这次调用跑的是哪一段」。
-   * 上层要回答「哪一步会在机器上留下作用」看 kind，要回答「挂在哪一段」看 phase。
+   * 所属阶段，取自 @dp/ports 的 StepKind。它**不等于** DockerPhase：install 那两步的 kind是 `prepare`（只做 stat，不动机器），而 phase 记的是「这次调用跑的是哪一段」。
    */
   readonly kind: Step['kind']
   /** false 表示在这一步上中止 —— 后面的步骤不会再有痕迹 */
   readonly ok: boolean
   /**
    * 该步骤**在机器上没有留下作用**：dryRun 下没执行，或本来就没动手。
-   *
-   * 判据是「留下没留下」而不是「跑没跑」—— dryRun 的 `compose ps` 真的跑了，
-   * 它报的服务状态是真的，所以它是 ran；而 pull 与 up 没跑，写进去的镜像与容器
-   * 一次也没发生过，所以是 skipped。报「已拉取已启动」而机器上什么都没变，
-   * 比不做更难发现。
    */
   readonly skipped: boolean
 }
 
 /**
  * 执行成功的产物。
- *
- * `ok` 是字面量 `true` 而不是布尔：失败走 throw，返回值里没有「失败」这一态，
- * 于是「忘了判 ok 就去读服务状态」在类型层面就不成立。
  */
 export interface DockerExecResult {
   /** 恒为 true。存在的意义是让调用方能 narrowing —— 见上面那条 */
@@ -135,9 +98,7 @@ export interface DockerExecFailure {
   readonly healing: readonly string[]
 }
 
-// ------------------------------------------------------------
 // 失败信息组装
-// ------------------------------------------------------------
 
 /** 截断长输出。`docker compose up` 失败时 stderr 动辄几百行，整段塞进去等于什么都没说 */
 function excerpt(text: string): string {
@@ -149,8 +110,7 @@ function excerpt(text: string): string {
 }
 
 /**
- * docker 的原话必须进错误信息。只报「启动失败」等于让用户自己上机器重跑一遍才知道原因，
- * 而他多半还得靠猜（镜像拉不到、端口占用、healthcheck 一直不绿）。stderr 优先。
+ * docker 的原话必须进错误信息。只报「启动失败」等于让用户自己上机器重跑一遍才知道原因，而他多半还得靠猜（镜像拉不到、端口占用、healthcheck 一直不绿）。stderr 优先。
  */
 function dockerOutput(result: ExecResult): string {
   const err = excerpt(result.stderr)
@@ -162,10 +122,6 @@ function dockerOutput(result: ExecResult): string {
 
 /**
  * 给人看的 argv。
- *
- * 用 JSON 而不是空格 join：这些值会进 compose 的路径与 `-p`，空格是合法字符，
- * join 出来的字符串无法区分「一个元素里有空格」和「两个元素」—— 而那正是本仓
- * 反复踩到的形状（argv 元素级，见 compose.ts 开头）。这里只是展示，执行仍然只传数组。
  */
 function argvText(argv: readonly string[]): string {
   return `argv ${JSON.stringify([...argv])}`
@@ -191,9 +147,7 @@ function argvOf(step: Step): readonly string[] {
 }
 
 /**
- * cwd 从计划里取。它固定到 release 目录（compose 的项目目录），而 compose 里的
- * 相对路径（build.context、volumes 的源）按项目目录解析 —— cwd 不对就是同一个 compose
- * 在两台机器上挂载了不同目录，而且是静默的。
+ * cwd 从计划里取。它固定到 release 目录（compose 的项目目录），而 compose 里的相对路径（build.context、volumes 的源）按项目目录解析 —— cwd 不对就是同一个 compose在两台机器上挂载了不同目录，而且是静默的。
  */
 function cwdOf(step: Step): string {
   const cwd = step.detail?.['cwd']
@@ -240,14 +194,6 @@ function optionalStep(plan: readonly Step[], id: string): Step | undefined {
 
 /**
  * 从某条 argv 里剥出 `docker compose -f ... -p <name>` 这一段。
- *
- * 报错信息里要给用户「自己执行」的 down / ps 命令。**从计划的那条 argv 推**，
- * 而不是在这里重拼一遍：重拼出的那条命令可能带着另一个项目名或另一组 `-f`，
- * 用户照着执行下去，停掉的与本次部署无关的东西比部署本身更难收拾。
- *
- * 尾部必须**逐元素锚定**在末尾，匹配不上就报错而不是「砍掉最后几个元素」——
- * 项目名取 `up` / `ps` 都是合法的，砍尾元素会砍到 `-p` 的值上。锚定在末尾
- * 也让项目名与子命令同名时不受影响：前缀那一侧是完整的。
  */
 function composeBaseOf(step: Step, ...tails: readonly (readonly string[])[]): readonly string[] {
   const argv = [...argvOf(step)]
@@ -276,9 +222,7 @@ function servicesTable(services: readonly ComposePsEntry[]): string {
     .join('；')
 }
 
-// ------------------------------------------------------------
 // 一次执行的上下文
-// ------------------------------------------------------------
 
 class Session {
   readonly steps: DockerStepTrace[] = []
@@ -312,9 +256,6 @@ class Session {
 
   /**
    * 唯一的 exec 出口：argv 与 cwd 都来自计划，timeoutMs 必填，stdin 永不带。
-   *
-   * 不喂 stdin 时子进程的 stdin 立即关闭 —— 目标机吐出 `Password:` 而我们没在等，
-   * 就是「静默挂起」，CI 里表现为部署永远不结束。
    */
   async exec(step: Step): Promise<ExecResult> {
     return this.runner.exec(argvOf(step), { cwd: cwdOf(step), timeoutMs: this.timeoutMs })
@@ -368,7 +309,6 @@ class Session {
 
   result(phase: DockerPhase, plan: readonly Step[], services?: readonly ComposePsEntry[]): DockerExecResult {
     // 计划里有的步骤必须都被走一遍（dryRun 下也产出 skipped 的那条）。
-    // 少走一步是这里唯一一种「看起来完全成功」的事故。
     const planned = plan.map((step) => step.id)
     const ran = new Set(this.steps.map((step) => step.id))
     const missing = planned.filter((id) => !ran.has(id))
@@ -391,23 +331,17 @@ class Session {
   }
 }
 
-// ------------------------------------------------------------
 // ① install：只确认存在，不搬文件
-// ------------------------------------------------------------
 
 /**
  * install 一条 exec 都不发。
  *
- * 搬运是 @dp/transport 的职责，这里重造一套就等于有了两条上传路径，而「文件到底传上去
- * 没有」会开始有两个答案。存在与否一律走 stat：`readFile` 在不存在时是抛错的，把
- * 「读不了」（EACCES、路径被换成目录）当成「不存在」会直接放行一次注定失败的部署。
- *
  * @param input runner / ctx / config。**ctx.releaseId 就是 compose 要从中读取的那个版本**：
- *   `dp apply` 把这一段排在传输之后，所以这里 stat 的时候文件本就该在位了 ——
- *   顺序反过来（照抄 nginx 的 install → deploy）会让这一步永远失败或什么也没证明
+ * `dp apply` 把这一段排在传输之后，所以这里 stat 的时候文件本就该在位了 ——
+ * 顺序反过来（照抄 nginx 的 install → deploy）会让这一步永远失败或什么也没证明
  * @returns install 的结论。它不带 services：这一步读的是盘上的 compose 文件，不是容器状态
  * @throws DpError DP.DOCKER.FILE_MISSING（compose 文件或 envFile 没随 release 上传），
- *   或 DP.DOCKER.PLAN_MISMATCH（计划与执行器不同步，属代码错误）
+ * 或 DP.DOCKER.PLAN_MISMATCH（计划与执行器不同步，属代码错误）
  */
 export async function installDocker(input: DockerExecInput): Promise<DockerExecResult> {
   const session = new Session(input, 'install')
@@ -422,7 +356,6 @@ export async function installDocker(input: DockerExecInput): Promise<DockerExecR
         missing.push(path)
       } else if (stat.isDirectory) {
         // 目录与「不在」是同一件事：`-f <目录>` 报的是 no such file or directory，
-        // 与真缺文件一字不差。不说破的话排查者会去查上传逻辑，而问题在路径本身
         missing.push(`${path}（是个目录，不是文件）`)
       }
     }
@@ -442,9 +375,7 @@ export async function installDocker(input: DockerExecInput): Promise<DockerExecR
   return session.result('install', plan)
 }
 
-// ------------------------------------------------------------
 // ② activate：pull → up
-// ------------------------------------------------------------
 
 /** up 失败后的人工下一步。给的是**命令**，不是执行器替人做的动作 */
 function upHealing(ctx: TargetContext, base: readonly string[]): readonly string[] {
@@ -463,27 +394,18 @@ function upHealing(ctx: TargetContext, base: readonly string[]): readonly string
 /**
  * pull → up，**不自动补偿**。
  *
- * 不自动 `down`：`docker compose -p <name> down` 按项目名停，而项目名是用户起的、
- * 目标机上可能还有别人在用的另一个项目 —— 一次失败部署换掉别的服务，损失比留着
- * 一个跑着的旧版本大得多。
- *
- * 不自动 `up` 上一版：那是 `dp rollback` 的职责。执行器自动回滚会把「失败」与
- * 「已回滚」两个语义混进同一个结果，上层无法区分，也就无法决定要不要再回滚一次。
- * 所以这里抛错，把该跑的命令写进 healing，由人决定。
- *
  * @param input runner / ctx / config。dryRun 时不 pull 也不 up，两条步骤都记 skipped ——
- *   它们在机器上确实什么都没留下
+ * 它们在机器上确实什么都没留下
  * @returns activate 的结论。它同样不带 services：容器起没起来由 verify 那条 compose ps 说，
- *   activate 不读 ps，`up --wait` 的返回值也区分不了「等到健康」和「超时放弃」
+ * activate 不读 ps，`up --wait` 的返回值也区分不了「等到健康」和「超时放弃」
  * @throws DpError DP.DOCKER.PULL_FAILED（镜像没拉到，运行中的容器没被动过）或
- *   DP.ACTIVATE.START_FAILED（up 失败；盘上/容器状态要自己看 ps 才知道）
+ * DP.ACTIVATE.START_FAILED（up 失败；盘上/容器状态要自己看 ps 才知道）
  */
 export async function activateDocker(input: DockerExecInput): Promise<DockerExecResult> {
   const session = new Session(input, 'activate')
   const plan = dockerTarget.planActivate(session.ctx, session.config)
   if (session.config.compose.wait === false) {
     // up 不带 --wait 时，compose 只保证「容器被创建了」。唯一一道关变成 verify 的 ps，
-    // 而 ps 是在 activate 之后单独跑的 —— 这中间有一段时间线上跑的是半就绪的容器
     session.warnings.push('compose.wait=false：up 不带 --wait，容器是否就绪只由 verify 的 compose ps 判定，期间可能有一段半就绪窗口')
   }
 
@@ -531,7 +453,6 @@ export async function activateDocker(input: DockerExecInput): Promise<DockerExec
       return session.fail(upStep, 'DP.ACTIVATE.START_FAILED', `起服务失败（退出码 ${up.code}）`, {
         output: dockerOutput(up),
         // 下面是 heal 之前的状态判断：up 失败时容器可能根本没换，也可能换了一半
-        //（`up -d` 先建新容器再停旧的）。执行器读不出是哪一种，所以只给命令不给结论
         hint:
           '本包不做任何自动补偿：自动 down 会连停掉目标机上同名的其它项目，' +
           '自动 up 上一版会让「失败」与「已回滚」两个语义混在一起。' +
@@ -545,25 +466,15 @@ export async function activateDocker(input: DockerExecInput): Promise<DockerExec
   return session.result('activate', plan)
 }
 
-// ------------------------------------------------------------
 // ③ verify：ps → 解析 → 断言
-// ------------------------------------------------------------
 
 /**
  * 跑 ps 并解析。**判定规则全部在 parseComposePs 里**，执行器不自己看 state / health。
- *
- * 解析失败时**原码原样冒泡**：DP.DOCKER.PS_PARSE_FAILED 的 message 与 hint 是在册的
- * 「读不出结论 ≠ 健康」告警，包成别的码就丢了「远端 compose 可能根本不可用」这条线索。
- * 这里只补上「挂的是哪一步」——靠 cause 上挂的失败现场，不靠改 code。
- * JSON 解析的那个 SyntaxError 不再往下传：它指不回任何用户能改的东西，
- * 而 raw stdout 已经原样进了 failure.output。
  */
 async function readPs(session: Session, step: Step): Promise<ReturnType<typeof parseComposePs>> {
   const result = await session.exec(step)
   if (result.code !== 0) {
     // 命令本身没跑成功，stdout 读不出任何东西 —— 按「验收失败」abort，绝不因为
-    // 「反正没输出」就跳到下一步。PS_PARSE_FAILED 留给「跑成了但输出读不懂」，
-    // 它的处置提示是「确认远端 compose 可用」，与这里同源，不必换个码
     return session.fail(step, 'DP.DOCKER.PS_PARSE_FAILED', `读 compose 状态失败（退出码 ${result.code}），本次没有任何服务被验证过`, {
       output: dockerOutput(result),
       hint:
@@ -593,19 +504,11 @@ async function readPs(session: Session, step: Step): Promise<ReturnType<typeof p
 /**
  * verify：`compose ps --format json` → 解析 → 断言。
  *
- * 为什么 verify 要自己再跑一次 ps，而不是复用 activate 那次 up：
- * `up --wait` 只在 wait 打开时才等到健康，关闭时 `up` 返回只说明容器被创建了 ——
- * 若验收跟着 up 走，同一份配置在 wait 开关之间会有一半情形根本没验收。
- * 走 ps 这一条，两种配置下的判据是同一套字符串比较。
- *
- * 不通过**不回滚**：版本好不好 vs 该不该退回去，是上层 `dp apply` 的事，
- * 这里只保证结论是真的（读不出结论就抛 PS_PARSE_FAILED，绝不判通过）。
- *
  * @param input runner / ctx / config。**dryRun 下 ps 照样真跑**：它是只读的，
- *   给出的服务状态是真的，所以那一步记 ran 而不是 skipped
+ * 给出的服务状态是真的，所以那一步记 ran 而不是 skipped
  * @returns 结论与读到的全部服务条目（`services`），供报告与后续的 healing 命令使用
  * @throws DpError DP.DOCKER.PS_PARSE_FAILED（读不出服务状态，有两种成因：命令没跑成、
- *   或输出读不懂）或 DP.VERIFY.FAILED（有结论但不达标）
+ * 或输出读不懂）或 DP.VERIFY.FAILED（有结论但不达标）
  */
 export async function verifyDocker(input: DockerExecInput): Promise<DockerExecResult> {
   const session = new Session(input, 'verify')
@@ -619,8 +522,6 @@ export async function verifyDocker(input: DockerExecInput): Promise<DockerExecRe
   session.pass(psStep)
 
   // 断言步骤没有 argv：它消费上一步的解析结果，不重跑命令。
-  // expectStates 不含 healthy 时计划里没有这一步，判定就落在 ps 那一步上 ——
-  // 但**不通过一样要报错**：把判定省掉等于把健康检查做成永远绿的灯
   const assertStep = optionalStep(plan, 'docker.assert-services')
   const failStep = assertStep ?? psStep
   if (assertStep !== undefined) session.begin(assertStep)
@@ -649,28 +550,22 @@ export async function verifyDocker(input: DockerExecInput): Promise<DockerExecRe
   return session.result('verify', plan, parsed.services)
 }
 
-// ------------------------------------------------------------
 // ④ rollback：上一版重新 up（不 pull）→ 复验
-// ------------------------------------------------------------
 
 /**
  * rollback：按**上一版 release 目录里的 compose** 重新 up（不 pull），再复验一遍。
  *
- * 不 pull 是刻意的：浮动 tag 再拉一次会把「上一版」换成现在仓库里的新镜像，
- * 那就不是回滚而是换了个版本重新上线，而报告仍然显示回滚成功。
- *
  * @param input runner / ctx / config。**ctx.previousReleaseId 必须是真正的上一版**：
- *   static 的回滚语义是「从 current 退到 previous」，那份 ctx 里的 previousReleaseId
- *   对 docker 而言可能是当前版本 —— 直接传下来会让执行器拿当前版本的 compose 再 up 一次
+ * static 的回滚语义是「从 current 退到 previous」，那份 ctx 里的 previousReleaseId
+ * 对 docker 而言可能是当前版本 —— 直接传下来会让执行器拿当前版本的 compose 再 up 一次
  * @returns 结论与复验读到的服务条目
  * @throws DpError DP.DOCKER.NO_PREVIOUS（首次部署，由 planRollback 在配置期判定），
- *   DP.ACTIVATE.START_FAILED（上一版的 compose 自己起不来），或 DP.VERIFY.FAILED
- *   （回滚已执行但上一版也没起来 —— 这时机器上跑的是上一版，需要人工介入）
+ * DP.ACTIVATE.START_FAILED（上一版的 compose 自己起不来），或 DP.VERIFY.FAILED
+ * （回滚已执行但上一版也没起来 —— 这时机器上跑的是上一版，需要人工介入）
  */
 export async function rollbackDocker(input: DockerExecInput): Promise<DockerExecResult> {
   const session = new Session(input, 'rollback')
   // planRollback 在 previousReleaseId 缺失时直接抛 NO_PREVIOUS：
-  // 「没有上一版可回滚」不是执行期发现，是配置期就能判定的事，不许在这里吞成空计划
   const plan = dockerTarget.planRollback(session.ctx, session.config)
 
   const upStep = stepAt(plan, 'docker.rollback-up')
@@ -721,9 +616,7 @@ export async function rollbackDocker(input: DockerExecInput): Promise<DockerExec
   return session.result('rollback', plan, parsed.services)
 }
 
-// ------------------------------------------------------------
 // 失败现场的读取
-// ------------------------------------------------------------
 
 /** 把 unknown 摊成可逐字段判定的记录，而不是 cast 成一个我们希望它是的东西 */
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -736,11 +629,8 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 /**
  * 读 `DpError.cause` 里的结构化失败信息用这个，而不是 cast。
  *
- * 执行器失败时保证挂上它；调用方拿到别的东西说明错误不是本包抛的 ——
- * 那就该当成「没有可用的失败现场」，而不是把读不出来的字段当成空数组。
- *
  * @param value 通常就是 `DpError.cause`。它的形状不属于本包的对外契约，
- *   所以只判字段在不在，不进一步校验取值
+ * 所以只判字段在不在，不进一步校验取值
  * @returns true 表示可以按 DockerExecFailure 逐字段读（phase / step / steps / healing）
  */
 export function isDockerExecFailure(value: unknown): value is DockerExecFailure {

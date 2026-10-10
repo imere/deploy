@@ -1,9 +1,3 @@
-/**
- * 本地 Runner —— 把 Runner 接口落到真实文件系统与真实子进程上。
- *
- * 与 SSH Runner 的唯一差别是「操作走哪儿执行」，形状完全一致，
- * 所以 target / core 不需要知道目标是本地还是远端。
- */
 import { promises as fs } from 'node:fs'
 import { DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
 import { run } from './exec.js'
@@ -31,13 +25,9 @@ function toDpError(err: unknown, path: string): DpError {
 /**
  * 把端口契约落到本地文件系统与子进程上；除了透传进来的 facts，不持有任何跨调用的状态。
  *
- * 刻意**不做缓存与失效**：Runner 是能力与形状的适配器，不是状态的持有者。
- * 一旦在这里缓存 stat 或文件内容，探测结论与实际文件之间就会隔一层不可见的时差 ——
- * 而部署中途替换版本目录正是最容易踩到它的场景。
- *
  * @param facts 由 probeLocalFacts 实测得来。这里只做透传不校验：
- *   Runner 无法重新核实一份 facts（那就等于把探测重做一遍），而目标层需要原样
- *   拿着它做决策
+ * Runner 无法重新核实一份 facts（那就等于把探测重做一遍），而目标层需要原样
+ * 拿着它做决策
  * @returns 实现 ports.Runner 的对象，所有方法直接落到本地文件系统与子进程
  */
 export function createLocalRunner(facts: Facts): Runner {
@@ -110,7 +100,6 @@ export function createLocalRunner(facts: Facts): Runner {
     async readBinary(path: string): Promise<Uint8Array> {
       try {
         // 显式拷成 Uint8Array：Buffer 是 Node 特有的子类，越过 Runner 边界泄漏出去
-        // 会让 SSH 那侧的实现无处着手（它拿不到 Buffer）
         return new Uint8Array(await fs.readFile(path))
       } catch (err) {
         throw toDpError(err, path)

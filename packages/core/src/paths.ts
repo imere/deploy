@@ -1,17 +1,9 @@
-/**
- * 路径：模板展开、发布目录候选、跨平台校验。
- *
- * 全部是**纯函数** —— 注入 Facts 即可断言，不需要任何机器。
- */
 import { DpError, type Facts, type Layout, type Platform } from '@dp/ports'
 
-// ------------------------------------------------------------
 // 模板展开
-// ------------------------------------------------------------
 
 /**
- * 展开所需的三个值。**全由调用方注入**，本文件不读 `process.env`：
- * 注入让展开结果可断言（给定 env 必得给定字符串），直读环境则没法测。
+ * 展开所需的三个值。**全由调用方注入**，本文件不读 `process.env`：注入让展开结果可断言（给定 env 必得给定字符串），直读环境则没法测。
  */
 export interface TemplateContext {
   /** 项目名，替换模板里的 `<name>` */
@@ -23,10 +15,7 @@ export interface TemplateContext {
 }
 
 /**
- * 展开 `~` / `$XDG_*` / `%LOCALAPPDATA%` / `%ProgramFiles%` / `<name>`
- *
- * 只在**串首**替换环境变量（`out.startsWith`），中间的 `$FOO` 原样保留：
- * 全文替换会把路径里合法的 `${...}` 形态也吃掉，产出的路径指向一个不存在的目录。
+ * 展开 `~` / `$XDG_*` / `%LOCALAPPDATA%` / `%ProgramFiles%` / `<name>`只在**串首**替换环境变量（`out.startsWith`），中间的 `$FOO` 原样保留：全文替换会把路径里合法的 `${...}` 形态也吃掉，产出的路径指向一个不存在的目录。
  *
  * @param tpl 待展开的模板串，形如 `/srv/<name>`
  * @param ctx 注入的 home / env / name
@@ -49,16 +38,10 @@ export function expandTemplate(tpl: string, ctx: TemplateContext): string {
   return out.replaceAll('<name>', ctx.name)
 }
 
-// ------------------------------------------------------------
 // 发布目录候选（规则明示）
-// ------------------------------------------------------------
 
 /**
  * 发布根目录候选表：platform × layout → 按优先级排好的路径模板。
- *
- * 顺序即优先级，**不可按字母排**：第一个可写的目录会被采用，
- * 调换顺序等于悄悄改了部署落点，而 plan 之外没有任何地方会暴露这个变化。
- * 每条都写明所属 layout，是为了让「为什么这台机器选了 user 布局」能从表本身读出来。
  */
 export const RELEASE_ROOT_CANDIDATES: Readonly<
   Record<Platform, Readonly<Record<Layout, readonly string[]>>>
@@ -99,8 +82,7 @@ export interface CandidateResult {
 }
 
 /**
- * 选定的发布根。`candidates` 一并返回（**包括没选中的**），
- * 因为「为什么不是 /opt」是用户最常问的问题，plan 阶段就要能答。
+ * 选定的发布根。`candidates` 一并返回（**包括没选中的**），因为「为什么不是 /opt」是用户最常问的问题，plan 阶段就要能答。
  */
 export interface ReleaseRootChoice {
   readonly root: string
@@ -120,9 +102,6 @@ export interface PickReleaseRootInput {
 
 /**
  * 按候选表 + 实测可写性选定发布根。
- *
- * 显式配置**优先于**能力推导但仍要过可写性检查：用户显式指定一个不可写的目录时
- * 静默改用别的落点，症状是「配了 root 却发到了别处」，比直接报错难查得多。
  *
  * @param input 注入的事实、布局、项目名与可选的显式 root
  * @returns 选中的根、是否来自显式配置，以及**全部**候选的判定结果
@@ -175,18 +154,12 @@ export function pickReleaseRoot(input: PickReleaseRootInput): ReleaseRootChoice 
   return { root: hit.path, explicit: false, candidates }
 }
 
-// ------------------------------------------------------------
 // 布局推导
-// ------------------------------------------------------------
 
 const SYSTEM_PROBE_PATHS = ['/var/lib', '/usr/local', 'C:/ProgramData'] as const
 
 /**
- * 由**实证能力**推导布局，不靠 uid 推断
- *
- * uid 0 不等于有权限：`canWrite` 是建了文件再删掉测出来的，
- * 容器里 root 照样可能只读挂载。凭 uid 判成 system 布局，
- * 后果是 plan 通过而 install 阶段在第一行就失败。
+ * 由**实证能力**推导布局，不靠 uid 推断uid 0 不等于有权限：`canWrite` 是建了文件再删掉测出来的，容器里 root 照样可能只读挂载。凭 uid 判成 system 布局，后果是 plan 通过而 install 阶段在第一行就失败。
  *
  * @param facts 目标机事实，布局只看 capabilities 里的可写性
  * @returns 'system'（系统目录可写）/ 'hybrid'（需提权）/ 'user'（两者都不行）
@@ -199,13 +172,10 @@ export function deriveLayout(facts: Facts): Layout {
   return 'user'
 }
 
-// ------------------------------------------------------------
 // 跨平台路径校验（四条，都不需连目标机就能查）
-// ------------------------------------------------------------
 
 const WIN_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i
 // 控制字符是被**故意**列进非法集的：路径里带 \n 或 \0 能在日志与 conf 里折断一行。
-// 规则报它是因为它以为这些转义是无意敲进去的，这里恰恰相反。
 // eslint-disable-next-line no-control-regex
 const WIN_ILLEGAL = /[<>:"|?*\u0000-\u001f]/
 
@@ -219,11 +189,6 @@ const PATH_LIMIT: Readonly<Record<Platform, number>> = {
 
 /**
  * 源路径检查。**在传第一个字节之前**发现问题 —— 此时还没有任何副作用。
- *
- *  - `DP.PATH.RESERVED_NAME`  Windows 保留名（`NUL` / `CON` / `aux.txt`）
- *  - `DP.PATH.ILLEGAL_CHAR`   目标平台非法字符
- *  - `DP.PATH.TOO_LONG`       超过目标平台长度上限
- *  - `DP.PATH.CASE_COLLISION` 仅大小写不同的路径，在不敏感平台上会静默互相覆盖
  *
  * @param entries 源里的相对路径清单
  * @param platform **目标机**平台：按源机的平台判非法字符会漏掉目标机才会炸的那些

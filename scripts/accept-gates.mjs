@@ -1,22 +1,6 @@
 #!/usr/bin/env node
 /**
  * 门禁自检：往每个门禁脚本的**副本**里注入一次它理应抓到的违规，确认它真的变红。
- *
- * 为什么断言退出码而不是 stdout 文本：文本格式会随实现变，退出码才是这套门禁对外的
- * 契约（各有缺口就非 0）。文本只用来在结论异常时给人看现场。
- *
- * 为什么每组都先跑对照组：门禁本来就红的时候，「注入后也红」什么也证明不了。
- * 少了对照这一列，「抓到了」与「它一直红」分不开。
- *
- * 为什么全部跑在 `.tmp/gate-mut/` 的副本上：变异一旦落在真实源码或真实产物上，
- * 被它污染的窗口里，任何并发的构建或测试读到的都是半截状态，
- * 而且还原失败时毁的是真仓而不是一份可以随手丢掉的副本。
- * 六个门禁的根目录都由 `import.meta.url` 推导（`new URL('..', …)`），
- * 所以「把仓布局复制一份、把门禁脚本放进副本的 scripts/ 下」就能让它们读副本，
- * 不用改门禁脚本里的任何一个字。
- *
- * 断言的是「该红没红」，不是「源码有多干净」：抓到了只证明这一处改动被拦住，
- * 证明不了判据没有别的盲区。
  */
 import { spawnSync } from 'node:child_process'
 import {
@@ -51,8 +35,6 @@ function copyTree(from, to) {
 
 /**
  * node_modules 只给产物 import 用（走包名解析），所以做一个指回真仓的 junction。
- * 不用复制：pnpm 的 isolated 布局是一堆硬链接，复制既慢又大。
- * 清理时先 unlink 掉这个 junction 再删目录 —— 对着 junction 递归删有删穿到真仓的风险。
  */
 function linkNodeModules() {
   const target = join(repoRoot, 'node_modules')
@@ -62,7 +44,6 @@ function linkNodeModules() {
     return
   }
   // 上一次自检没能删掉这个链接（删除有批量配额）时直接沿用：它指向的目标没变，
-  // 重建反而会 EEXIST 把整轮带崩。
   if (existsSync(link) && lstatSync(link).isSymbolicLink()) {
     log('  · node_modules 链接已存在，沿用上一次留下的')
     return
@@ -74,10 +55,7 @@ function linkNodeModules() {
 }
 
 /**
- * 清空副本目录。整目录递归删可能被运行时拦下（本仓有安全删除垫片，批量删除要确认，
- * 而确认就是弹窗 —— 自动化里等于挂住）。拦下就退回逐项删：单个 unlink/rmdir 不构成批量。
- * 残留几个文件不会让结论失真：下面每一步都是把输入整份覆盖写，唯一的额外风险是
- * 「上一次的变异没还原」，而每一次变异自己都会校验还原结果。
+ * 清空副本目录。整目录递归删可能被运行时拦下（本仓有安全删除垫片，批量删除要确认，而确认就是弹窗 —— 自动化里等于挂住）。拦下就退回逐项删：单个 unlink/rmdir 不构成批量。
  */
 function clearDir() {
   if (!existsSync(MUT)) return
@@ -179,7 +157,6 @@ function runMutation({ gate, gateArgs = [], file, describe, transform }) {
     if (now !== before) restoreFailure = new Error(`还原失败：${file} —— 副本已被污染，后续组别的对照不再可信`)
   }
   // 在 finally 里 throw 会把 runGate 自己的失败顶掉：那等于把「门禁为什么红」换成
-  // 「还原失败」，真正该看的诊断反而没了。还原失败同样是致命的，但排在后面抛。
   if (restoreFailure !== null) throw restoreFailure
   return { describe, control, after, detail }
 }
@@ -188,21 +165,11 @@ function runMutation({ gate, gateArgs = [], file, describe, transform }) {
 
 /**
  * 死代码：往一个确定被 import 的非入口源文件里加一个全仓没人引用的导出。
- *
- * 一次只试一个文件是不够的：扫描器有自己的遮罩（注释 / 字符串 / 模板插值 / 正则），
- * 某个文件的中途一旦让遮罩失配，**文件尾部**的声明就整体看不见 ——
- * 那种情况下死代码门禁对该文件是全盲的。所以按「入口引用到的非入口源文件」取若干个
- * 目标逐个试，命中数本身就是「门禁在多大范围内有效」的证据。
  */
 const M_DEAD_NAME = 'zzGateMutUnreferencedExport'
 
 /**
  * 目标：一个**只被具名 import、没有被 barrel 星号转出**的源文件。
- *
- * 这个条件是必须的，不是讲究：入口对某文件写了 `export * from './x.js'` 时，
- * 该文件的每一个导出都是对外 API 的一部分，往里加一个没人引用的导出并不违规 ——
- * 门禁把它判成活的完全正确，判红才是误报。文件本身被谁 import 只决定它「活着」，
- * 星号转出决定它的每个符号「对外可见」，两者要分开看。
  */
 function pickDeadCodeTargets(limit = 3) {
   const out = []
@@ -251,10 +218,6 @@ const mutDeadCode = (file) => ({
 
 /**
  * 分层：最底的一层反向依赖 cli，是硬失败。
- *
- * 追加到**已存在**的入口文件而不是新建文件：删除动作在本仓有批量配额，新建文件的
- * 还原要靠 unlink —— 一旦配额被别处耗光，还原就会抛错并把整个自检带崩，
- * 而入口文件本来就能承载这条 import（这个门禁不给入口文件开豁免）。
  */
 const mutImports = () => {
   const candidates = ['packages/ports/src/index.ts', 'packages/core/src/index.ts', 'packages/template/src/index.ts']
@@ -299,9 +262,6 @@ const mutJsdoc = () => {
 
 /**
  * 依赖声明：往一个**不依赖 local 的包**里塞一条 `import from '@dp/local'`。
- *
- * 这一组验的是「本地绿、CI 红」那一类：未声明的依赖在本地靠 junction 能解析，
- * 只有 pnpm 的 isolated 布局会拒绝它。所以必须由门禁在本地就抓住。
  */
 const mutDeps = () => {
   const file = 'packages/core/src/detect.ts'
@@ -463,8 +423,7 @@ const mutSmoke = () => {
 /* ---------------------------------------------------------------- 跑 */
 
 /**
- * 清理。junction 先单独 unlink：目录里留着它又递归删，等于把真仓的 node_modules 交给
- * 一个递归删除。删不掉就警告 —— 残留几个临时文件远好过把自检变成一次误删。
+ * 清理。junction 先单独 unlink：目录里留着它又递归删，等于把真仓的 node_modules 交给一个递归删除。删不掉就警告 —— 残留几个临时文件远好过把自检变成一次误删。
  */
 function cleanup() {
   const link = join(MUT, 'node_modules')
@@ -522,8 +481,6 @@ try {
       continue
     }
     // 派不起子进程时**不许判成「该红没红」**：那是环境结论，不是门禁结论，
-    // 混在一起会驱动人去改一个本来就对的门禁。但也不能当绿放行 ——
-    // 自检没跑成就是没跑成，让人看见。
     if (r.control.error || r.after.error) {
       const why = r.control.error ?? r.after.error
       log('  对照退出码  ——')

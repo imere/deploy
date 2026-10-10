@@ -1,69 +1,37 @@
-/**
- * 极简 schema DSL。
- *
- * 为什么自研而不是引入库：
- *  1. 错误消息必须带**配置路径**（`projects.web.source.root`），且必须能挂 hint
- *  2. 需要偏好链（preference chain）这种本项目专属语义
- *  3. 零依赖 —— 供应链要可审计
- *
- * 三个用途（对应第 4 条要求）：TS 类型推导 / 运行时校验 / 导出 JSON Schema。
- *
- * 两个类型参数：
- *  - `TOut` 归一化**之后**的类型（parse 的返回值）
- *  - `TIn`  用户**可写**的形态（define* 的参数类型，决定 IDE 提示）
- *  二者不同的典型例子是偏好链：可写 `'rsync'` 或 `['rsync','sftp']`，出来一律是数组。
- */
 import { DpError } from '@dp/ports'
 
 /**
  * JSON Schema 的节点类型，只覆盖**编辑器提示用得到的那一小撮**字段。
- *
- * 为什么不引一份完整的 JSON Schema 类型定义：本包零依赖（供应链要可审计），
- * 而那套类型里绝大多数字段本仓一个都不产出。带进来只是多加一个包，
- * 还会把「本仓实际产出什么形状」这件事埋进一份外部声明里。
  */
 export interface JsonSchemaNode {
   /**
    * 原子类型名。
-   *
-   * 联合写成数组形态（JSON Schema 允许）而不是 anyOf：编辑器只认 type，
-   * 拆成 anyOf 之后悬浮提示里就看不到可选类型了。数组形态目前没有产出方，
-   * 留着是为了将来加联合时不必改类型。
    */
   type?: string | string[]
   /**
-   * 对象字段 → 该字段的 schema。只描述"有哪些字段"，
-   * 与 `required` 分开是因为「有这个字段」与「这个字段必填」是两件事。
+   * 对象字段 → 该字段的 schema。只描述"有哪些字段"，与 `required` 分开是因为「有这个字段」与「这个字段必填」是两件事。
    */
   properties?: Record<string, JsonSchemaNode>
   /**
-   * 必填字段名。由 `obj()` 按 `isOptional` **反推**而不是手写 ——
-   * 手写一份必填清单会和真正的必填判定分叉，症状是编辑器说必填、运行时却接受省略。
+   * 必填字段名。由 `obj()` 按 `isOptional` **反推**而不是手写 ——手写一份必填清单会和真正的必填判定分叉，症状是编辑器说必填、运行时却接受省略。
    */
   required?: string[]
   /** 数组元素的 schema */
   items?: JsonSchemaNode
   /**
-   * 字符串枚举，进编辑器的下拉补全。由 `oneOf()` 产出，
-   * 所以它同时也是错误消息里"可选值"的同一份来源。
+   * 字符串枚举，进编辑器的下拉补全。由 `oneOf()` 产出，所以它同时也是错误消息里"可选值"的同一份来源。
    */
   enum?: readonly unknown[]
   /**
-   * 字面量。**与 enum 是两个东西**：enum 是「从这几个里选一个」，
-   * const 是「必须是这个值」。分开的实质理由是 `oneOf` 只认字符串，
-   * 而 `reload: false`（交给外部机制重载）这类非字符串字面量只能落在 const 上。
+   * 字面量。**与 enum 是两个东西**：enum 是「从这几个里选一个」，const 是「必须是这个值」。分开的实质理由是 `oneOf` 只认字符串，而 `reload: false`（交给外部机制重载）这类非字符串字面量只能落在 const 上。
    */
   const?: unknown
   /**
-   * 默认值，只供编辑器做占位提示。运行时的缺省值由 `withDefault` 自己填 ——
-   * 两条路各自独立，这一项写错不会影响部署，只影响提示好不好读。
+   * 默认值，只供编辑器做占位提示。运行时的缺省值由 `withDefault` 自己填 ——两条路各自独立，这一项写错不会影响部署，只影响提示好不好读。
    */
   default?: unknown
   /**
    * 给用户看的说明，直接显示在编辑器的悬浮提示里。
-   *
-   * 这是**用户看得见**的文案，所以只写「是什么 / 怎么填」，不写指向别处的指路 ——
-   * 读这段字的人手边只有那个悬浮框。
    */
   description?: string
   /** 键不受限制时的值 schema（`record()` 产出）。`false` 表示不允许额外键 */
@@ -80,15 +48,13 @@ export interface JsonSchemaNode {
    按「未使用」删掉它，InputOf 就再也推不出输入类型了。
    开关放在 JSDoc 块**外面**：插在 JSDoc 与声明之间会把 doc 块顶掉，JSDoc 门禁立刻报缺块。 */
 /**
- * `IsOptional` 必须是**字面量类型**而不是 boolean —— 否则类型层面无法区分
- * 可选字段与必填字段，`withDefault` 的字段会被误判成必填。
+ * `IsOptional` 必须是**字面量类型**而不是 boolean —— 否则类型层面无法区分可选字段与必填字段，`withDefault` 的字段会被误判成必填。
  */
 export interface Schema<TOut, TIn = TOut, IsOptional extends boolean = false> {
   readonly kind: string
   readonly isOptional: IsOptional
   /**
-   * 输入可以省略该字段。opt() 与 withDefault() 都是 true —— 区别在于
-   * 前者省略后**不产生**该键，后者省略后填入默认值。
+   * 输入可以省略该字段。opt() 与 withDefault() 都是 true —— 区别在于前者省略后**不产生**该键，后者省略后填入默认值。
    */
   readonly acceptsUndefined: boolean
   readonly description?: string
@@ -99,17 +65,10 @@ export interface Schema<TOut, TIn = TOut, IsOptional extends boolean = false> {
 
 /**
  * schema 归一化**之后**的类型 —— 下游消费的形状。
- *
- * 与 `InputOf` 成对存在的理由：偏好链可写 `'rsync'` 或 `['rsync','sftp']`，
- * 出来一律是数组。只留一个类型参数的话，IDE 要么拒绝单值（难写），
- * 要么让下游在每个消费点都处理一次联合（难用且迟早漏一处）。
  */
 export type Infer<S> = S extends Schema<infer TOut, any, any> ? TOut : never
 /**
  * 用户**可写**的形态 —— `define*` 的参数类型，决定 IDE 提示。
- *
- * 与 `Infer` 的差别集中在两处：`withDefault` 的字段在这里可省、在 `Infer` 里必填；
- * 偏好链在这里可写单值、在 `Infer` 里是数组。
  */
 export type InputOf<S> = S extends Schema<any, infer TIn, any> ? TIn : never
 
@@ -124,7 +83,6 @@ export type InferShape<S extends Shape> = {
 
 /**
  * 输入形状：**只要 TIn 允许 undefined 就是可选键**。
- * 这样 opt() 与 withDefault() 在用户书写时都不必填，但输出语义不同。
  */
 export type InputShape<S extends Shape> = {
   [K in keyof S as undefined extends InputOf<S[K]> ? never : K]: InputOf<S[K]>
@@ -146,9 +104,7 @@ function typeName(v: unknown): string {
   return typeof v
 }
 
-// ------------------------------------------------------------
 // 原子类型
-// ------------------------------------------------------------
 
 function atom<T>(
   kind: string,
@@ -172,9 +128,6 @@ function atom<T>(
 /**
  * 字符串。严格 `typeof === 'string'`，不做任何强制转换。
  *
- * 为什么不宽松地转：`'8080'` 写进一个数字字段是手滑而不是"想要字符串"，
- * 转过去之后就再也无法区分这两种意图，而后者拼进 argv 时完全是另一回事。
- *
  * @param description 给用户看的说明，进 JSON Schema 的 description
  * @returns 字符串 schema
  */
@@ -183,10 +136,6 @@ export const str = (description?: string): Schema<string> =>
 
 /**
  * 数字。必须是**有限数** —— `NaN` 与 `Infinity` 一并拒掉。
- *
- * 为什么单独排非有限数：JSON 里出不来它们，但 YAML 与 JS 配置能出。
- * 而一个 NaN 拼进路径或 argv 之后，目标机报的错与本次配置毫无关系，
- * 排查方向会整个偏掉。数字字符串同样不接受，理由同 `str`。
  *
  * @param description 给用户看的说明，进 JSON Schema 的 description
  * @returns 数字 schema
@@ -197,9 +146,6 @@ export const num = (description?: string): Schema<number> =>
 /**
  * 布尔。严格 `typeof === 'boolean'`，不做真假值转换。
  *
- * 为什么不接受 `'false'` 这类字符串：任何非空字符串按真假值转换都是 `true`，
- * 转过去的结果是配置明明写了个"关"、实际跑的是"开"，且没有一处会报错。
- *
  * @param description 给用户看的说明，进 JSON Schema 的 description
  * @returns 布尔 schema
  */
@@ -208,10 +154,6 @@ export const bool = (description?: string): Schema<boolean> =>
 
 /**
  * 字符串枚举。判定是**严格相等**：不 trim、不折叠大小写。
- *
- * 为什么这么硬：枚举值最终是给机器分派的（错误码、目标类型、驱动名都按字面量分派），
- * 折叠一次就会出现「配置里写 `prod `（尾部空格）、代码按 `prod` 分派」的错位，
- * 而这种错没有任何一处会报错。多一个空格的代价是当场报一条带可选值的错误，便宜得多。
  *
  * @param values 允许的字面量。错误消息的 hint 由它直接生成，所以它就是"可用值"的单一事实来源
  * @param description 给用户看的说明
@@ -238,12 +180,7 @@ export function oneOf<T extends string>(values: readonly T[], description?: stri
 }
 
 /**
- * 单一字面量。与 `oneOf` 的分工**不是**「一个值 vs 多个值」：
- * `oneOf` 表达「从这几个里选一个」且只认字符串，这里用严格相等比一个值，
- * 于是布尔与数字也能表达 —— `reload: false`（交给外部机制重载）只有它能落地。
- *
- * 失败时报「期望 X，实际是 Y」而不是列一串可选值：只有一个允许值时，
- * 说清"该写什么"比给一堆选项有用。
+ * 单一字面量。与 `oneOf` 的分工**不是**「一个值 vs 多个值」：`oneOf` 表达「从这几个里选一个」且只认字符串，这里用严格相等比一个值，于是布尔与数字也能表达 —— `reload: false`（交给外部机制重载）只有它能落地。
  *
  * @param value 唯一允许的值
  * @returns 字面量 schema
@@ -263,16 +200,10 @@ export function literal<T extends string | number | boolean>(value: T): Schema<T
   }
 }
 
-// ------------------------------------------------------------
 // 复合类型
-// ------------------------------------------------------------
 
 /**
  * 数组。逐元素 parse，元素的路径编成 `${path}[${i}]`。
- *
- * 为什么下标必须进路径：数组里第 3 个元素写错，报 `locations` 等于让人去查整个数组，
- * 报 `locations[2].upstream` 才指向真正要改的那一行。空数组是合法的 ——
- * 「一个都没有」与「写错了」是两件事，后者才有判定，判定发生在元素上。
  *
  * @param item 元素的 schema
  * @param description 给用户看的说明
@@ -294,15 +225,6 @@ export function arr<T>(item: Schema<T>, description?: string): Schema<readonly T
 
 /**
  * 对象。**未知字段一律报错**，绝不静默忽略。
- *
- * 这是本包最要紧的一条判据：字段名拼错（`serverNam`）时若忽略，用户会以为自己
- * 配了 server_name，而渲染出来的 conf 是 `server_name _` —— 不报错，只是行为不对，
- * 这种故障要一路绿到远端 reload 之后才可能被人察觉。报出来的是「未知字段 + 可用字段清单」，
- * 改哪一处一眼可见。
- *
- * 必填判定走 `acceptsUndefined` 而不是 `key in src`：`{ keep: undefined }`
- * （展开一个可能没值的变量得来）与不写 `keep` 在 JS 里是两件事，但对 `withDefault`
- * 都该填默认值；用 `in` 判会把前者当成"给了 undefined"然后 parse 失败。
  *
  * @param shape 字段名 → schema。`opt()` 的字段省略后**不产生该键**，`withDefault()` 的字段填默认值
  * @param description 给用户看的说明
@@ -352,12 +274,6 @@ export function obj<S extends Shape>(
 /**
  * 泛型必须把三个参数都写出来。
  *
- * 写成 `record<T>(value: Schema<T>)` 时，`Schema<T>` 等价于 `Schema<T, T, false>`，
- * 于是 T 同时对应到 TOut 与 TIn 两个位置。传入 `obj({...})` 这种 TOut ≠ TIn 的
- * schema 时 TS 会挑其中一个 —— 实测挑了 **TIn（输入形状）**，于是
- * `Config.projects.web.release.keep` 明明有默认值却被推导成可能 undefined，
- * 下游只得写一堆 `?? 默认值` 来绕。TOut / TIn 分开声明才能把归一化后的形状传出去。
- *
  * @param value 每个值服从的 schema
  * @param description 给用户看的说明
  * @returns 键自由、值逐个归一化的 schema
@@ -389,16 +305,10 @@ export function record<TOut, TIn, IsOptional extends boolean>(
   }
 }
 
-// ------------------------------------------------------------
 // 修饰器
-// ------------------------------------------------------------
 
 /**
  * 标为可选：输入可省略，省略后**输出里不产生这个键**（下游拿到的是"没有"）。
- *
- * 与 `withDefault` 的差别只在输出：那边省略后填默认值（下游必填）。
- * 合成一个"可选 + 默认值"的形状会把两种语义混成一团 —— 下游再也分不清
- * 「用户明确没配」与「用了系统默认」，而这两者在报告与排查里是两件事。
  *
  * @param schema 被修饰的 schema
  * @returns 同型但 isOptional 为 true 的 schema
@@ -416,12 +326,6 @@ export function opt<TOut, TIn, IsOpt extends boolean>(
 
 /**
  * 给一个默认值：输入可省，输出**必填**（省略时填 fallback）。
- *
- * 默认值的适用范围被严格限定在「用户没写」：写了但不合法照样报错，
- * 绝不拿默认值去兜一个写坏的值 —— 那等于拿一份"看起来能跑"的配置去动生产路径。
- *
- * fallback 本身**不过** schema.parse：它是实现给的常量而不是用户输入，
- * 对它做校验只是把实现自己的取值也拖进"配置错"这一类里。
  *
  * @param schema 被修饰的 schema
  * @param fallback 省略时使用的值
@@ -446,16 +350,9 @@ export function withDefault<TOut, TIn, IsOpt extends boolean>(
 /**
  * 给 schema 挂一条**结构之外**的规则。
  *
- * 为什么不开成「校验器数组」：多条规则并行时，错误消息该报哪一条取决于注册顺序，
- * 而顺序一改，用户昨天看到的报错今天就换了措辞。串行链在第一条就抛出，位置稳定。
- *
- * check 拿到的是**已归一化**的值，不是用户原文：所以它能判「归一化后自相矛盾」
- * （两处端口不一致），但判不了「用户本意是哪个」—— 那需要原文，schema 层拿不到。
- * 想报错信息带上用户原话，check 只能自己在闭包里记一份。
- *
  * @param schema 被修饰的 schema，形状与类型参数原样透传
  * @param check 拿到归一化后的值与配置路径；抛错即终止，**不返回值**是刻意的 ——
- *   允许返回新值就等于有了第二条归一化路径，withDefault 之外不该再有一个
+ * 允许返回新值就等于有了第二条归一化路径，withDefault 之外不该再有一个
  * @returns 同型 schema，parse 时在原 parse 之后串上 check
  * @throws DpError check 主动抛出的错误，code 与 path 原样透出
  */
@@ -480,23 +377,12 @@ export type PrefInput<T extends string> = T | readonly T[] | 'auto'
 /**
  * 偏好链（第 5 条）：配置可以写单值或数组，归一化后**一律是数组**。
  *
- *   'auto'               → 默认链
- *   'rsync'              → ['rsync']
- *   ['rsync','tar-ssh']  → 原样
- *
- * 链内项若都不被支持 → 由 core 报 `DP.PREF.UNSUPPORTED`，列出整条链与每项的失败原因。
- *
- * 为什么 `'auto'` 在这里就展开成默认链、而不是留到运行时才决定：
- * plan 期要能**在不碰目标机**的前提下打印出「将按什么顺序尝试」，而链长是那份
- * 计划的一部分。留到执行期再展开，plan 与真跑就可能是两条不同的链 ——
- * 这是本仓反复出现的故障形状（计划一套、执行另一套）。
- *
  * @param allowed 允许的取值全集；链里有不在其中的项即报 CONFIG_INVALID 并指明下标
  * @param defaultChain 写 'auto' 或省略时展开成的链。**不校验**它是否 ⊆ allowed ——
- *   它是实现给的常量，且这些默认值本身就是「实测过能跑」的顺序
+ * 它是实现给的常量，且这些默认值本身就是「实测过能跑」的顺序
  * @param description 供编辑器提示与 JSON Schema 用的说明；不写则该字段在编辑器里没有解释
  * @returns 输出恒为非空数组的 schema —— 空链在这里就报错而不是放行，
- *   因为空链在下游等同于「没有候选」，而那不是一个能给出建议的失败
+ * 因为空链在下游等同于「没有候选」，而那不是一个能给出建议的失败
  */
 export function prefChain<T extends string>(
   allowed: readonly T[],

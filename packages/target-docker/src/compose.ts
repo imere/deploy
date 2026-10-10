@@ -1,15 +1,3 @@
-/**
- * compose argv 构造 + `docker compose ps --format json` 解析。**纯函数，零 IO。**
- *
- * 两条贯穿全程的规则：
- *
- * 1. **argv 只在这里写一次。** target.ts 的每条 Step 都从本文件取 `detail.argv`，
- *    执行器不许另写一份 —— 两份 argv 各改各的 = 计划说一套、真跑另一套，
- *    而症状是「计划看着没问题，线上起的不是这个容器」。
- * 2. **校验覆盖面按「值最终被拼进什么」来数。** 拼进 argv 的每个值都有对应校验：
- *    projectName 有字符集、每个路径走 @dp/template 的 shell 档。漏掉一个，
- *    代价是 compose 在远端报一句与配置毫无关系的话。
- */
 import { DpError, RELEASES_DIR_NAME, type TargetContext } from '@dp/ports'
 import { renderString } from '@dp/template'
 import type { DockerCompose, DockerMode, DockerTargetConfig } from './types.js'
@@ -24,7 +12,7 @@ function joinPath(...parts: readonly string[]): string {
  *
  * @param ctx 部署上下文，用它的 `root`（已由实测能力选定的发布根，不是用户写的原样路径）
  * @param releaseId 版本号。**回滚时传的是上一版** —— resolveCompose 靠这个参数让
- *   `up` 读到上一版 release 目录里的 compose，两个方向共用同一个函数才不会算出两套路径
+ * `up` 读到上一版 release 目录里的 compose，两个方向共用同一个函数才不会算出两套路径
  * @returns 绝对路径，末尾不带 `/`。它会成为 compose 的项目目录与 cwd，所以一律用 `/` 分隔
  */
 export function releaseDir(ctx: TargetContext, releaseId: string): string {
@@ -33,10 +21,6 @@ export function releaseDir(ctx: TargetContext, releaseId: string): string {
 
 /**
  * compose 项目名的字符集。
- *
- * 收紧它不是为了好看：它会成为**容器名与网络名的前缀**，而 compose 自己的报错是
- * `invalid project name ... please check the provided name` —— 那句话不指出是哪一行配置
- * 写错了，排查者只能自己在配置里瞎猜。这里在 plan 期就指名道姓地说哪个字符不行。
  */
 const PROJECT_NAME = /^[a-z0-9][a-z0-9_-]*$/
 
@@ -46,7 +30,7 @@ const PROJECT_NAME = /^[a-z0-9][a-z0-9_-]*$/
  * @param value 渲染之后的候选项目名（已经过 @dp/template 的 shell 档）
  * @param path 出错的配置项路径。三档拒绝给的是**不同原因**，所以 path 必须指向具体字段
  * @returns 原值。返回它而不是 void，是为了让调用方能内联写成
- *   `projectName: assertProjectName(renderString(...), ...)` —— 少一处中间变量就少一处漏校验的机会
+ * `projectName: assertProjectName(renderString(...), ...)` —— 少一处中间变量就少一处漏校验的机会
  * @throws DpError 空串、以 `-` 开头，或含 compose 不允许的字符（码：DP.DOCKER.PROJECT_NAME_INVALID）
  */
 export function assertProjectName(value: string, path: string): string {
@@ -77,9 +61,6 @@ export function assertProjectName(value: string, path: string): string {
 
 /**
  * 相对路径校验。compose 文件按约定是**相对 release 目录**的。
- *
- * 绝对路径与 `..` 逃逸都拒绝：前者会让「这次部署的 compose 文件」变成「盘上任意一个文件」，
- * 后者让文件落点逃出 release 目录 —— 两种情况都是用户以为在部署 A、实际读的是 B。
  */
 function assertRelative(value: string, path: string, what: string): string {
   if (value === '') {
@@ -127,7 +108,7 @@ function pathValue(raw: string, config: DockerTargetConfig, path: string, what: 
  * 非 remote-cli 显式拒绝。静默当成 remote-cli 是最糟的降级：用户以为构建过了
  *
  * @param mode 配置里的 mode。类型放宽到 string 是刻意的 —— YAML 里写什么都会到这里，
- *   运行期这条闸门是唯一能兜住的地方
+ * 运行期这条闸门是唯一能兜住的地方
  * @param path 出错的配置项路径
  * @throws DpError 不是 `remote-cli`（码：DP.DOCKER.MODE_UNSUPPORTED）
  */
@@ -144,10 +125,6 @@ export function assertMode(mode: DockerMode, path: string): void {
 
 /**
  * 一份配置解析出来的全部具体值，**所有 argv 的唯一输入**。
- *
- * 为什么这四个字段必须一次算完：`-f` 的顺序决定 compose 的覆盖顺序、cwd 决定 compose
- * 里的相对路径怎么解析、projectName 决定容器名前缀 —— 三者任意一个与另两个不同源，
- * 症状都是「同一份配置在 install 通过、在 activate 报错」，而那是最难怀疑自己的不一致。
  */
 export interface ResolvedCompose {
   /** 展开后的 release 目录（compose 的项目目录） */
@@ -162,16 +139,14 @@ export interface ResolvedCompose {
 }
 
 /**
- * 配置 → 可拼进 argv 的具体值。所有校验在这里一次做完，
- * 四个 plan 共用同一份解析结果 —— 同一份配置在 install 通过、在 activate 报错
- * 是最让人怀疑自己的那类不一致。
+ * 配置 → 可拼进 argv 的具体值。所有校验在这里一次做完，四个 plan 共用同一份解析结果 —— 同一份配置在 install 通过、在 activate 报错是最让人怀疑自己的那类不一致。
  *
  * @param ctx 部署上下文。**回滚时调用方要把 releaseId 换成上一版再传进来** ——
- *   否则项目名与 cwd 都算对了，唯独 compose 文件仍取自当前版本，而「按上一版 compose 重新 up」
- *   会变成「按当前版再 up 一次」，报告却照样显示回滚成功
+ * 否则项目名与 cwd 都算对了，唯独 compose 文件仍取自当前版本，而「按上一版 compose 重新 up」
+ * 会变成「按当前版再 up 一次」，报告却照样显示回滚成功
  * @param config docker 目标配置
  * @param configPath 出错时的配置项基准路径。默认值用通配写法，是因为本函数也会被单独调用
- *   （例如只想算出 compose 清单），那时手上没有具体项目名可用
+ * （例如只想算出 compose 清单），那时手上没有具体项目名可用
  * @returns 项目目录、文件的绝对路径、`-f` 选项对、项目名与 cwd —— 拼 argv 所需的全部零件，别无其他
  * @throws DpError mode 不支持、files 为空或重复、路径非法、项目名不合法
  */
@@ -220,7 +195,6 @@ export function resolveCompose(ctx: TargetContext, config: DockerTargetConfig, c
     projectName: assertProjectName(renderString(c.projectName, config.render, { usage: 'shell', path: `${configPath}.compose.projectName` }), `${configPath}.compose.projectName`),
     ...(envFile !== undefined ? { envFile } : {}),
     // cwd 固定到 release 目录：compose 里的相对路径（build.context、volumes 的源）
-    // 按项目目录解析，cwd 不对就是「同一个 compose 在两台机器上挂载了不同目录」
     cwd: projectDir,
   }
 }
@@ -240,10 +214,6 @@ function base(resolved: ResolvedCompose): readonly string[] {
 /**
  * `docker compose ... pull` 的 argv。
  *
- * 刻意与 up 分成两条命令：浮动 tag（`:latest`）必须先落到本地缓存才能判断「这次部署拿到的
- * 是哪个镜像」。合成一条的话，失败点是「容器没起」，而真正的原因可能是镜像没拉到 ——
- * 两者看的命令完全不同。
- *
  * @param resolved resolveCompose 的产物：`-f`、项目名与 envFile 都取自它，本函数不再拼第二份
  * @returns 元素级 argv（真正执行时传的也是这个数组，计划里展示的只是它的一份拷贝）
  */
@@ -253,10 +223,6 @@ export function pullArgv(resolved: ResolvedCompose): readonly string[] {
 
 /**
  * `docker compose ... up -d [--wait]` 的 argv。
- *
- * `wait` 由调用方显式传而不是读配置：它回答的是「up 返回时这次部署算不算完成」，
- * 而这件事只有编排层知道答案。关掉 `--wait` 时 compose 只保证「容器被创建」，
- * 唯一的验收关口变成后面那条 compose ps —— activate 与 verify 之间会有一段半就绪窗口。
  *
  * @param resolved 同上
  * @param wait 是否带 `--wait`。传 false 时由调用方负责把「验收只剩 ps 一道关」说清楚
@@ -269,11 +235,6 @@ export function upArgv(resolved: ResolvedCompose, wait: boolean): readonly strin
 /**
  * `docker compose ... ps --format json` 的 argv。
  *
- * 用 `compose ps` 而不是 `docker ps`：后者列的是这台机器上**所有**容器，判不出「本次部署的
- * 这套服务」是否健康；前者按 `-p` 收口到本项目，给的是 compose 级别的期望状态。
- * `--format json` 而不是默认表格：表格的列名与列宽随 compose 版本变，
- * 按空格切列等于把自己的验收结论押在一个会漂移的格式上。
- *
  * @param resolved 同上。判定的服务项目名也由此处的 `-p` 界定
  * @returns 元素级 argv
  */
@@ -281,16 +242,10 @@ export function psArgv(resolved: ResolvedCompose): readonly string[] {
   return [...base(resolved), 'ps', '--format', 'json']
 }
 
-// ------------------------------------------------------------
 // docker compose ps --format json 的解析
-// ------------------------------------------------------------
 
 /**
  * ps 输出里的一个服务。
- *
- * 四个字段都按原始字符串保留、不做「友好化」：判定规则只在 parseComposePs 里写一份，
- * 这里若先把读不出来的值归一成 running/healthy，验收就带上了一处看不见的默认值 ——
- * 而那正是「健康检查永远绿」最容易出现的位置。
  */
 export interface ComposePsEntry {
   /** 服务名。空串按「无名」进报告而不是丢弃：丢掉等于少验一个服务 */
@@ -305,10 +260,6 @@ export interface ComposePsEntry {
 
 /**
  * ps 的判定结论。
- *
- * 不通过与失败不是一回事：`healthy: false` 是**这条命令读完之后的结论**，
- * 而读不出结论要抛 PS_PARSE_FAILED。合成「healthy 为 false」会让「远端 compose 根本不可用」
- * 与「容器起了但不健康」两种处置方式的差异消失。
  */
 export interface ComposePsResult {
   /** 解析出的全部条目，**含未参与判定的那些** —— 报告要能回答「实际跑了哪些服务」 */
@@ -337,20 +288,9 @@ function isEntryOk(entry: ComposePsEntry, expectStates: readonly string[]): bool
 /**
  * 解析 `docker compose ps --format json` 的 stdout。
  *
- * 两种输入形态都要认：老版本给一个 JSON 数组，新版本给**每行一个对象**的 NDJSON。
- * 真机上两种都见过 —— 只认一种的结果是「升级了 compose 就全部健康检查失败」，
- * 而报出来的错是「JSON 解析失败」，指不回真正的原因。
- *
- * `onlyServices` 非空时只判定这些服务 —— **判定范围也必须在这里收口**：放在
- * 执行器里做过滤，等于「哪些服务算数」有两处实现，而 plan 的 `onlyServices`
- * 与实际生效范围会悄悄分叉。
- *
- * **解析不了就报错，绝不因为解析不了而判通过**：那等于把健康检查做成永远绿的灯，
- * 容器起没起来全靠人肉发现。
- *
  * @param stdout ps 的 stdout 原文；JSON 数组与 NDJSON 两种形态都收
  * @param expectStates 通过的状态集合，默认 `running` / `healthy`。`health` 那一维也按它判：
- *   配了 healthcheck 的容器，`state=running` 并不代表探针过了
+ * 配了 healthcheck 的容器，`state=running` 并不代表探针过了
  * @param onlyServices 只判定这几个服务；空数组 = 判定全部
  * @returns 全部条目 + 是否通过；不通过时给出人读原因，`healthy` 为 true 时没有 reason
  * @throws DpError stdout 为空、不是合法 JSON、或某一项不是对象（码：DP.DOCKER.PS_PARSE_FAILED）
@@ -384,7 +324,6 @@ export function parseComposePs(
       })
     }
     // JSON 里以 `[` 开头就一定是数组，这条分支不需要再判一次：
-    // 写了「防御性」的死代码等于让人以为这里有第二道闸，实际并没有
     rows = parsed as readonly unknown[]
   } else {
     // NDJSON：逐行独立解析。一行坏掉就整体报错，不跳过 —— 跳过等于少验一个服务
@@ -425,7 +364,6 @@ export function parseComposePs(
   }
 
   // 指定了服务却一个都对不上号 = 名字写错了（或这个服务压根没被这次部署带上）。
-  // 按「没有要判的服务」处理就是绿灯，而它绿得毫无依据
   const missing =
     onlyServices.length === 0
       ? []

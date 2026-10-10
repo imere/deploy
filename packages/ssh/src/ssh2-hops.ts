@@ -1,18 +1,3 @@
-/**
- * ssh2 侧的链式转发 —— 多跳真正落地的地方。
- *
- * 形状：第 0 跳直连，之后每一跳的 TCP 流都由**前一跳开出的 direct-tcpip
- * 通道**承载，并把那个通道当 `sock` 交给新的 Client。ssh2 的 Channel 是
- * Duplex，能直接当 socket 用 —— 不经过本地任何 TCP 端口，于是端口冲突、
- * 监听地址暴露、别的进程抢端口这三类问题一个都不存在。
- *
- * 为什么 nc 只在**运行期**兜底：跳板禁 TCP 转发是常见加固手段，而"能不能开
- * direct-tcpip"只有真发一次才知道（AllowTcpForwarding no 的机器上 forwardOut
- * 直接失败）。计划阶段就选 nc 等于猜，所以 planHopChain 只产出
- * direct/forwardOut。nc 自己也不是万能（很多镜像连 nc 都没有），所以两次都
- * 失败时报错必须把**两次各自的原因**都列出来 —— 只报一个"连不上"会让人
- * 去查错方向。
- */
 import { DpError } from '@dp/ports'
 import type { HopSpec, ResolvedSecrets, SshConnectionOptions } from './driver.js'
 import { resolveTimeoutMs } from './driver.js'
@@ -83,8 +68,6 @@ export async function openHopChain(
     }
   } catch (err) {
     // 半条链是最糟的状态：跳板上留着还开着的会话，而用户完全看不见。
-    // 逆序关（先内层后外层），关不掉也继续关完再抛原来的错 ——
-    // 补偿失败不许吞掉原错误，否则「第 3 跳超时」会被「关连接时报错」顶掉。
     await closeAll(clients)
     throw err
   }
@@ -92,7 +75,6 @@ export async function openHopChain(
   return makeHandle(clients)
 }
 
-// ------------------------------------------------------------
 
 function makeHandle(clients: readonly Ssh2ClientLike[]): HopChainHandle {
   // planHopChain 拒了 0 跳，所以这里一定有末跳
@@ -222,9 +204,6 @@ function hopHint(step: HopChainStep): string {
 
 /**
  * 从前一跳拿一条通向 `step` 的字节流。
- *
- * srcPort 必须是 0：direct-tcpip 的源地址只给服务端记账，填一个本地没监听的
- * 端口会让一部分 sshd 直接拒掉这条请求。
  */
 function openChannel(
   prev: Ssh2ClientLike,
@@ -269,7 +248,6 @@ function openChannel(
         return
       }
       // -q0：stdin 一关就退出。不给这个参数，nc 会在目标侧先挂起，
-      // 于是这条通道永远不 EOF，下一跳的握手被推迟到超时才暴露
       const command = buildRemoteCommand(['nc', '-q0', dstHost, String(dstPort)])
       prev.exec(command, { pty: false }, (ncErr, ncChannel) => {
         if (ncErr !== undefined) {

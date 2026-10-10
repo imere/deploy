@@ -1,15 +1,3 @@
-/**
- * @dp/transport —— 传输方式的**协商**与**执行**。
- *
- * 分层：ports（类型/错误）→ ssh（argv 与提权的唯一出口）→ 本包（编排）→ 调用方。
- * 本包**不发明**任何转义：所有需要拼成 shell 语义的地方都调 `@dp/ssh` 的
- * `quoteArg` / `wrapCommand`。自己再写一套转义是这类系统最典型的严重缺陷来源
- * （转义必须是唯一出口）。
- *
- * 纯 / 非纯的分界：`availability` / `rsh` / `rsync` 的 argv / `scp` / `tar-ssh`
- * 的 argv / `local-copy` 的路径计算 —— 零 IO，可 100% 断言。
- * `runRsync` / `runScp` / `runTarSsh` / `copyLocal` —— 唯一允许 IO 的四个入口。
- */
 import { DpError, type Facts } from '@dp/ports'
 import { createLogger, type Logger } from '@dp/log'
 import { hostTarget, type KnownHostsMode, type SshAuthKind } from '@dp/ssh'
@@ -56,16 +44,11 @@ const DEFAULT_KNOWN_HOSTS: KnownHostsMode = 'strict'
 /**
  * 传一次。
  *
- * 固定三段：**协商 → 构造 argv → 执行**。分段的意义是每一步的结论都能单独展示与
- * 断言，而「计划里说 rsync、实际跑了 tar」是这类系统最难发现的一类分叉。
- * 协商结论与工具清单不一致时（探测已陈旧）**报 DP.SSH.TOOL_MISSING 而不偷偷换一条**：
- * 换掉的话报告里显示的传输方式与机器上发生的事就不一致了。
- *
  * @param req 一次传输的声明，不含「用哪种方式」——那由两端 Facts 决定
  * @param deps 依赖与偏好。本地目标需注入 localRunner；远端需给 remoteFacts
  * @returns 传输结果，`command` 为实际执行的 argv，供日志与报告使用
  * @throws DpError DP.CONFIG.INVALID（缺 Facts / 缺 localRunner / 本地没有 ssh）、
- *   DP.SSH.TOOL_MISSING、DP.PREF.UNSUPPORTED（偏好不可用，或选到尚未接入执行的 sftp）
+ * DP.SSH.TOOL_MISSING、DP.PREF.UNSUPPORTED（偏好不可用，或选到尚未接入执行的 sftp）
  */
 export async function transfer(
   req: TransferRequest,
@@ -160,7 +143,6 @@ async function runRemote(
   const remoteTarget = target.includes('@') ? target : target
 
   // 认证方式：给了 identityFile 才是明确的 key；否则用 agent（agent 转发是关的，
-  // 见 @dp/ssh argv.ts）。**不猜密码** —— 密码走 SSH_ASKPASS，属于 ssh 驱动的事
   const rsh: RshOptions = {
     sshPath,
     authKind: (deps.identityFileKind ?? (req.identityFile !== undefined ? 'key' : 'agent')) as SshAuthKind,
@@ -223,7 +205,6 @@ async function runRemote(
       })
     }
     // sftp 与 local-copy 的执行分支留给下一回合：sftp 需要 sftp 子系统通道，
-    // 它属于 @dp/ssh 的 Runner 能力而不是子进程 argv，混进来会让本包两头不靠
     case 'sftp':
       throw new DpError('DP.PREF.UNSUPPORTED', 'sftp 传输尚未接入执行层', {
         hint: 'sftp 走 sshd 子系统，通道在 @dp/ssh 的 Runner 上而不是子进程 argv。下一回合接入；现在请显式选 rsync-ssh 或 tar-ssh',

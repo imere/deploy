@@ -1,9 +1,3 @@
-/**
- * 连接工厂 —— 偏好链 + 事实探测 + Runner 组装。
- *
- * 这是 `@dp/ssh` 唯一的"从配置到可用 Runner"的入口。@dp/core **不 import
- * 本文件**：core 只认 `Runner` 接口，具体是本地还是远端由实现包决定。
- */
 import type { Facts, Runner } from '@dp/ports'
 import { DpError } from '@dp/ports'
 import { createLogger, type Logger } from '@dp/log'
@@ -19,11 +13,7 @@ function factoryFor(options: SshConnectionOptions): (kind: SshDriverKind) => Ssh
 }
 
 /**
- * 连接的**调用侧**选项。与 `SshConnectionOptions` 分开是因为两者来源不同：
- * 那是配置里写的「连哪台、用什么认证」，这是进程里定的「怎么用这次连接」。
- *
- * 全部可选是有意的：CLI 只传它真正关心的，测试则几乎全靠注入
- * （driver + facts）来避免每条用例都去连真机器。
+ * 连接的**调用侧**选项。与 `SshConnectionOptions` 分开是因为两者来源不同：那是配置里写的「连哪台、用什么认证」，这是进程里定的「怎么用这次连接」。
  */
 export interface ConnectOptions {
   readonly logger?: Logger
@@ -35,9 +25,6 @@ export interface ConnectOptions {
   readonly maxOutputBytes?: number
   /**
    * 复用已有的 Facts（比如 `--facts facts.json` 提供的夹具），跳过探测。
-   *
-   * 给了就**一次远端往返都不发生** —— 这是它存在的意义，也是它危险的地方：
-   * 复用一份与当前机器不符的 facts，路径校验会全部按错误的平台与能力跑。
    */
   readonly facts?: Facts
   /** 复用已有驱动（测试与多目标扇出）。给了则偏好链与 `options.driver` 都不参与选型 */
@@ -45,9 +32,7 @@ export interface ConnectOptions {
 }
 
 /**
- * 一次已建立的连接。**不是 Runner**：它同时交出驱动与隧道，
- * 而 Runner 只承诺文件系统与 exec —— rsync 那条路必须绕过 Runner，
- * 它的通道语义属于驱动而不属于文件操作。
+ * 一次已建立的连接。**不是 Runner**：它同时交出驱动与隧道，而 Runner 只承诺文件系统与 exec —— rsync 那条路必须绕过 Runner，它的通道语义属于驱动而不属于文件操作。
  */
 export interface ConnectedSsh {
   /** 已装配好的 Runner；路径校验、退出码映射、超时都在里面 */
@@ -67,16 +52,12 @@ export interface ConnectedSsh {
 /**
  * 连上一台远端机器。
  *
- * 顺序刻意如此：**先过非空 hops 的校验**（不合法的链在碰网络之前就报错，而不是
- * 连到一半才失败），再走偏好链选驱动，最后才探测 —— 探测是有往返成本的，不该
- * 为一条注定失败的连接买单。
- *
  * @param options 连哪台、用什么认证。凭据只以 ref 形式出现，明文要调用方先解析进 secrets
  * @param connectOptions 见 {@link ConnectOptions}。全空等价于「按默认值真连一次并探测」
  * @returns 已建立的连接；**不会**替你关闭它，用完必须 `close()`
  * @throws DpError hops 不合法（`DP.CONFIG.INVALID`）、无可用驱动
- *   （`DP.SSH.DRIVER_UNAVAILABLE`，message 里逐项列出失败原因）、
- *   以及探测阶段驱动抛出的连接/认证类错误
+ * （`DP.SSH.DRIVER_UNAVAILABLE`，message 里逐项列出失败原因）、
+ * 以及探测阶段驱动抛出的连接/认证类错误
  */
 export async function connectSsh(
   options: SshConnectionOptions,

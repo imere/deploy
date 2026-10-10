@@ -1,19 +1,3 @@
-/**
- * 公共 API 的 JSDoc 门禁。
- *
- * 为什么只扫每个包的 `src/index.ts` 导出的东西：全量扫 296 个源文件会一次冒出
- * 几百条，接上门禁就永远是红的 —— 没人会去修一个永远红的检查，它会退化成背景噪声，
- * 比没有检查更糟。收口到公共 API，缺口是有限且能真正补完的集合。
- *
- * 为什么不用 TypeScript 编译器 API：它确实在仓里，但拖进来后门禁会跟着 tsconfig、
- * 项目引用、编译缓存一起变慢变脆 —— 一个检查注释的脚本不该依赖「能编译过」。
- * 本文件只需要：JSDoc 块、声明名、形参名、interface 成员。这四样用遮罩后的
- * 正则 + 括号配平就够，不需要完整 AST。
- *
- * 启发式（疑似复述）**不参与退出码**：把描述判成「复述」是猜，写得好的注释
- * （如「拆 user@host:port。不补默认端口 —— …」）在词面上和函数名有重叠是常态。
- * 误报会让门禁失去可信度，所以它只提示。
- */
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -34,13 +18,8 @@ const root = fileURLToPath(new URL('..', import.meta.url))
 const packagesDir = join(root, 'packages')
 
 // 遮罩、括号配平、形参切分、注释块定位、块解析、复述启发式都在 rules 模块里：
-// 那些是纯文本判定，本文件只留「读文件、顺说明符追声明、拼报告」三件碰 IO 的事。
-// 判据与它的用法分开放，是为了判据能被 `node --test` 直接断言 ——
-// 留在扫描循环内联时，判据被改坏不会有任何东西变红。
 
-// ============================================================
 // index.ts 导出解析
-// ============================================================
 
 const cache = new Map()
 function loadFile(file) {
@@ -51,7 +30,6 @@ function loadFile(file) {
 const RE_EXPORT_ALL = /(?:^|\n)\s*export\s+\*\s+(?:as\s+[A-Za-z_$][\w$]*\s+)?from\s*['"]([^'"]+)['"]/g
 const RE_EXPORT_LIST = /(?:^|\n)\s*export\s+(?:type\s+)?\{([\s\S]*?)\}\s*from\s*['"]([^'"]+)['"]/g
 // 末尾不能只认 `;` 与字符串结尾：没有 m 标志时 `$` 只匹配全文末尾，
-// 而文件中间的 `export type { X }` 后面跟的是换行 —— 加上 `(?=\n)` 才够得着。
 const RE_LOCAL_LIST = /(?:^|\n)\s*export\s+(?:type\s+)?\{([\s\S]*?)\}\s*(?:;|(?=\n)|$)/g
 // 本地再导出的名字往往是从别处 import 进来的，要顺着 import 才能追到真声明所在的文件
 const RE_IMPORT_NAMED = /(?:^|\n)\s*import\s+(?:type\s+)?\{([\s\S]*?)\}\s*from\s*['"]([^'"]+)['"]/g
@@ -85,8 +63,6 @@ function collectExports(file, seen = new Set()) {
   }
 
   // 本地再导出（`export { a }` / `export type { T }`，不带 from）：名字可能就声明在本文件，
-  // 也可能是本文件 import 进来再转手导出 —— 后者必须顺着 import 追到源文件的声明，
-  // 否则会报「导出找不到定义」，而真实的声明明明就在另一个包里。
   RE_LOCAL_LIST.lastIndex = 0
   const localNames = []
   while ((m = RE_LOCAL_LIST.exec(codeOnly)) !== null) {
@@ -122,7 +98,6 @@ function collectExports(file, seen = new Set()) {
   }
 
   // 先把匹配收齐再递归：RE_* 是模块级 /g 正则，递归进入子文件会把它自己的
-  // lastIndex 清零，循环中途被重置就会静默截断 —— 表现为「某个包一个符号都没查到」。
   RE_EXPORT_ALL.lastIndex = 0
   const starTargets = []
   while ((m = RE_EXPORT_ALL.exec(codeOnly)) !== null) {
@@ -143,9 +118,6 @@ function locate(entry, depth = 0) {
   if (decls.has(key)) return decls.get(key)
   if (depth > 2) return null
   // seen 必须从空集合起：collectExports 开头就是 `seen.has(file) → 返回空`，
-  // 把起点自己预先塞进去等于让这一层追踪永远空转，表现为「导出找不到定义」——
-  // 而声明其实就在同目录的另一个文件里，只是本文件转手再导出了一次。
-  // 防环由 collectExports 内部的 seen.add 保证，不需要在这里预置。
   for (const e of collectExports(entry.file, new Set())) {
     if (e.name !== key) continue
     const hit = locate({ ...e, want: e.want ?? e.name }, depth + 1)
@@ -154,9 +126,7 @@ function locate(entry, depth = 0) {
   return null
 }
 
-// ============================================================
 // 校验
-// ============================================================
 
 const findings = []
 const restated = []
@@ -205,9 +175,7 @@ function checkDecl(decl, exportedName) {
   for (const f of checkMembers(decl, label)) add(decl, f.symbol, f.problem)
 }
 
-// ============================================================
 // 主流程
-// ============================================================
 
 const packageDirs = existsSync(packagesDir)
   ? readdirSync(packagesDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)

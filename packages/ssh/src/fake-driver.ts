@@ -1,17 +1,3 @@
-/**
- * 测试用的假 SSH 驱动。
- *
- * 它**不执行 shell**：它读 posix.ts 在脚本头两行留下的意图（`#dp-op` / `#dp-arg`），
- * 然后在一份内存文件系统上直接给出与真实目标机一致的结果与退出码。
- *
- * 诚实说明这个 fixture 的边界：
- *  - 它验证的是**客户端逻辑** —— argv 构造、路径校验、退出码映射、二进制往返、
- *    截断、超时、prompt 传播。这部分不需要任何机器。
- *  - 它**不**验证脚本体本身。脚本体只有真机能跑，那是 e2e 套件（默认跳过）的职责。
- *
- * prompt / timeout 的处理刻意**模仿真实驱动**：真实驱动是在自己进程里嗅探到
- * prompt 后杀进程并 reject，嗅探逻辑本身由 prompt.test.ts 单独覆盖。
- */
 import { DpError } from '@dp/ports'
 import { readIntent } from './posix.js'
 import { truncateOutput } from './parse.js'
@@ -66,7 +52,6 @@ export class FakeSshDriver implements SshDriver {
     this.calls.push(req)
 
     // 顺序要紧：prompt 与真实驱动一样是**最先**判定的事 ——
-    // 哪怕这条命令本身我们没登记，远端吐了 prompt 依然是 prompt
     if (this.promptText !== undefined) {
       const hit = detectPrompt(this.promptText)
       if (hit !== undefined) {
@@ -107,7 +92,6 @@ export class FakeSshDriver implements SshDriver {
     this.closed = true
   }
 
-  // ------------------------------------------------------------
 
   private shape(r: ForcedResponse): DriverExecResult {
     return {
@@ -171,8 +155,6 @@ export class FakeSshDriver implements SshDriver {
         const p = arg('path')
         if (this.isDenied(p)) return { code: 5, stderr: `bash: ${p}: Permission denied` }
         // 数据在脚本里是 `d=<base64>`（posix.ts 的 writeFileScript）。
-        // base64 的字符集 `A-Za-z0-9+/=` 全在 quoteArg 的安全集里，所以
-        // **不一定带引号** —— 两种形态都要认。
         const b64 = /^d='?([A-Za-z0-9+/=]*)'?$/m.exec(scriptText)?.[1] ?? ''
         this.files.set(p, new Uint8Array(Buffer.from(b64, 'base64')))
         this.dirs.add(p.slice(0, p.lastIndexOf('/')) || '/')

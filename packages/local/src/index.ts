@@ -1,9 +1,3 @@
-/**
- * @dp/local —— 本地目标：能力实证、命令执行、文件系统操作、源枚举。
- *
- * 这里的 Runner 与将来的 SSH Runner 实现同一个 `@dp/ports` 接口，
- * 所以 core / target 不需要知道自己在跟哪台机器说话。
- */
 export {
   detectPrompt,
   PROMPT_PATTERNS,
