@@ -1,7 +1,7 @@
 /**
  * 真机集成测试 —— **默认跳过**。
  *
- * 需要真 SSH 目标时按 `.agents/skills/dp-spike-env/` 起 podman 容器，
+ * 需要真 SSH 目标时起容器靶机（跳板机 + 内网靶机各一台），
  * 然后：
  *
  * ```
@@ -23,7 +23,7 @@ import type { SshConnectionOptions } from './driver.js'
 const E2E = process.env.DP_SSH_E2E === '1'
 const SKIP = E2E
   ? false
-  : '需要真机：设置 DP_SSH_E2E=1 与 DP_SSH_HOST / DP_SSH_USER（见 .agents/skills/dp-spike-env）'
+  : '需要真机：设置 DP_SSH_E2E=1 与 DP_SSH_HOST / DP_SSH_USER'
 
 const host = process.env.DP_SSH_HOST ?? '127.0.0.1'
 const user = process.env.DP_SSH_USER ?? 'dpuser'
