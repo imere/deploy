@@ -1,12 +1,16 @@
 import { DpError } from '@dp/ports'
+import { TARGET_KINDS } from '@dp/schema'
 
 /** 对应 `targetSchema.pick`。不设默认值：调用方必须显式传，默认值由 schema 那一层给 */
 export type TargetPick = 'auto' | 'fail'
 
 /**
- * 本仓**已实现**的目标类型。
+ * 本仓**已实现**的目标类型 = 配置里允许写出的那一份。
+ *
+ * 两份名单分开写就会各改各的：配置放行一个没有执行器的类型，用户写下去得到的是
+ * 「校验通过、部署行为完全不是他点名的那个」。
  */
-export const IMPLEMENTED_KINDS: readonly string[] = ['static', 'nginx', 'docker']
+export const IMPLEMENTED_KINDS: readonly string[] = TARGET_KINDS
 
 /**
  * 探测的输入。**没有**「源目录」字段，只有展开后的条目名：探测关心的是「有没有 compose 文件」，不是「文件在哪」——给了路径就得关心它从哪来，纯函数的前提随即破掉。

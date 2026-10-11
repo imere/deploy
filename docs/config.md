@@ -112,7 +112,7 @@ profiles: {
 auth: { type: password, passwordRef: env:DEPLOY_PASSWORD }
 ```
 
-scheme 有 `env:` / `file:` / `prompt:` / `cmd:`，注册表化，未来可加 `vault:` / `op:` —— 见 security.md。
+scheme 目前只有 `env:`（环境变量）一种 —— 别的来源没有实现，写了也取不到值。
 
 ---
 
@@ -178,7 +178,7 @@ hosts:
 
 > **不假设 root。** `sshUser` 一律是普通账号，`become` 只是可选项而非必经步骤（`type: none` 是一等公民）。
 > 目标机上的路径 —— 状态目录、systemd unit 位置、confd —— **都不是配置项**：由实测能力推导出
-> `system | hybrid | user` 三种布局之一，并在 plan 里打印出来供核对。完整模型见 `privilege.md`。
+> `system | user` 两种布局之一（`auto` 由能力推导），并在 plan 里打印出来供核对。
 
 **设计要点**：`hosts` 描述「怎么过去」，`target` 描述「到了之后怎么生效」，两者正交。所以同一份 nginx 配置，挂 `prod-bastion` 就是远端部署，挂 `local-box` 就是本机部署 —— target 的代码一行不用改。
 
@@ -186,158 +186,46 @@ hosts:
 
 ## 5. 多主机 / 集群扇出
 
-一个 project 可以同时投向**多台主机**（集群），`host` 写成数组或 host group：
+一个 project 可以同时投向**多台主机**：
 
 ```yaml
-hostGroups:
-  prod-cluster: ['prod-web-01', 'prod-web-02', 'prod-web-03']
-
 projects:
   web:
-    source: ./dist
-    host: { group: prod-cluster }
-    rollout:
-      strategy: rolling          # all | rolling | canary | serial
-      batch: 1                   # rolling 时每批几台
-      pauseMs: 5000              # 批间隔
-      failPolicy: abort          # abort | continue | ask
-      healthWaitMs: 30000
+    source: { root: './dist' }
+    hosts: ['prod-web-01', 'prod-web-02', 'prod-web-03']   # 不写则投向所有主机
 ```
 
-| 策略 | 行为 | 适合 |
-| --- | --- | --- |
-| `all` | 全并行 | 无状态服务、追求最快 |
-| `rolling` | 分批，`batch: 1` 时就是逐台 | 有状态 / 要保容量 |
-| `canary` | 先一台，验健康后推全量 | 高风险发布 |
-| `serial` | 严格串行并在每台之间等待人工确认 | 关键业务的保守节奏 |
+扇出的单位要清楚：**一次部署里，每台主机各自算一条独立的 plan**（各自的 Facts 可能不同 ——
+机器间 rsync 版本不一样是常事），共用一个 `releaseId`，以便跨机器对齐版本与回滚。
+`dp status --host <id>` 看某一台当前指向的版本，逐台跑一遍就能判断集群是否一致；
+候选多于一台又没指定时 `--host` 是必填的（dp 不替你选一台）。
 
-扇出的单位要清楚：**一次部署里，每台主机各自算一条独立的 plan**（各自的 Facts 可能不同 —— 机器间 rsync 版本不一样是常事），共用一个 `releaseId`，以便跨机器对齐版本与回滚。`dp releases --all` 能看到每台机器上当前指向的版本，用来判断集群是否一致。
-
-幂等在这里特别值钱：同一 `releaseId` 已在某台机器上存在时，那台机器跳过上传直接参与 activation，跨机重复运行也就安全了。
+幂等在这里特别值钱：同一 `releaseId` 已在某台机器上存在时，那台机器跳过上传直接参与
+activation，跨机重复运行也就安全了。
 
 ---
 
-## 6. 容器：动态构建 / 推拉 / 多服务编排
-
-容器场景容易写成一个死板的开关列表，所以这里按「**镜像从哪来**」这条主线组织：
-
-```mermaid
-flowchart TB
-    SRC["release 内容<br/>（含 Dockerfile / compose 文件）"] --> MODE{"target.mode"}
-    MODE -->|build-push| A["在 build host 构建<br/>docker buildx build --platform"]
-    A --> B["push 到 registry<br/>tag: ${git.sha} + ${env}"]
-    B --> C["各主机 pull"]
-    MODE -->|build-load| D["本机/构建机构建<br/>docker save → SSH stdin"]
-    D --> E["远端 docker load"]
-    MODE -->|remote-build| F["每台各自构建<br/>（开发/测试环境常用）"]
-    MODE -->|image-only| G["只 pull 现成镜像<br/>不由本流水线构建"]
-    C --> UP["compose up -d --wait<br/>或 docker run / stack deploy"]
-    E --> UP
-    F --> UP
-    G --> UP
-    UP --> V["健康检查：compose ps --format json"]
-
-    classDef box fill:#134e4a,stroke:#2dd4bf,color:#ccfbf1
-    class A,B,C,D,E,F,G,UP,V box
-```
-
-```yaml
-projects:
-  api:
-    source: { root: ./apps/api, include: ['**'], exclude: ['**/node_modules/**'] }
-    target:
-      type: docker
-      mode: build-push              # build-push | build-load | remote-build | image-only
-      image:
-        name: registry.example.com/team/api
-        tags: ['${git.sha}', '${env}-latest']     # 多标签
-        platform: 'linux/arm64'      # 交叉构建目标架构
-      build:                        # **设计形态，未实现**：docker 目前只有 remote-cli 一种 mode
-        where: local                # local | remote | buildHost
-        buildHost: builder-arm64    # where=buildHost 时用它
-        dockerfile: Dockerfile
-        context: .
-        cacheFrom: ['type=registry,ref=...']
-        buildkit: true
-      registry:                     # 同上，未实现
-        auth: { usernameRef: env:REG_USER, passwordRef: env:REG_PASS }
-      compose:
-        files: ['docker-compose.yml', 'docker-compose.prod.yml']
-        projectName: api
-        envFile: .env.prod
-        pull: true
-        wait: true                   # docker compose up --wait
-    healthcheck:
-      - { type: command, run: 'docker compose ps --format json', expect: 'running' }
-      - { type: http, url: 'http://127.0.0.1:8080/healthz', expectStatus: [200,204] }
-```
-
-要点：
-
-- **多容器天然支持**：compose 文件就是多服务定义，我们不重造编排语义，只负责「把文件送过去 + 用正确的 projectName/env 执行 + 验健康」。多主机时每个主机各自 `up`。
-- **动态推拉**：`mode: build-push` 时，镜像 tag 由 `${git.sha}` 与 `${env}` 决定，无需手写版本；compose 文件里的镜像引用可以写成 `${image}` 变量，由我们在 plan 期注入（避免 compose 文件里写死 tag）。
-- **`image-only`** 是给「镜像由别的流水线做好」的场景留的位置 —— 同一个 target 类型覆盖四种供给方式，而不是四个互斥的 target。
-- **默认 `remote-build` 之外都避免依赖本机 docker CLI**：`build-load` 需要本机 docker，`build-push` 若为交叉构建则需要 buildx。缺什么要明确报错 + 建议退到哪里。
-
----
-
-## 7. 交叉编译
-
-「在哪构建」和「构建出什么架构」是两回事，配置里分开表达：
-
-```yaml
-projects:
-  edge-agent:
-    build:                      # 独立于 source.prepare，是「构建」而非「拷贝」的阶段
-      where: buildHost          # local | remote | buildHost | auto
-      buildHost: builder-arm64  # 一台架构匹配的构建机
-      platform: 'linux/arm64'   # 目标架构
-      strategy: auto            # cross | native | buildx
-      command: 'make build'     # 非 docker 场景：自己承担交叉编译（GOARCH / --target 等）
-      env: { GOOS: linux, GOARCH: arm64 }
-      artifact: ./dist/edge-agent
-```
-
-推导规则（`strategy: auto` 时）：
-
-```mermaid
-flowchart TB
-    A{"本地 arch == 目标 arch?"} -->|是| NAT["本机构建即可"]
-    A -->|否| B{"配了 buildHost<br/>且架构匹配?"}
-    B -->|是| REM["在 buildHost 上原生构建"]
-    B -->|否| C{"用容器?"}
-    C -->|是| BX["buildx crossPlatform 构建<br/>--platform 指定"]
-    C -->|否| CCMD["本机跑用户给定的<br/>交叉编译命令 + 环境变量"]
-    CCMD --> WARN["构建产物无法在本机验证<br/>→ 必须开启更强的 healthcheck"]
-
-    classDef box fill:#1e293b,stroke:#38bdf8,color:#e2e8f0
-    classDef warn fill:#422006,stroke:#f59e0b,color:#fef3c7
-    class NAT,REM,BX,CCMD box
-    class WARN warn
-```
-
-有一条硬规则：**交叉编译出来的产物不能在本机验证**。因此 `strategy: cross | buildx` 且没配 healthcheck 时，給出警告（不阻断，但要用户知情）——这是为避免「推上去了才发现跑在错误的架构上」。
-
----
-
-## 8. 自动识别：不写 target 会发生什么
+## 6. 目标类型：nginx / docker 与自动识别
 
 `target` 不填时走 **TargetResolver**，两个阶段：
 
 1. **探测器（Detector）**：在项目根收集证据。每个探测器返回 `(confidence, evidence[])`。
 2. **仲裁**：按「命中数量 + 显式开关」决定，并**打印它为什么这么选**。
 
-| 探测到的证据 | 建议 target |
-| --- | --- |
-| `docker-compose.yml` / `compose.yaml` / `docker-compose.*.yml` | `docker`（mode: remote-build 或 image-only） |
-| `Dockerfile` 且无 compose | `docker`（single image） |
-| `nginx.conf` / `conf.d/*.conf` / `*.nginx.conf` | `nginx` |
-| `Caddyfile` | `caddy`（后续功能） |
-| `*.service` 单元文件 | `systemd` |
-| `ecosystem.config.js` | `pm2` |
-| `package.json` 有 `scripts.deploy` / `.deploy/scripts/*` | **`delegate`**：交给项目自带的部署方式 |
-| 只有静态文件（含 `index.html`） | `static` |
-| `Chart.yaml` / k8s manifests | `k8s`（后续功能） |
+| 探测到的证据 | 结论 | 有执行器 |
+| --- | --- | --- |
+| `docker-compose.yml` / `compose.yaml` / `docker-compose.*.yml` | `docker`（`mode: remote-cli`） | ✅ |
+| `nginx.conf` / `conf.d/*.conf` / `*.nginx.conf` | `nginx` | ✅ |
+| 只有静态文件（含 `index.html`） | `static` | ✅ |
+| `Dockerfile` 且无 compose | `docker`（单镜像） | ❌ |
+| `*.service` 单元文件 | `systemd` | ❌ |
+| `ecosystem.config.js` | `pm2` | ❌ |
+| `package.json` 有 `scripts.deploy` / `.deploy/scripts/*` | `delegate`（交给项目自带的方式） | ❌ |
+| `Caddyfile` | `caddy` | ❌ |
+| `Chart.yaml` / k8s manifests | `k8s` | ❌ |
+
+右列是 ❌ 的那些**不在 `target.type` 的取值里**（`dp schema` 里查不到）：它们被认出来是为了把
+「为什么选了别的」说清楚，以及防止「源里躺一个 `Caddyfile` 就把 compose 项目判成 caddy」。
 
 仲裁策略必须保守：
 
@@ -447,34 +335,9 @@ activate 相反）：compose 文件是随 release 上传的，install 只做「�
 「没读到」（ps 失败只给 warning，不让 status 整条变红）；`dp rollback` 没有上一版时
 报错而不是假成功。
 
-### delegate：项目自带部署方式
-
-很多项目已经有自己的部署脚本/compose/Makefile，我们不该抢活。此时本项目的角色变成：**在一旁提供版本布局、锁、日志、回滚与验证**。
-
-```yaml
-projects:
-  legacy:
-    target:
-      type: delegate
-      run: 'npm run deploy'      # 或 deploy.sh / make deploy
-      cwd: '.'
-```
-
-contract 通过环境变量传给脚本：
-
-```
-DP_RELEASE_DIR   /srv/app/releases/<releaseId>
-DP_CURRENT_DIR   /srv/app/current
-DP_RELEASE_ID    20261001-003000-a1b2c3d4
-DP_ENV           prod
-DP_HOST_COUNT    3          # 多台时
-```
-
-于是「项目自带的方式」与「我们的 release/rollback/audit」各司其职：**沙箱由项目负责，秩序由我们负责。**
-
 ---
 
-## 9. 覆盖优先级
+## 7. 覆盖优先级
 
 ```
 CLI --set / 参数  >  project 内的 target  >  profiles.<env>.projects.<name>
@@ -494,22 +357,76 @@ transport.strategy = auto ← defaults（本次协商结果：tar-ssh）
 
 ---
 
-## 10. 字段速查表
+## 8. 字段速查表
 
-| 层级 | 关键字段 |
-| --- | --- |
-| `defaults` / `profiles` | `hosts`、`projects`、`release`、`transport`、`crypto`、`timeouts` |
-| `hosts.*` | `ssh`（**单跳**连接串）、`hops`（多跳）、`local`、`become`、`layout`、`transport`。**未落地**：`crypto`、`knownHosts`、`timeouts`、`retry` |
-| `projects.*.source` | `root`、`include`、`exclude`、`files`、`dotfiles`、`prepare`（本机前置命令） |
-| `projects.*.build` | `where`、`buildHost`、`platform`、`strategy`、`command`、`env`、`artifact` |
-| `projects.*.release` | `root`、`keep`、`shared[]`、`owner`、`dirMode`、`fileMode`、`switchStrategy` |
-| `projects.*.transfer` | `strategy`、`delete`、`compress`、`checksum`、`bandwidthLimit` |
-| `projects.*.rollout` | `strategy`、`batch`、`pauseMs`、`failPolicy`、`healthWaitMs` |
-| `projects.*.target` | `type`、`pick`、`confd`、`service` + 各 target 自有段（`target.nginx.*` / `docker.image` / ...） |
-| `projects.*.target.nginx` | `server`（块或块数组）、`filename`、`force`、`reload`（argv[] 或 `false`）。 |
-| `projects.*.target.docker` | `mode`（仅 `remote-cli`）、`compose.{files[],projectName,envFile,pull,wait}`、`healthcheck.{services[],expectStates[]}`。 |
-| `projects.*.healthcheck` | `command` / `http` / `tcp` / `fileExists` |
-| `projects.*.hooks` | `before|after × prepare|transfer|install|activate|verify`，每条带 `where: local|remote` |
-| `projects.*.rollback` | `enabled`、`onFailure: auto|ask|never` |
+下面这张表是**从 `dp schema` 的 JSON Schema 反查出来的**，不是手抄的 —— 抄出来的表一定会
+和实现分叉，而分叉之后用户照着文档写的配置在校验期就被顶回来。
 
-完整字段名以 `dp schema` 导出的 JSON Schema 为准 —— schema 即文档，两者不容许不一致。
+（`defaults` 与 `profiles.<env>` 的字段是 `hosts` / `release` / `transport` / `activation`
+四段的子集，写法同上，故不重复列出。）
+
+| 字段 | 必填 | 类型 / 取值 |
+| --- | --- | --- |
+| `hosts` | 可选 | {} |
+| `hosts.*.ssh` | 可选 | string |
+| `hosts.*.hops` | 可选 | [] |
+| `hosts.*.hops[].ssh` | 必填 | string |
+| `hosts.*.hops[].auth` | 可选 | {} |
+| `hosts.*.hops[].knownHosts` | 可选 | strict | accept-new | tofu | off |
+| `hosts.*.hops[].port` | 可选 | number |
+| `hosts.*.local` | 可选 | boolean |
+| `hosts.*.become` | 可选 | {} |
+| `hosts.*.become.type` | 必填 | none | sudo | su | doas | custom |
+| `hosts.*.become.user` | 可选 | string |
+| `hosts.*.become.method` | 必填 | auto | nopasswd | stdin | pty |
+| `hosts.*.become.passwordRef` | 可选 | string |
+| `hosts.*.become.preserveEnv` | 必填 | boolean |
+| `hosts.*.become.template` | 可选 | string |
+| `hosts.*.layout` | 必填 | auto | system | user |
+| `hosts.*.transport` | 可选 | {} |
+| `hosts.*.transport.strategy` | 必填 | rsync | tar-ssh | sftp | scp | local[] |
+| `hosts.*.transport.delete` | 必填 | boolean |
+| `hosts.*.transport.compress` | 必填 | auto | none | gzip | zstd |
+| `projects` | 必填 | {} |
+| `projects.*.source` | 必填 | {} |
+| `projects.*.source.root` | 必填 | string |
+| `projects.*.source.include` | 可选 | string[] |
+| `projects.*.source.exclude` | 可选 | string[] |
+| `projects.*.hosts` | 可选 | string[] |
+| `projects.*.release` | 可选 | {} |
+| `projects.*.release.root` | 可选 | string |
+| `projects.*.release.keep` | 必填 | number |
+| `projects.*.release.shared` | 可选 | string[] |
+| `projects.*.release.owner` | 可选 | string |
+| `projects.*.release.dirMode` | 可选 | string |
+| `projects.*.release.fileMode` | 可选 | string |
+| `projects.*.release.switchStrategy` | 必填 | auto | symlink | rename | copy |
+| `projects.*.target` | 可选 | {} |
+| `projects.*.target.type` | 必填 | static | nginx | docker[] |
+| `projects.*.target.pick` | 必填 | auto | fail |
+| `projects.*.target.confd` | 可选 | string |
+| `projects.*.target.nginx` | 可选 | {} |
+| `projects.*.target.docker` | 可选 | {} |
+| `projects.*.healthcheck` | 可选 | {} |
+| `projects.*.healthcheck.command` | 可选 | string |
+| `projects.*.healthcheck.http` | 可选 | {} |
+| `projects.*.healthcheck.tcp` | 可选 | {} |
+| `projects.*.healthcheck.fileExists` | 可选 | string[] |
+| `projects.*.healthcheck.timeoutMs` | 必填 | number |
+| `projects.*.healthcheck.intervalMs` | 必填 | number |
+| `projects.*.activation` | 可选 | {} |
+| `projects.*.activation.mode` | 必填 | trial-promote | direct |
+| `projects.*.activation.trialTimeout` | 必填 | string |
+| `projects.*.activation.autoPromote` | 必填 | when-healthcheck-passes | never | always |
+| `projects.*.activation.promoteConsecutivePasses` | 必填 | number |
+| `projects.*.activation.promoteWindow` | 必填 | string |
+| `projects.*.transport` | 可选 | {} |
+| `projects.*.transport.strategy` | 必填 | rsync | tar-ssh | sftp | scp | local[] |
+| `projects.*.transport.delete` | 必填 | boolean |
+| `projects.*.transport.compress` | 必填 | auto | none | gzip | zstd |
+
+「必填」是**归一化输出**的口径：`withDefault` 的字段输入可省、输出一定有值，所以它们是必填。
+`target.type` 可以写单个值或偏好链（`[]` 表示数组），取值只有上表列出的那几种。
+
+各 target 自有段（`target.nginx.*` / `target.docker.*`）的完整形状见第 6 节，以及
+`dp schema` 导出的 JSON Schema —— schema 即文档，两者不容许不一致。

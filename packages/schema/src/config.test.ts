@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DpError } from '@dp/ports'
-import { DEFAULT_KEEP, defineBecome, defineDocker, defineHost, defineNginx, defineTarget, becomeSchema, dockerSchema, nginxSchema, releaseSchema, type DockerInput, type NginxInput } from './config.js'
+import { DEFAULT_KEEP, defineBecome, defineDocker, defineHost, defineNginx, defineTarget, becomeSchema, dockerSchema, nginxSchema, releaseSchema, targetSchema, type DockerInput, type NginxInput } from './config.js'
 
 function codeOf(fn: () => unknown): { code: string; message: string; path?: string; hint?: string } {
   try {
@@ -296,6 +296,67 @@ describe('docker · 未知字段被拒', () => {
   it('compose 里的未知键定位到具体路径', () => {
     const r = codeOf(() => dockerSchema.parse({ compose: { ...DOCKER_BASE.compose, network: 'x' } }, 'docker'))
     assert.equal(r.path, 'docker.compose.network')
+  })
+})
+
+describe('target.type 与 nginx / docker 段必须一致', () => {
+  const NGINX_BASE: NginxInput = { server: { root: '/srv/app/current' } }
+
+  it('点名 nginx 却没有 nginx 段 → 拒绝（否则会静默按 static 部署）', () => {
+    assert.throws(
+      () => defineTarget({ type: 'nginx' }),
+      (err: unknown) => {
+        assert.ok(err instanceof DpError)
+        assert.equal(err.code, 'DP.CONFIG.INVALID')
+        assert.equal(err.path, 'target.nginx')
+        return true
+      },
+    )
+  })
+
+  it('点名 docker 却没有 docker 段 → 同上', () => {
+    assert.throws(
+      () => defineTarget({ type: ['docker', 'static'] }),
+      (err: unknown) => err instanceof DpError && err.code === 'DP.CONFIG.INVALID',
+    )
+  })
+
+  it('给了 nginx 段却写 type: nginx 之外的名字 → 拒绝（段决定跑什么，type 不能是另一个说法）', () => {
+    assert.throws(
+      () => defineTarget({ type: 'docker', nginx: NGINX_BASE, docker: DOCKER_BASE }),
+      (err: unknown) => {
+        assert.ok(err instanceof DpError)
+        assert.equal(err.path, 'target.type')
+        return true
+      },
+    )
+  })
+
+  it('type 是必填：只给段不写类型要报错（不给它就没法判断一致性）', () => {
+    assert.throws(
+      () => targetSchema.parse({ docker: DOCKER_BASE }, 'target'),
+      (err: unknown) => err instanceof DpError && err.code === 'DP.CONFIG.INVALID',
+    )
+  })
+
+  it('type: auto 展开成缺省链，此时有段不判不一致 —— 段才是执行器的判据', () => {
+    const target = defineTarget({ type: 'auto', docker: DOCKER_BASE })
+    assert.equal(target.docker?.compose.projectName, 'api')
+  })
+
+  it('没有执行器的类型不在选项里：systemd / process 写出来即报错', () => {
+    for (const kind of ['systemd', 'process']) {
+      assert.throws(
+        () => defineTarget({ type: kind as 'static' }),
+        (err: unknown) => {
+          assert.ok(err instanceof DpError)
+          assert.match(err.message, /不被支持/)
+          assert.match(err.hint ?? '', /static, nginx, docker/)
+          return true
+        },
+        `${kind} 不该被接受`,
+      )
+    }
   })
 })
 

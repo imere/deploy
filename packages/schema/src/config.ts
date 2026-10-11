@@ -207,9 +207,13 @@ export const hostSchema = constrained(
 // 目标
 
 /**
- * 目标类型全集。**全仓只有这一份**。
+ * 目标类型全集。**全仓只有这一份**，且只收**已实现**的那几种。
+ *
+ * 探测能认出 systemd / caddy / k8s 等更多形态，但它们没有执行器；把它们放进这里
+ * 等于允许用户写出一份「通过了校验、跑起来却是 static」的配置 —— 那比直接拒绝
+ * 难查得多。未实现的形态由探测层显式报错（`IMPLEMENTED_KINDS`），不在这里留口子。
  */
-export const TARGET_KINDS = ['static', 'nginx', 'docker', 'systemd', 'process'] as const
+export const TARGET_KINDS = ['static', 'nginx', 'docker'] as const
 
 /**
  * nginx 段。**只管形状与类型**，语义判定全部留给 @dp/target-nginx。
@@ -349,19 +353,46 @@ export const dockerSchema = obj(
  */
 export const DEFAULT_TARGET_PICK = 'auto'
 
+/** type 缺省时展开成的链。判别「用户有没有写 type」要靠它 */
+const DEFAULT_TARGET_CHAIN: readonly string[] = ['static']
+
 /**
- * 部署目标。type 收窄了 `nginx` / `docker` 两段与 type 的一致性 ——写 `type: 'nginx'` 却给了 docker 段，在这一层就能拒。
+ * 部署目标。**type 与 nginx / docker 两段必须一致**：真正决定跑哪个执行器的是段，
+ * type 只是覆盖探测的开关，两者分叉就会「点名 nginx、实际按 static 部署」。
  */
-export const targetSchema = obj(
-  {
-    type: prefChain(TARGET_KINDS, ['static'] as const, '目标类型，也可以是偏好链'),
-    pick: withDefault(oneOf(['auto', 'fail'] as const), DEFAULT_TARGET_PICK),
-    confd: opt(str('conf.d 目录（nginx 目标）。不写则由实测能力推导')),
-    service: opt(str('服务名（systemd / process 目标）')),
-    nginx: opt(nginxSchema),
-    docker: opt(dockerSchema),
+export const targetSchema = constrained(
+  obj(
+    {
+      type: prefChain(TARGET_KINDS, ['static'] as const, '目标类型，也可以是偏好链'),
+      pick: withDefault(oneOf(['auto', 'fail'] as const), DEFAULT_TARGET_PICK),
+      confd: opt(str('conf.d 目录（nginx 目标）。不写则由实测能力推导')),
+      nginx: opt(nginxSchema),
+      docker: opt(dockerSchema),
+    },
+    '部署目标',
+  ),
+  (value, path) => {
+    const chain = [...value.type]
+    // 反向那条只在「用户真的写了 type」时判：type 缺省展开成 ['static']，而只给 docker 段
+    // 不写 type 是合法写法 —— 段才是执行器的判据
+    const explicit = !(
+      chain.length === DEFAULT_TARGET_CHAIN.length && chain.every((k, i) => k === DEFAULT_TARGET_CHAIN[i])
+    )
+    for (const kind of ['nginx', 'docker'] as const) {
+      if (chain.includes(kind) && value[kind] === undefined) {
+        throw new DpError('DP.CONFIG.INVALID', `target.type 点名 ${kind} 却没有 ${kind} 段`, {
+          path: `${path}.${kind}`,
+          hint: `写上 projects.<项目>.target.${kind}，或把 ${kind} 从 type 里去掉 —— 没有段就没有可执行的东西，跑下去只会静默按 static 部署`,
+        })
+      }
+      if (explicit && value[kind] !== undefined && !chain.includes(kind)) {
+        throw new DpError('DP.CONFIG.INVALID', `给了 ${kind} 段，但 target.type 里没有 ${kind}`, {
+          path: `${path}.type`,
+          hint: `把 ${kind} 加进 type，或删掉这一段 —— 两者不一致时实际跑的是段对应的执行器，type 就成了骗人的标签`,
+        })
+      }
+    }
   },
-  '部署目标',
 )
 
 // 发布
@@ -442,13 +473,6 @@ export const projectSchema = obj(
     hosts: opt(arr(str('引用的主机名'))),
     release: opt(releaseSchema),
     target: opt(targetSchema),
-    build: opt(
-      obj({
-        command: opt(str('构建命令')),
-        where: withDefault(oneOf(['local', 'remote'] as const), 'local'),
-        artifact: opt(str('产物路径')),
-      }),
-    ),
     healthcheck: opt(healthcheckSchema),
     activation: opt(activationSchema),
     transport: opt(transportSchema),
