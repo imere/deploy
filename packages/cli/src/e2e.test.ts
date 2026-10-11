@@ -219,6 +219,6 @@ describe('cli · 退出码与错误输出（走 main()，不起子进程）', ()
   it('没有任何子命令时打印根帮助并成功退出', async () => {
     const lines: string[] = []
     assert.equal(await main([], { write: (t) => lines.push(t) }), EXIT_OK)
-    assert.match(lines.join(''), /命令（已实现）/)
+    assert.match(lines.join(''), /^命令$/m)
   })
 })

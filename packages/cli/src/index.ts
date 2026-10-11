@@ -12,12 +12,10 @@ import {
   COMMAND_NAMES,
   commandHelp,
   findCommand,
-  notImplementedMessage,
   rootHelp,
   unknownCommandMessage,
 } from './help.js'
 import {
-  EXIT_FAILURE,
   exitCodeFor,
   renderErrorJson,
   renderErrorPretty,
@@ -195,10 +193,6 @@ export async function main(argv: readonly string[], options: MainOptions = {}): 
       options,
       flags0Json(parsed),
     )
-  }
-
-  if (!doc.implemented) {
-    return emit(options, notImplementedMessage(doc), EXIT_FAILURE)
   }
 
   let flags: ResolvedFlags

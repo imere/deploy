@@ -16,8 +16,6 @@ export interface CommandDoc {
   readonly related: readonly string[]
   /** 这个命令最可能撞到的错误 → 怎么修 */
   readonly commonErrors: readonly (readonly [string, string])[]
-  /** 后续回合才实现 */
-  readonly implemented: boolean
 }
 
 const GLOBAL_FLAGS: readonly (readonly [string, string])[] = [
@@ -61,7 +59,6 @@ export const COMMANDS: readonly CommandDoc[] = [
       ['DP.PATH.NOT_WRITABLE', '没有可写的发布根；用 release.root 显式指定，或让运维授权候选之一'],
       ['DP.SOURCE.EMPTY', 'source 枚举结果为空；先构建，或检查 include/exclude'],
     ],
-    implemented: true,
   },
   {
     name: 'facts',
@@ -80,7 +77,6 @@ export const COMMANDS: readonly CommandDoc[] = [
       ['DP.SSH.TOOL_MISSING', '本地没有 ssh 可执行文件；装 OpenSSH 或改用本地目标'],
       ['DP.SSH.HOST_KEY_UNKNOWN', '主机密钥不认识；先手工 ssh 一次确认指纹，或显式配 knownHosts'],
     ],
-    implemented: true,
   },
   {
     name: 'schema',
@@ -90,7 +86,6 @@ export const COMMANDS: readonly CommandDoc[] = [
     examples: ['dp schema', 'dp schema --out ./deploy.schema.json'],
     related: ['plan'],
     commonErrors: [['DP.PATH.NOT_WRITABLE', '--out 的目录不存在或不可写；先创建目录']],
-    implemented: true,
   },
   {
     name: 'help',
@@ -100,7 +95,6 @@ export const COMMANDS: readonly CommandDoc[] = [
     examples: ['dp help', 'dp help plan', 'dp plan --help'],
     related: ['plan', 'facts', 'schema'],
     commonErrors: [],
-    implemented: true,
   },
   {
     name: 'apply',
@@ -124,7 +118,6 @@ export const COMMANDS: readonly CommandDoc[] = [
       ['DP.PATH.NOT_WRITABLE', '发布根建不出来；用 release.root 显式指定一个可写目录'],
       ['DP.VERIFY.FAILED', '健康检查未通过，**已自动回退**到上一版；坏版本留在 releases/<id> 待查。退出码 2'],
     ],
-    implemented: true,
   },
   {
     name: 'deploy',
@@ -146,7 +139,6 @@ export const COMMANDS: readonly CommandDoc[] = [
       ['DP.CONFIG.INVALID', '探测到 nginx：零配置不造 server 块（那等于编造你的意图）；用 --config 写 target.nginx，或把 nginx.conf exclude 出源'],
       ['DP.CONFIG.INVALID', '配置里有多个环境却没给 --env；dp 不默认挑第一个 —— 那正是把预发发到生产的入口'],
     ],
-    implemented: true,
   },
   {
     name: 'rollback',
@@ -168,7 +160,6 @@ export const COMMANDS: readonly CommandDoc[] = [
       ['DP.VERIFY.FAILED', '没有可回退的版本（首次部署 / 只有一个版本）；先跑 dp apply 部署出历史'],
       ['DP.VERIFY.FAILED', '已切回但新 current 健康检查不过 → needsHealing=true、退出码 2，需要人工介入'],
     ],
-    implemented: true,
   },
   {
     name: 'verify',
@@ -190,7 +181,6 @@ export const COMMANDS: readonly CommandDoc[] = [
       ['DP.VERIFY.FAILED', '健康检查未通过；退出码 2。`--json` 的 error.code 才是可靠信号（退出码 2 也用于用法错）'],
       ['DP.VERIFY.FAILED', '尚未部署过，没有可校验的 current；先跑 dp apply'],
     ],
-    implemented: true,
   },
   {
     name: 'status',
@@ -212,7 +202,6 @@ export const COMMANDS: readonly CommandDoc[] = [
       ['DP.SSH.CONNECT_FAILED', '连不上目标机；确认网络 / 凭据 / 端口，或改用 --host 本地'],
       ['DP.PATH.NOT_WRITABLE', '发布根算不出来；用 release.root 显式指定，或让运维授权候选之一'],
     ],
-    implemented: true,
   },
 ]
 
@@ -281,8 +270,7 @@ function renderTable(rows: readonly (readonly [string, string])[]): string[] {
  * @returns 完整帮助文本，含退出码表与配置发现优先级
  */
 export function rootHelp(version: string): string {
-  const done = COMMANDS.filter((c) => c.implemented)
-  const todo = COMMANDS.filter((c) => !c.implemented)
+  const done = COMMANDS
   return [
     `dp ${version} —— deploy-kit 命令行。把目录/文件通过 rsync / scp / ssh 部署到本地或远端；`,
     '发布根由实证能力推导，切换 current 走 rename 保证原子。',
@@ -290,11 +278,8 @@ export function rootHelp(version: string): string {
     '用法',
     '  dp <命令> [选项]',
     '',
-    '命令（已实现）',
+    '命令',
     ...renderTable(done.map((c) => [c.name, c.summary] as const)),
-    '',
-    '命令（后续回合接入，现在会明确拒绝而不是静默什么都不做）',
-    ...renderTable(todo.map((c) => [c.name, c.summary] as const)),
     '',
     '全局开关',
     ...renderTable(GLOBAL_FLAGS),
@@ -362,19 +347,4 @@ export function unknownCommandMessage(name: string): string {
   lines.push('  可用命令：' + COMMAND_NAMES.join(' | '))
   lines.push('  用 `dp --help` 看全部说明')
   return lines.join('\n')
-}
-
-/**
- * 已登记但未接入的命令的提示。
- *
- * @param doc `implemented === false` 的那条命令记录
- * @returns 说明性文本；明确告知不会静默成功
- */
-export function notImplementedMessage(doc: CommandDoc): string {
-  return [
-    `dp ${doc.name} 还没接入（后续回合实现）。`,
-    '本回合这条命令会打印这句并以退出码 1 结束 —— 不会静默什么都不做，',
-    '因为「静默成功」是自动化里最难查的一类故障。',
-    '现在能做的：dp plan --host <id> —— 先看清将要执行哪些步骤。',
-  ].join('\n')
 }

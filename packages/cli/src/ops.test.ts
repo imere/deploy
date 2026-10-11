@@ -624,11 +624,10 @@ describe('ops · --json 纯度与扇出', () => {
 // ------------------------------------------------------------
 
 describe('ops · help', () => {
-  it('三条命令都是 implemented: true', () => {
+  it('三条命令在 help 表里都有完整条目', () => {
     for (const name of ['status', 'verify', 'rollback']) {
       const doc = COMMANDS.find((c) => c.name === name)
       assert.ok(doc !== undefined, `help 表里应有 ${name}`)
-      assert.equal(doc.implemented, true, `${name} 仍标着未实现`)
       assert.ok(!/后续回合|待实现/.test(doc.summary), `${name} 的 summary 还留着占位字样`)
       assert.ok(doc.flags.some(([f]) => f.includes('--json')), `${name} 的 flags 必须含 --json`)
     }
@@ -642,13 +641,12 @@ describe('ops · help', () => {
     assert.match(text, /用法/)
   })
 
-  it('根帮助把三条命令列在「已实现」里', async () => {
+  it('根帮助把三条命令都列出来', async () => {
     const out: string[] = []
     await main(['--help'], { write: (t) => out.push(t), writeErr: () => {}, env: {} })
     const text = out.join('')
-    const doneSection = text.split('命令（后续回合')[0] ?? ''
     for (const name of ['status', 'verify', 'rollback']) {
-      assert.match(doneSection, new RegExp(name), `${name} 应在已实现区`)
+      assert.match(text, new RegExp(name), `${name} 应出现在命令表里`)
     }
   })
 })

@@ -6,7 +6,6 @@ import {
   commandHelp,
   editDistance,
   findCommand,
-  notImplementedMessage,
   rootHelp,
   suggestCommand,
   unknownCommandMessage,
@@ -24,7 +23,7 @@ describe('help · 每个命令都够用', () => {
   })
 
   it('每个已实现命令都有：用途 / 用法行 / 开关 / ≥2 例子 / 相关命令', () => {
-    for (const doc of COMMANDS.filter((c) => c.implemented)) {
+    for (const doc of COMMANDS) {
       const text = commandHelp(doc)
       assert.ok(doc.summary.length > 0, `${doc.name} 缺 summary`)
       assert.match(text, /用法/, `${doc.name} 缺用法`)
@@ -50,11 +49,9 @@ describe('help · 每个命令都够用', () => {
     }
   })
 
-  it('未实现的命令也给出可执行的下一步，而不是空帮助', () => {
-    for (const doc of COMMANDS.filter((c) => !c.implemented)) {
-      const text = notImplementedMessage(doc)
-      assert.match(text, /后续回合/, doc.name)
-      assert.match(text, /dp plan/, `${doc.name} 应指向 plan`)
+  it('命令表里没有占位条目（登记了就必须是能跑的）', () => {
+    for (const doc of COMMANDS) {
+      assert.ok(!/后续回合|待实现|TODO/.test(doc.summary), `${doc.name} 的 summary 是占位文案`)
     }
   })
 })
@@ -90,7 +87,7 @@ describe('help · 未找到命令', () => {
   })
 
   it('findCommand', () => {
-    assert.equal(findCommand('plan')?.implemented, true)
+    assert.equal(findCommand('plan')?.name, 'plan')
     assert.equal(findCommand('nope'), undefined)
   })
 })
