@@ -5,6 +5,8 @@ import { buildRshArgv, rshValueForRsync } from './rsh.js'
 import type { TransferRequest, TransferResult, SpawnImpl } from './types.js'
 import type { RshOptions } from './rsh.js'
 
+const FULL_TRANSFER = 'tar-ssh 是全量传输，没有增量：每次都会重传全部内容'
+
 /**
  * tar-ssh 两侧的构造输入。
  */
@@ -96,6 +98,22 @@ export async function runTarSsh(
   pair: TarArgvPair,
   options: RunTarSshOptions = {},
 ): Promise<TransferResult> {
+  // tar-ssh 没有服务端干跑：真演练就是**不起进程**。以前这里照跑一遍、只把
+  // 条目数报成 0 —— 那等于声称验证过远端，而远端一个字节都没被碰过。
+  if (options.dryRun === true) {
+    return {
+      kind: 'tar-ssh',
+      filesTransferred: 0,
+      command: [...pair.local],
+      exitCode: 0,
+      warnings: [
+        FULL_TRANSFER,
+        'dry-run 没有起 tar：远端目录能否解包、磁盘是否够、链路是否通，这次一概没被验证',
+      ],
+      dryRun: true,
+    }
+  }
+
   const timeoutMs = options.timeoutMs
   const common = {
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
@@ -131,19 +149,16 @@ export async function runTarSsh(
     })
   }
 
-  const warnings: string[] = [
-    'tar-ssh 是全量传输，没有增量：每次都会重传全部内容',
-  ]
+  const warnings: string[] = [FULL_TRANSFER]
   if (req_deleteUnsupported(pair)) warnings.push('tar-ssh 不删除目标上多余的文件')
 
   return {
     kind: 'tar-ssh',
     // tar 的 stdout 是二进制归档流，**不能**像 rsync 那样从输出里统计文件数；
-    filesTransferred: options.dryRun === true ? 0 : countEntries(pair),
+    filesTransferred: countEntries(pair),
     command: [...pair.local],
     exitCode: 0,
     warnings,
-    ...(options.dryRun === true ? { dryRun: true } : {}),
   }
 }
 

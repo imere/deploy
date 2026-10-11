@@ -1,9 +1,13 @@
 import { DpError } from '@dp/ports'
 import { quoteArg, wrapCommand } from '@dp/ssh'
 import { runProcess, summarizeFailure } from './proc.js'
+import { sshOptionsForCopyTool } from './copy-opts.js'
 import { buildRshArgv } from './rsh.js'
 import type { TransferRequest, TransferResult, SpawnImpl } from './types.js'
 import type { RshOptions } from './rsh.js'
+
+const LAST_RESORT = 'scp 是最后手段：不走增量，也无法删除目标上多余的文件'
+const NO_VERIFY = 'dry-run 没有起 scp：远端是否可写、磁盘是否够、链路是否通，这次一概没被验证'
 
 /**
  * scp 侧构造 argv 的输入。
@@ -38,9 +42,15 @@ export function buildScpArgv(req: TransferRequest, options: ScpArgvOptions): rea
     })
   }
 
-  const argv: string[] = [options.scpPath, '-r', '-p', '-O', ...buildRshArgv(options.rsh).slice(1)]
-  // scp 没有 `--dry-run` 这个选项，干跑就是 `-n`。
-  if (req.dryRun === true) argv.push('-n')
+  // 选项片段来自 ssh，但 scp 的 -p 是「保留时间戳」、端口是大写 -P —— 照搬会把
+  // 端口号当成源文件名。改写见 copy-opts.ts。
+  const argv: string[] = [
+    options.scpPath,
+    '-r',
+    '-p',
+    '-O',
+    ...sshOptionsForCopyTool(buildRshArgv(options.rsh).slice(1)),
+  ]
 
   // 提权：scp 没有 --rsync-path，对应机制是给 ssh 的 RemoteCommand 之外的
   if (req.become !== undefined && req.become.type !== 'none') {
@@ -80,6 +90,19 @@ export async function runScp(
   argv: readonly string[],
   options: RunScpOptions = {},
 ): Promise<TransferResult> {
+  // scp 没有服务端干跑。真演练就是不起进程 —— 塞一个它不认识的选项只会让
+  // 「干跑」变成一次必失败的真跑。
+  if (options.dryRun === true) {
+    return {
+      kind: 'scp',
+      filesTransferred: 0,
+      command: argv,
+      exitCode: 0,
+      warnings: [LAST_RESORT, NO_VERIFY],
+      dryRun: true,
+    }
+  }
+
   const result = await runProcess(argv, {
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     ...(options.spawnImpl !== undefined ? { spawnImpl: options.spawnImpl } : {}),
@@ -99,18 +122,17 @@ export async function runScp(
       })
     }
     throw new DpError('DP.VERIFY.FAILED', `scp 失败（exit ${result.code}）：${detail}`, {
-      hint: '带 --dry-run 重跑；scp 无增量与删除能力，考虑改用 rsync-ssh',
+      hint: 'scp 无增量与删除能力，考虑改用 rsync-ssh —— 它带服务端 --dry-run，能真的验一遍',
     })
   }
 
   return {
     kind: 'scp',
     // scp 成功时不输出任何机器可读统计：从 argv 反推条目数是**猜**，
-    filesTransferred: options.dryRun === true ? 0 : (options.expectedEntries ?? 0),
+    filesTransferred: options.expectedEntries ?? 0,
     command: argv,
     exitCode: result.code,
-    warnings: ['scp 是最后手段：不走增量，也无法删除目标上多余的文件'],
-    ...(options.dryRun === true ? { dryRun: true } : {}),
+    warnings: [LAST_RESORT],
   }
 }
 

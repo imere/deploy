@@ -5,6 +5,7 @@ import { chooseTransport } from './availability.js'
 import { copyLocal } from './local-copy.js'
 import { buildRsyncArgv, runRsync } from './rsync.js'
 import { buildScpArgv, runScp } from './scp.js'
+import { buildSftpPlan, runSftp } from './sftp.js'
 import { buildTarArgv, runTarSsh } from './tar-ssh.js'
 import type { RshOptions } from './rsh.js'
 import type * as T from './types.js'
@@ -34,6 +35,7 @@ export {
   type RsyncStats,
 } from './rsync.js'
 export { buildScpArgv, runScp, type ScpArgvOptions } from './scp.js'
+export { buildSftpPlan, runSftp, type SftpArgvOptions, type SftpPlan, type RunSftpOptions } from './sftp.js'
 export { buildTarArgv, remoteExtractCommand, runTarSsh, type TarArgvOptions, type TarArgvPair } from './tar-ssh.js'
 export { copyLocal } from './local-copy.js'
 export { runProcess, realSpawn, DEFAULT_TIMEOUT_MS, summarizeFailure, type RunProcessOptions } from './proc.js'
@@ -48,7 +50,8 @@ const DEFAULT_KNOWN_HOSTS: KnownHostsMode = 'strict'
  * @param deps 依赖与偏好。本地目标需注入 localRunner；远端需给 remoteFacts
  * @returns 传输结果，`command` 为实际执行的 argv，供日志与报告使用
  * @throws DpError DP.CONFIG.INVALID（缺 Facts / 缺 localRunner / 本地没有 ssh）、
- * DP.SSH.TOOL_MISSING、DP.PREF.UNSUPPORTED（偏好不可用，或选到尚未接入执行的 sftp）
+ * DP.SSH.TOOL_MISSING、DP.PREF.UNSUPPORTED（偏好不可用，或该方式不支持请求里
+ * 的 --delete / 远端提权）、DP.SOURCE.EMPTY（清单为空）
  */
 export async function transfer(
   req: TransferRequest,
@@ -204,11 +207,21 @@ async function runRemote(
         expectedEntries: req.entries.length,
       })
     }
-    // sftp 与 local-copy 的执行分支留给下一回合：sftp 需要 sftp 子系统通道，
-    case 'sftp':
-      throw new DpError('DP.PREF.UNSUPPORTED', 'sftp 传输尚未接入执行层', {
-        hint: 'sftp 走 sshd 子系统，通道在 @dp/ssh 的 Runner 上而不是子进程 argv。下一回合接入；现在请显式选 rsync-ssh 或 tar-ssh',
+    case 'sftp': {
+      const sftpPath = localFacts.tools.sftp ?? null
+      if (sftpPath === null) {
+        throw new DpError('DP.SSH.TOOL_MISSING', '本地没有 sftp（协商结论已过期）', {
+          hint: '重新探测 Facts 后再协商；不要在这里偷偷换成 scp —— 那会让 plan 与实际执行不一致',
+        })
+      }
+      const plan = buildSftpPlan(req, { sftpPath, rsh, remoteTarget })
+      log.info('transfer.sftp', { entries: req.entries.length })
+      return runSftp(plan, {
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        ...(spawnImpl !== undefined ? { spawnImpl } : {}),
+        ...(req.dryRun !== undefined ? { dryRun: req.dryRun } : {}),
       })
+    }
     case 'local-copy':
       throw new DpError('DP.CONFIG.INVALID', 'local-copy 只适用于 kind=local', { hint: '检查调用方传错了 kind' })
   }

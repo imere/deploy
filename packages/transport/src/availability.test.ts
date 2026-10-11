@@ -44,9 +44,21 @@ describe('chooseTransport · remote 缺省链', () => {
   })
 
   test('两端都没 rsync 也没 tar，但 sftp 可用 → sftp', () => {
-    const bare = makeFacts({ host: 'bare', tools: { ssh: '/usr/bin/ssh' } })
+    // sftp 成立的条件最松：服务端是对端 sshd 的子系统，本地只缺不了 sftp 客户端
+    const bare = makeFacts({ host: 'bare', tools: { ssh: '/usr/bin/ssh', sftp: '/usr/bin/sftp' } })
     const choice = chooseTransport({ local: bare, remote: bare, kind: 'remote' })
     assert.equal(choice.kind, 'sftp')
+  })
+
+  test('本地没有 sftp 客户端 → sftp 被拒并点名本地，scp 不再被"sftp 可用"挡住', () => {
+    const noSftp = makeFacts({ host: 'l', tools: { ssh: '/usr/bin/ssh', scp: '/usr/bin/scp' } })
+    const remote = makeFacts({ host: 'r', tools: { ssh: '/usr/sbin/ssh', scp: '/usr/bin/scp' } })
+    const choice = chooseTransport({ local: noSftp, remote, kind: 'remote' })
+    const sftp = choice.rejected.find((r) => r.kind === 'sftp')
+    assert.ok(sftp, 'sftp 必须出现在 rejected 里')
+    assert.match(sftp.reason, /本地没有 sftp/)
+    // 关键：sftp 不成立时，scp 不该再拿"sftp 可用"当拒理由 —— 那两条会互相矛盾
+    assert.equal(choice.kind, 'scp')
   })
 })
 

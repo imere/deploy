@@ -39,6 +39,9 @@ function evaluate(
   const remoteTar = tool(input.remote, 'tar')
   const localScp = tool(input.local, 'scp')
   const remoteScp = tool(input.remote, 'scp')
+  // sftp 的服务端是 sshd 的子系统，但**客户端**得在本地：批量脚本走 `sftp -b -`
+  const localSftp = tool(input.local, 'sftp')
+  const sftpUsable = input.sftpAvailable !== false && localSftp !== null
 
   switch (kind) {
     case 'rsync-ssh': {
@@ -81,11 +84,18 @@ function evaluate(
       if (input.sftpAvailable === false) {
         return { kind, ok: false, reason: 'sftp 子系统被显式禁用' }
       }
-      return { kind, ok: true, reason: 'sftp 走 sshd 的子系统协议，只需要 ssh 通道本身' }
+      if (localSftp === null) {
+        return {
+          kind,
+          ok: false,
+          reason: '本地没有 sftp 客户端（子系统跑在对端 sshd 上，但发批量脚本的客户端得在本地）',
+        }
+      }
+      return { kind, ok: true, reason: 'sftp 走 sshd 的子系统协议，本地有 sftp 客户端即可' }
     }
 
     case 'scp': {
-      if (input.sftpAvailable !== false) {
+      if (sftpUsable) {
         return {
           kind,
           ok: false,
@@ -191,7 +201,8 @@ function buildUnusableMessage(
 }
 
 function buildSuggestion(input: ChooseTransportInput): string {
-  const localMissing = (['rsync', 'tar', 'scp'] as const).filter((t) => tool(input.local, t) === null)
+  // sftp 只查本地：远端那一侧是 sshd 的子系统，facts.tools 表达不了它
+  const localMissing = (['rsync', 'tar', 'sftp', 'scp'] as const).filter((t) => tool(input.local, t) === null)
   const remoteMissing = (['rsync', 'tar', 'scp'] as const).filter((t) => tool(input.remote, t) === null)
   const out: string[] = []
   if (localMissing.length > 0) {

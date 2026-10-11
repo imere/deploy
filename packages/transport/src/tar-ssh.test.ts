@@ -172,6 +172,19 @@ describe('runTarSsh', () => {
     assert.equal(fake.count(), 2)
   })
 
+  test('dry-run 两端都不起：tar-ssh 没有服务端干跑，跑一遍再报 0 就是谎报', async () => {
+    const fake = fakeSpawn({ exitCode: 0 })
+    const result = await runTarSsh(buildTarArgv(req, opts), {
+      spawnImpl: fake.impl,
+      timeoutMs: 5000,
+      dryRun: true,
+    })
+    assert.equal(fake.count(), 0, 'dry-run 不许起 tar / ssh')
+    assert.equal(result.filesTransferred, 0)
+    assert.equal(result.dryRun, true)
+    assert.ok(result.warnings.some((w) => w.includes('没被验证')))
+  })
+
   test('超时 → DP.TIMEOUT.EXEC（两端都有 timeout）', async () => {
     const fake = fakeSpawn({ autoClose: false })
     await assert.rejects(

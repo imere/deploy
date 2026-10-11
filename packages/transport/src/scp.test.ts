@@ -41,6 +41,19 @@ describe('buildScpArgv', () => {
     assert.ok(!argv.some((a) => a.includes(';') || a.includes('&&') || a.includes('|') || a.includes('`')))
   })
 
+  test('端口是大写 -P，且与自己的 -p（保留时间戳）不冲突', () => {
+    const argv = buildScpArgv(req, { ...opts, rsh: { ...opts.rsh, port: 2222 } })
+    assert.ok(argv.includes('-p'), '-p 是保留时间戳，照旧要带')
+    assert.ok(argv.includes('-P'), 'ssh 的 -p 端口必须改写成 -P')
+    // 照搬 ssh 的 `-p 2222`：scp 的 -p 不带参数，2222 会被当成一个源文件名
+    assert.equal(argv[argv.indexOf('-P') + 1], '2222')
+  })
+
+  test('不带 -T：那是「关掉远端文件名校验」，我们没有理由关它', () => {
+    const argv = buildScpArgv(req, opts)
+    assert.ok(!argv.includes('-T'))
+  })
+
   test('远端目标 path 走 quoteArg', () => {
     const argv = buildScpArgv({ ...req, remoteRoot: '/srv/my app' }, opts)
     assert.equal(argv[argv.length - 1], "dp-user@dp-target:'/srv/my app/'")
@@ -84,6 +97,19 @@ describe('runScp', () => {
     const result = await runScp(['/usr/bin/scp', '-r'], { spawnImpl: fake.impl, timeoutMs: 5000 })
     assert.equal(result.kind, 'scp')
     assert.ok(result.warnings.some((w) => w.includes('最后手段')))
+  })
+
+  test('dry-run 不起进程：scp 没有服务端干跑，塞一个它不认识的选项等于必失败的真跑', async () => {
+    const fake = fakeSpawn({ exitCode: 0 })
+    const result = await runScp(['/usr/bin/scp', '-r'], {
+      spawnImpl: fake.impl,
+      timeoutMs: 5000,
+      dryRun: true,
+    })
+    assert.equal(fake.count(), 0)
+    assert.equal(result.filesTransferred, 0)
+    assert.equal(result.dryRun, true)
+    assert.ok(result.warnings.some((w) => w.includes('没被验证')))
   })
 
   test('255 → DP.SSH.CONNECT_FAILED', async () => {
