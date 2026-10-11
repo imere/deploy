@@ -49,7 +49,7 @@ describe('output · 退出码映射（纯函数）', () => {
   })
 
   it('3 = 配置错', () => {
-    for (const code of ['DP.CONFIG.INVALID', 'DP.SOURCE.EMPTY', 'DP.PATH.RESERVED_NAME', 'DP.LAYOUT.UNSUPPORTED'] as const) {
+    for (const code of ['DP.CONFIG.INVALID', 'DP.SOURCE.EMPTY', 'DP.PATH.RESERVED_NAME', 'DP.LAYOUT.MISMATCH'] as const) {
       assert.equal(exitCodeFor(new DpError(code, 'x')), EXIT_CONFIG, code)
     }
   })

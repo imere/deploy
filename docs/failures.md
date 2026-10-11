@@ -44,10 +44,8 @@
 | `DP.PATH.RESERVED_NAME` | 源校验 | ✅ | abort（Windows 保留名，如 `NUL` / `CON`） | `@dp/core` |
 | `DP.PATH.TOO_LONG` | 源校验 | ✅ | abort（超出平台路径上限，传到一半才炸更贵） | `@dp/core` |
 | `DP.PATH.ILLEGAL_CHAR` | 源校验 | ✅ | abort（**零副作用**：此时还没传第一个字节） | `@dp/core` / `@dp/ssh` |
-| `DP.PATH.WSL_MOUNT` | 源校验 | ✅ | abort（WSL 挂载点上的文件行为不一致） | `@dp/core` |
 | `DP.PATH.NOT_WRITABLE` | 发布根 | ❌ | abort（**实证写入**得知，不靠 uid 推断）；列出全部候选让用户授权其一 | `@dp/core` |
 | `DP.LAYOUT.MISMATCH` | 布局推导 | ✅ | abort（显式指定的 layout 与实测能力不符） | `@dp/core` |
-| `DP.LAYOUT.UNSUPPORTED` | 布局推导 | ✅ | abort（该平台没有可用布局） | `@dp/core` |
 | `DP.PREF.UNSUPPORTED` | 传输协商 | ✅ | abort（**不静默降级**：偏好链里第一项不可用就直说，换一个不告之等于暗改行为） | `@dp/transport` |
 | `DP.LINK.UNAVAILABLE` | 激活 | ❌ | abort（软链不可用，原子切换无从谈起） | `@dp/core` |
 | `DP.SOURCE.EMPTY` | 源枚举 | ✅ | abort（**在连目标机之前**就知道，此时零代价） | `@dp/transport` / `@dp/cli` |

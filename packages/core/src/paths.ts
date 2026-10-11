@@ -98,6 +98,12 @@ export interface PickReleaseRootInput {
   readonly name: string
   /** 配置里显式写的 `release.root`；不可写时报错而不静默换一个 */
   readonly explicitRoot?: string
+  /**
+   * 布局是不是用户点名的（写死 `system` / `user` 而不是 `auto`）。
+   * 它决定「一个候选都不可写」报哪个码：点名的布局落不了地是 `DP.LAYOUT.MISMATCH`，
+   * 推导出来的只是「这台机器没有可写目录」。
+   */
+  readonly layoutExplicit?: boolean
 }
 
 /**
@@ -143,11 +149,22 @@ export function pickReleaseRoot(input: PickReleaseRootInput): ReleaseRootChoice 
 
   const hit = candidates.find((c) => c.writable)
   if (hit === undefined) {
+    const tried = `候选：${candidates.map((c) => c.path).join(' | ')}`
+    if (input.layoutExplicit === true) {
+      throw new DpError(
+        'DP.LAYOUT.MISMATCH',
+        `点名了 ${layout} 布局，但它的 ${candidates.length} 个候选实测都不可写`,
+        {
+          path: 'hosts.*.layout',
+          hint: `${tried}。改成 layout: auto 让 dp 按实测能力挑，或让运维授权其中一个目录`,
+        },
+      )
+    }
     throw new DpError(
       'DP.PATH.NOT_WRITABLE',
       `没有可写的发布目录（已试 ${candidates.length} 个候选）`,
       {
-        hint: `候选：${candidates.map((c) => c.path).join(' | ')}。可显式指定 release.root，或让运维授权其中一个目录`,
+        hint: `${tried}。可显式指定 release.root，或让运维授权其中一个目录`,
       },
     )
   }

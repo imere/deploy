@@ -158,6 +158,27 @@ test('pickReleaseRoot: 全部不可写 → 报错且 hint 列出候选', () => {
   }
 })
 
+test('pickReleaseRoot: 布局是用户点名的 → 一个候选都不可写时报 LAYOUT.MISMATCH', () => {
+  // 差别不是码本身，是它能说清「该改什么」：点名 system 却落不了地，
+  // 用户要动的是 layout（或授权），而不是去找一个不存在的目录
+  assert.throws(
+    () =>
+      pickReleaseRoot({
+        facts: makeFacts({ platform: 'linux' }),
+        layout: 'system',
+        name: 'web',
+        layoutExplicit: true,
+      }),
+    (e: unknown) => {
+      assert.ok(e instanceof DpError)
+      assert.equal(e.code, 'DP.LAYOUT.MISMATCH')
+      assert.equal(e.path, 'hosts.*.layout')
+      assert.match(e.hint ?? '', /layout: auto/)
+      return true
+    },
+  )
+})
+
 // ------------------------------------------------------------
 // 跨平台路径校验：这几条不需连目标机就能查
 // ------------------------------------------------------------

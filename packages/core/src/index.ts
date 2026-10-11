@@ -52,8 +52,8 @@ export function makePlan(input: PlanInput): Plan {
   checkSourcePaths(input.sourceEntries, facts.platform)
 
   // ② 布局推导
-  const layout: Layout =
-    input.layout !== undefined && input.layout !== 'auto' ? input.layout : deriveLayout(facts)
+  const layoutExplicit = input.layout !== undefined && input.layout !== 'auto'
+  const layout: Layout = layoutExplicit ? input.layout! : deriveLayout(facts)
 
   // ③ 发布目录推导
   const choice = pickReleaseRoot({
@@ -61,6 +61,7 @@ export function makePlan(input: PlanInput): Plan {
     layout,
     name,
     explicitRoot: project.release?.root,
+    ...(layoutExplicit ? { layoutExplicit: true } : {}),
   })
 
   // ④ 已知的能力缺口，提前告知而不是等到运行时

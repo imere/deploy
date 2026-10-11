@@ -49,10 +49,8 @@ export function exitCodeFor(err: unknown): number {
       case 'DP.PATH.ILLEGAL_CHAR':
       case 'DP.PATH.TOO_LONG':
       case 'DP.PATH.CASE_COLLISION':
-      case 'DP.PATH.WSL_MOUNT':
       case 'DP.PATH.NOT_WRITABLE':
       case 'DP.LAYOUT.MISMATCH':
-      case 'DP.LAYOUT.UNSUPPORTED':
         return EXIT_CONFIG
       case 'DP.SSH.TOOL_MISSING':
       case 'DP.SSH.DRIVER_UNAVAILABLE':
