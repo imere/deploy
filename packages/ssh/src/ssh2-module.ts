@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import { isSea } from 'node:sea'
 import { DpError } from '@dp/ports'
 import type { AuthConfig } from './driver.js'
 
@@ -78,7 +79,9 @@ export function loadSsh2(force = false): Ssh2Load {
     cached = {
       ok: false,
       reason,
-      hint: '它是可选运行时依赖：`pnpm add -D ssh2`。但注意 ssh2 **不支持任何抗量子 KEX**（实测），若 crypto.kexPolicy=pq-required 只能走 native-ssh',
+      hint: isSea()
+        ? '当前跑的是单文件产物，里面只有本仓自己的包，可选依赖装不进去 —— 用产物时只能走 native-ssh（它同时是唯一能抗量子的驱动）'
+        : '它是可选运行时依赖：`pnpm add -D ssh2`。但注意 ssh2 **不支持任何抗量子 KEX**（实测），若 crypto.kexPolicy=pq-required 只能走 native-ssh',
     }
   }
   return cached

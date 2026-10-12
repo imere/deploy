@@ -13,7 +13,14 @@
  */
 import { createHash } from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -40,7 +47,42 @@ function findSeaFuse(exePath) {
 
 function argValue(name) {
   const at = process.argv.indexOf(name)
-  return at === -1 ? undefined : process.argv[at + 1]
+  if (at === -1) return undefined
+  const value = process.argv[at + 1]
+  // 写了选项名却没给值：用户以为自己指定了平台，按当前平台默默产出就是骗人
+  if (value === undefined || value.startsWith('--')) {
+    throw new Error(`${name} 缺值：要写 ${name} <platform>-<arch>`)
+  }
+  return value
+}
+
+/**
+ * 自检：只生成文件不算构建成功，跑不起来就是坏产物。
+ *
+ * 跑两条而不是一条：`--version` 只证明「注入成功 + 资源能解 + ESM 能加载」，
+ * `--help` 才会把全部包都 import 一遍 —— 少一条就漏掉「入口起来了、包加载崩了」。
+ */
+function selfCheck(exe, VERSION) {
+  for (const argv of [['--version'], ['--help']]) {
+    const label = argv.join(' ')
+    const run = spawnSync(exe, argv, { encoding: 'utf8', timeout: 60_000 })
+    if (run.error !== undefined) {
+      // 起不了子进程不是产物的错，但也绝不能当成自检通过 —— 那等于把一次没做的
+      // 验证记成已验证
+      return { ok: false, why: `${label} 起不了子进程：${run.error.message}（未验证）` }
+    }
+    if (run.status !== 0) {
+      return { ok: false, why: `${label} 退出码 ${run.status}，stderr=${run.stderr ?? ''}` }
+    }
+    const out = (run.stdout ?? '').trim()
+    if (out === '') return { ok: false, why: `${label} 没有输出` }
+    if (argv[0] === '--version') {
+      // 严格相等而不是包含：差一个字符的脏输出也得算失败
+      if (out !== VERSION) return { ok: false, why: `--version 输出 ${JSON.stringify(out)}，期望 ${VERSION}` }
+      return { ok: true, version: out }
+    }
+  }
+  return { ok: true, version: VERSION }
 }
 
 async function collect(dir) {
@@ -135,23 +177,15 @@ async function main() {
     sentinelFuse: findSeaFuse(exe),
   })
 
-  // 自检：只生成文件不算构建成功，跑不起来就是坏产物
-  const run = spawnSync(exe, ['--version'], { encoding: 'utf8', timeout: 60_000 })
-  if (run.error !== undefined) {
-    // 起不了子进程不是产物的错，但也绝不能当成自检通过 —— 那等于把一次没做的验证
-    // 记成已验证。明确报出来，让人手动跑一次
-    throw new Error(
-      `自检没能执行（起不了子进程：${run.error.message}）。` +
-        `产物已生成但未经验证，请手动跑 ${exe} --version 确认后再交付。`,
-    )
+  const check = selfCheck(exe, VERSION)
+  if (!check.ok) {
+    // 坏产物不能躺在交付目录里等下一次构建把它捡走 —— 改名，现场留在 bin-work
+    const bad = `${exe}.unverified`
+    rmSync(bad, { force: true })
+    renameSync(exe, bad)
+    throw new Error(`自检失败：${check.why}。产物已改名 ${bad}，构建现场在 ${WORK}`)
   }
-  if (run.status !== 0 || !(run.stdout ?? '').includes(VERSION)) {
-    throw new Error(
-      `自检失败：${exe} --version 退出码 ${run.status}，输出 ${JSON.stringify(run.stdout)}` +
-        `，期望含 ${VERSION}。stderr=${run.stderr ?? ''}`,
-    )
-  }
-  process.stdout.write(`✓ ${exe}（${(await stat(exe)).size} 字节）--version → ${run.stdout.trim()}\n`)
+  process.stdout.write(`✓ ${exe}（${(await stat(exe)).size} 字节）--version → ${check.version}\n`)
 }
 
 /** 产物里的入口。它在单文件产物内部运行，读资源、落盘、再把真正的入口 import 进来 */
@@ -173,17 +207,32 @@ const raw = (key) => Buffer.from(getRawAsset(key))
 const manifest = JSON.parse(raw('dp-manifest.json').toString('utf8'))
 const keys = getAssetKeys().filter((k) => k !== 'dp-manifest.json')
 
-// 缓存目录的父目录取不到就用临时目录 —— 只读的家目录不该让整个产物起不来
-const base = (function () {
-  const home = homedir()
-  const candidate = home === '' ? '' : join(home, '.cache', 'dp-sea')
-  try {
-    mkdirSync(candidate, { recursive: true })
-    return candidate
-  } catch {
-    return join(tmpdir(), 'dp-sea')
+// 只读的家目录不该让整个产物起不来：家目录建不出来就退到临时目录；
+// 显式指定了 DP_SEA_CACHE 就不退 —— 指定了还悄悄换地方，等于没指定
+function pickBase() {
+  const override = process.env.DP_SEA_CACHE
+  if (override !== undefined && override !== '') {
+    mkdirSync(override, { recursive: true })
+    return override
   }
-})()
+  const home = homedir()
+  if (home !== '') {
+    try {
+      const candidate = join(home, '.cache', 'dp-sea')
+      mkdirSync(candidate, { recursive: true })
+      return candidate
+    } catch {}
+  }
+  return join(tmpdir(), 'dp-sea')
+}
+
+let base
+try {
+  base = pickBase()
+} catch (err) {
+  process.stderr.write('解包目录建不出来：' + (err && err.message ? err.message : err) + '\\n')
+  process.exit(1)
+}
 
 // 内容定死 → 目录可以用内容哈希做键；标记文件在，说明这一版已经完整落过盘
 const dir = join(base, manifest.hash.slice(0, 16))
@@ -208,16 +257,25 @@ if (!existsSync(join(dir, '.dp-ok'))) {
     )
   }
   // 校验一遍再换正：只写一半就当成可用，是这类自解压最容易出的假成功
-  for (const key of keys) {
-    if (!existsSync(join(staging, key))) {
-      process.stderr.write('落盘不完整，放弃：' + key + '\\n')
-      process.exit(1)
+  try {
+    for (const key of keys) {
+      if (!existsSync(join(staging, key))) {
+        process.stderr.write('落盘不完整，放弃：' + key + '\\n')
+        process.exit(1)
+      }
     }
+    rmSync(dir, { recursive: true, force: true })
+    mkdirSync(dirname(dir), { recursive: true })
+    renameSync(staging, dir)
+    writeFileSync(join(dir, '.dp-ok'), String(Date.now()))
+  } catch (err) {
+    // 家目录与临时目录都不可写时走到这里。不接住的话抛的是一串栈，看不出该改什么
+    process.stderr.write(
+      '解包失败，写不进缓存目录：' + (err && err.message ? err.message : err) +
+        '\\n  想换一个位置就设 DP_SEA_CACHE\\n',
+    )
+    process.exit(1)
   }
-  rmSync(dir, { recursive: true, force: true })
-  mkdirSync(dirname(dir), { recursive: true })
-  renameSync(staging, dir)
-  writeFileSync(join(dir, '.dp-ok'), String(Date.now()))
 }
 
 import(pathToFileURL(join(dir, manifest.entry)).href).catch((err) => {
