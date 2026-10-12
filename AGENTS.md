@@ -41,9 +41,9 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：它依赖的 esbuild 平台�
 测试文件与源码同目录（`src/*.test.ts`），经 `tsc -b` 落到 `build/` 后由 `node --test` 执行；
 覆盖率只统计 `packages/*/build/**`。写新能力时同步补三样：纯函数夹具测试、真实 IO 测试、一条能指导下一步的错误路径断言。
 
-某些环境下 pnpm 的 isolated 布局会静默丢链接，`postinstall` 里的
-`scripts/link-workspace.mjs` 用 junction 补上。**不要为了绕坑改成 hoisted** ——
-那等于丢掉 pnpm 的核心价值。解除条件。
+某些环境下 pnpm 的顶层链接会静默缺失（软链被写成 0 字节普通文件），`postinstall` 的
+`scripts/link-workspace.mjs` 用 junction 补齐 —— workspace 包与根的直接依赖都补。
+**不要为绕这个坑改成 hoisted**：那等于丢掉 pnpm 的核心价值。
 
 ## 目录
 
