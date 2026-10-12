@@ -1,8 +1,9 @@
 import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
 import globals from 'globals'
+import { defineConfig } from 'eslint/config'
 
-export default tseslint.config(
+export default defineConfig([
   {
     ignores: ['**/build/**', '**/dist/**', '**/node_modules/**', '.tmp/**', 'docs/**', 'build/**'],
   },
@@ -40,4 +41,4 @@ export default tseslint.config(
     files: ['**/*.mjs'],
     languageOptions: { ecmaVersion: 'latest', sourceType: 'module' },
   },
-)
+])
