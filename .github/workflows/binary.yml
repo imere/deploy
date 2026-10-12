@@ -1,0 +1,52 @@
+name: 单文件产物
+
+# 各平台各出一次，不做跨构建：单文件产物是把 blob 注进运行时二进制，跨注入就得
+# 先拿到别的平台的运行时再校验完整性 —— 在目标平台上直接构建天然正确，也更快。
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  binary:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install pnpm
+        run: |
+          npm install -g pnpm@12.6.0
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      # 脚本自带自检（真跑一次 --version），跑不起来就是构建失败
+      - name: Package single-file binary
+        run: node scripts/build-binary.mjs
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: dp-${{ matrix.os }}
+          path: build/bin/*
+          if-no-files-found: error

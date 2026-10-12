@@ -26,8 +26,14 @@ pnpm test                 # 构建 + node --test + 覆盖率 → build/coverage/
 pnpm verify               # build + lint + test + 七项静态门禁（verify:gates）
 pnpm run verify:selfcheck # 门禁自检：注入违规看它们是否还拦得住
 pnpm run verify:mutation  # 变异测试（每个变异都要整包跑一遍测试，慢，常规交给 CI 周跑）
+pnpm run build:bin        # 单文件可执行程序 → build/bin/dp-<platform>-<arch>
 pnpm clean                # tsc -b --clean
 ```
+
+`build:bin` 只为**构建机所在平台**产出（把 blob 注进运行时二进制，跨平台注入要先拿到别家的
+运行时再验完整性 —— 不划算）。linux 与 windows 两份由 CI 矩阵各出一次，见 `.github/workflows/binary.yml`。
+产物**不打包、不转模块格式**：编译产物整棵嵌进去，启动落缓存目录后按 ESM 原样加载，
+所以不存在「源码跑得对、产物跑不对」这条分叉。外部工具不进产物。
 
 Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：它依赖的 esbuild 平台二进制在部分环境装不上，
 而 Node 24 内置测试运行器够用且零依赖。
@@ -45,6 +51,8 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：它依赖的 esbuild 平台�
 packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / target-docker / cli 均已接线）
 openspec/        行为契约（source of truth）：specs/<capability>/spec.md
 docs/           只留两份参考：config.md（配置字段）、decisions.md（决策与理由）
+scripts/        构建与七道门禁；build-binary.mjs 出单文件产物，link-workspace.mjs 补 pnpm 链接
+.github/        CI：verify（门禁 + 覆盖率）与 binary（各平台各出一次产物）
 .agents/skills/ 可复用流程（与本项目无关，可整体搬到别处）：
                  subagent-dispatch（派活与验收）
                  mutation-verify（变异验证闭环）

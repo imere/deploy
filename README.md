@@ -78,9 +78,15 @@ pnpm install
 pnpm verify        # build + lint + test + 七项静态门禁
 pnpm run verify:selfcheck   # 门禁自检：注入违规看它们是否还拦得住
 pnpm run verify:mutation    # 变异测试
+pnpm run build:bin # 打成单文件可执行程序 → build/bin/dp-<platform>-<arch>
 ```
 
 Node ≥ 24。产物落各包 `build/`，测试跑的是产物不是源码；lcov 在 `build/coverage/`。
+
+单文件产物：把编译产物嵌进运行时二进制，启动时落到缓存目录再按 ESM 原样加载
+（不打包、不转换模块格式，所以不存在「源码跑得对、产物跑不对」这条分叉）。
+**只为构建机所在平台产出**，别的平台交给 CI 矩阵各出一次。产物自带自检，跑不起来就是构建失败。
+外部工具（ssh / rsync / tar / scp）**不进产物**，仍从执行环境里找，缺了会报缺的是哪个。
 
 七项门禁：`dead-code` → `check-imports` → `check-deps` → `check-tests` → `check-jsdoc` → `check-coverage` → `smoke`。纯逻辑包（`schema` / `core` / `template`）要求覆盖率 100%。
 
@@ -105,3 +111,4 @@ Node ≥ 24。产物落各包 `build/`，测试跑的是产物不是源码；lco
 | `logging` | 日志格式与脱敏 |
 | `privilege-layout` | 权限与布局推导 |
 | `ssh-runner` | 远端执行与主机密钥 |
+| `packaging` | 单文件可执行产物 |

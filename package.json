@@ -16,6 +16,7 @@
     "verify:gates": "node scripts/dead-code.mjs && node scripts/check-imports.mjs && node scripts/check-deps.mjs && node scripts/check-tests.mjs && node scripts/check-jsdoc.mjs && node scripts/check-coverage.mjs && node scripts/smoke.mjs",
     "verify:selfcheck": "node scripts/accept-gates.mjs",
     "verify:mutation": "node scripts/mutate.mjs --package schema --max all --fail-over 5 && node scripts/mutate.mjs --package core --max all --fail-over 5 && node scripts/mutate.mjs --package template --max all --fail-over 5",
+    "build:bin": "pnpm build && node scripts/build-binary.mjs",
     "clean": "tsc -b --clean",
     "postinstall": "node scripts/link-workspace.mjs"
   },
@@ -24,6 +25,7 @@
     "@types/node": "^24.0.0",
     "eslint": "^10.12.0",
     "globals": "^17.13.0",
+    "postject": "1.0.0-alpha.6",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.71.1"
   }
