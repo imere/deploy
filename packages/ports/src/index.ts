@@ -65,6 +65,19 @@ export const CURRENT_LINK_NAME = 'current'
 export const INCOMING_SUFFIX = '.incoming'
 
 /**
+ * `current` 的切换方式。schema 校验它与 static 目标执行它读的是同一组字面量。
+ *
+ * `auto` 先试软链、建不了退到复制；`symlink` 只要软链，建不了就失败；
+ * `copy` 从不建软链 —— 有些挂载点上的软链不被服务进程认，而那要等到线上 404 才看得见。
+ *
+ * 没有 `rename`：`releases/<id>` 改名成 `current` 会把它移出 `releases/`，
+ * prune 与 rollback 随即失去目标 —— 省一次 rename 换不来这个代价。
+ */
+export const SWITCH_STRATEGIES = ['auto', 'symlink', 'copy'] as const
+/** 从 SWITCH_STRATEGIES 派生 */
+export type SwitchStrategy = (typeof SWITCH_STRATEGIES)[number]
+
+/**
  * 布局推导要试写的目录；顺序即优先级，改动等于改落点
  */
 export const POSIX_WRITE_CANDIDATES: readonly string[] = [

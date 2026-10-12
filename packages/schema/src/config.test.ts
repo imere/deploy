@@ -386,6 +386,14 @@ describe('DEFAULT_KEEP', () => {
   it('release 段整个省略时，归一化结果就是它（其余各处从这里取，不再各写一份 5）', () => {
     assert.equal(releaseSchema.parse({}, 'release').keep, DEFAULT_KEEP)
   })
+
+  it('switchStrategy 缺省 auto，且不收没有实现的值', () => {
+    assert.equal(releaseSchema.parse({}, 'release').switchStrategy, 'auto')
+    // rename 会把 releases/<id> 移出 releases/，prune 与 rollback 随即失去目标
+    assert.throws(() => releaseSchema.parse({ switchStrategy: 'rename' }, 'release'), {
+      path: 'release.switchStrategy',
+    })
+  })
 })
 
 describe('hops：多跳配置入口', () => {

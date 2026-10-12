@@ -6,6 +6,7 @@ import {
   type Runner,
   type SourceEntry,
   type Step,
+  type SwitchStrategy,
   type Target,
   type TargetContext,
 } from '@dp/ports'
@@ -14,7 +15,7 @@ import {
 const TMP_SUFFIX = '.dp-tmp'
 
 /**
- * static 目标的全部可配置项 —— 也就是**只有健康检查这一项**。
+ * static 目标的可配置项。
  */
 export interface StaticTargetConfig {
   /** 激活后必须存在的相对路径；缺省校验当前 release 非空 */
@@ -24,6 +25,10 @@ export interface StaticTargetConfig {
      */
     readonly fileExists?: readonly string[]
   }
+  /**
+   * `current` 的切换方式，缺省 `auto`。
+   */
+  readonly switch?: SwitchStrategy
 }
 
 const DIR_MODE = 0o755
@@ -86,15 +91,33 @@ async function writeJson(runner: Runner, file: string, index: ReleaseIndex): Pro
   await runner.writeFile(file, `${JSON.stringify(index, null, 2)}\n`, { mode: INDEX_MODE })
 }
 
+const COPY_WARNING =
+  'current 是复制出来的目录而不是软链：切换不是原子操作，且磁盘占用翻倍'
+
 /**
- * 创建软链，Windows 无特权时自动退化。
+ * 按切换方式把 `current` 指向某个版本。
+ *
+ * @param strategy 见 {@link SwitchStrategy}。`auto` 与 `symlink` 都先试软链（切换是
+ * 一次 rename，原子）；只有 `copy` 从一开始就不碰软链 —— 有些挂载点上的软链不被
+ * 服务进程认，而那要等到线上 404 才看得见
+ * @throws DpError `DP.LINK.UNAVAILABLE` —— `symlink` 下这台机器建不了软链。
+ * 用户点名了软链，静默换成复制等于把「非原子 + 占盘翻倍」偷偷塞给他
  */
-async function linkWithFallback(
+async function switchCurrent(
   runner: Runner,
   linkPath: string,
   target: string,
+  strategy: SwitchStrategy,
   warnings: string[],
 ): Promise<void> {
+  if (strategy === 'copy') {
+    await runner.remove(linkPath)
+    await runner.mkdir(linkPath, { recursive: true })
+    await copyInto(runner, target, linkPath)
+    warnings.push(COPY_WARNING)
+    return
+  }
+
   const tmp = `${linkPath}.dp-tmp`
   try {
     await runner.remove(tmp)
@@ -108,9 +131,13 @@ async function linkWithFallback(
     await runner.symlink(target, linkPath)
   } catch (err) {
     if (!runner.facts.capabilities.canSymlink) {
-      warnings.push(
-        'DP.LINK.UNAVAILABLE: 本地无法创建软链（无开发者模式/管理员权限），current 改为复制目录 —— 这不是原子操作，且磁盘占用翻倍',
-      )
+      if (strategy === 'symlink') {
+        throw new DpError('DP.LINK.UNAVAILABLE', '这台机器上建不了软链，而配置点名了 switch: symlink', {
+          path: 'projects.*.release.switchStrategy',
+          hint: 'Windows 需要开发者模式或管理员权限；容器里可能是挂载选项。改成 switchStrategy: copy 接受非原子切换，或 auto 让 dp 自己退',
+        })
+      }
+      warnings.push(`DP.LINK.UNAVAILABLE: 本地无法创建软链（无开发者模式/管理员权限），${COPY_WARNING}`)
       await runner.remove(linkPath)
       await runner.mkdir(linkPath, { recursive: true })
       await copyInto(runner, target, linkPath)
@@ -214,6 +241,7 @@ export interface DeployInput {
  */
 export async function deploy(input: DeployInput): Promise<DeployResult> {
   const { runner, ctx } = input
+  const strategy: SwitchStrategy = input.config?.switch ?? 'auto'
   const L = layout(ctx.root)
   const warnings: string[] = []
   const tracer: StepTrace[] = []
@@ -268,7 +296,7 @@ export async function deploy(input: DeployInput): Promise<DeployResult> {
   await runner.rename(staging, L.releaseDir(ctx.releaseId))
 
   // ③ activate：原子换向
-  await linkWithFallback(runner, L.currentLink, L.releaseDir(ctx.releaseId), warnings)
+  await switchCurrent(runner, L.currentLink, L.releaseDir(ctx.releaseId), strategy, warnings)
   tracer.push({ id: 'activate', kind: 'activate', ok: true })
 
   // ④ verify：健康检查不过 → 立刻回退，不留半成品状态
@@ -276,7 +304,7 @@ export async function deploy(input: DeployInput): Promise<DeployResult> {
   if (!check.ok) {
     warnings.push(`DP.VERIFY.FAILED: ${check.reason}，已自动回退`)
     if (previous !== undefined) {
-      await linkWithFallback(runner, L.currentLink, L.releaseDir(previous), warnings)
+      await switchCurrent(runner, L.currentLink, L.releaseDir(previous), strategy, warnings)
     }
     throw new DpError('DP.VERIFY.FAILED', `健康检查未通过：${check.reason}`, {
       hint: `本次已回退到 ${previous ?? '（无上一版）'}，坏版本留在 ${L.releaseDir(ctx.releaseId)} 待查`,
@@ -327,11 +355,17 @@ export async function verifyRelease(
  *
  * @param runner 目标机通道
  * @param ctx 发布上下文；只用 root 与 previousReleaseId（后者仅在索引不可用时兜底）
+ * @param strategy 与部署时一样的切换方式。回退走的必须是同一条路，否则「部署用软链、
+ * 回退变成复制」会让 current 的形态在两次操作后不一致
  * @returns 实际生效的版本号，调用方据此更新自己的状态
  * @throws DpError `DP.VERIFY.FAILED` —— 没有可回退的版本。复用已登记的码是因为处置方式
  * 确实是同一类（「先处理这个再重来」），而不是这里漏了新码
  */
-export async function rollback(runner: Runner, ctx: TargetContext): Promise<string> {
+export async function rollback(
+  runner: Runner,
+  ctx: TargetContext,
+  strategy: SwitchStrategy = 'auto',
+): Promise<string> {
   const L = layout(ctx.root)
   const index = await readJson(runner, L.indexFile)
   const target = index.current !== undefined && index.releases.length > 1
@@ -345,7 +379,7 @@ export async function rollback(runner: Runner, ctx: TargetContext): Promise<stri
   }
 
   const warnings: string[] = []
-  await linkWithFallback(runner, L.currentLink, L.releaseDir(target), warnings)
+  await switchCurrent(runner, L.currentLink, L.releaseDir(target), strategy, warnings)
   index.current = target
   await writeJson(runner, L.indexFile, index)
   return target

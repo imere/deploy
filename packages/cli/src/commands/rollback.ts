@@ -17,7 +17,7 @@ import { dockerConfigFor } from '../docker-config.js'
 import { EXIT_FAILURE, EXIT_VERIFY_FAILED, exitCodeFor } from '../output.js'
 import { renderOpsJson, renderOpsPretty, type RollbackResult } from '../output-ops.js'
 import { selectTargets } from '../targets.js'
-import { staticConfigFor } from '../target-config.js'
+import { staticConfigFor, switchStrategyFor } from '../target-config.js'
 import { resolveTarget, targetErrorFields, type ResolvedTargetInput } from '../target-resolve.js'
 import type { ResolvedFlags, RunContext } from '../run.js'
 import type { LoadedConfig } from '../config-file.js'
@@ -142,7 +142,7 @@ async function rollbackOne(
       })
     }
 
-    const to = await rollback(resolved.runner, ctx)
+    const to = await rollback(resolved.runner, ctx, switchStrategyFor(input.projectConfig))
 
     // 实测结果与预期对不上，必须报出来。
     //

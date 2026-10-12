@@ -1,4 +1,10 @@
-import { DpError, KNOWN_HOSTS_MODES, assertPortInRange, parseSshTarget } from '@dp/ports'
+import {
+  DpError,
+  KNOWN_HOSTS_MODES,
+  SWITCH_STRATEGIES,
+  assertPortInRange,
+  parseSshTarget,
+} from '@dp/ports'
 import {
   arr,
   bool,
@@ -413,10 +419,7 @@ export const releaseSchema = obj(
     owner: opt(str('属主')),
     dirMode: opt(str('目录权限，如 0750')),
     fileMode: opt(str('文件权限，如 0640')),
-    switchStrategy: withDefault(
-      oneOf(['auto', 'symlink', 'rename', 'copy'] as const),
-      'auto',
-    ),
+    switchStrategy: withDefault(oneOf(SWITCH_STRATEGIES, 'current 的切换方式'), 'auto'),
   },
   '发布布局',
 )

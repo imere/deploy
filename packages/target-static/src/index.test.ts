@@ -251,6 +251,43 @@ describe('static target · deploy', () => {
       '复制不能把源目录掏空 —— 掏空了 release 就成了残疾版本',
     )
   })
+
+  it('switch: symlink 时建不了软链就失败，绝不静默换成复制', async () => {
+    const runner = new MemoryRunner(
+      makeFacts({ capabilities: { ...makeFacts().capabilities, canSymlink: false } }),
+    )
+    await assert.rejects(
+      deploy({
+        runner,
+        ctx: makeCtx(),
+        entries: [fileEntry('a.txt', 'v1')],
+        config: { switch: 'symlink' },
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof DpError)
+        assert.equal(err.code, 'DP.LINK.UNAVAILABLE')
+        return true
+      },
+    )
+    assert.equal(
+      await runner.readlink('/app/current'),
+      null,
+      '点名要软链却复制出一个目录，用户会以为自己拿到的是软链',
+    )
+  })
+
+  it('switch: copy 时即使支持软链也不建 —— 挂载点上的软链可能不被服务进程认', async () => {
+    const runner = new MemoryRunner(makeFacts())
+    const result = await deploy({
+      runner,
+      ctx: makeCtx(),
+      entries: [fileEntry('a.txt', 'v1')],
+      config: { switch: 'copy' },
+    })
+    assert.equal(await runner.readlink('/app/current'), null)
+    assert.equal(await runner.readFile('/app/current/a.txt'), 'v1')
+    assert.match(result.warnings.join(), /不是原子操作/)
+  })
 })
 
 describe('static target · transfer 钩子', () => {
@@ -336,6 +373,27 @@ describe('static target · prune 与 rollback', () => {
     const back = await rollback(runner, makeCtx({ releaseId: 'r2', previousReleaseId: 'r1' }))
     assert.equal(back, 'r1')
     assert.equal(await runner.resolvedCurrent('/app'), 'r1')
+  })
+
+  it('rollback 沿用部署时的切换方式，两次操作后 current 形态一致', async () => {
+    const runner = new MemoryRunner(makeFacts())
+    await deploy({
+      runner,
+      ctx: makeCtx({ releaseId: 'r1' }),
+      entries: [fileEntry('a.txt', 'v1')],
+      config: { switch: 'copy' },
+    })
+    await deploy({
+      runner,
+      ctx: makeCtx({ releaseId: 'r2', previousReleaseId: 'r1' }),
+      entries: [fileEntry('a.txt', 'v2')],
+      config: { switch: 'copy' },
+    })
+
+    const to = await rollback(runner, makeCtx({ releaseId: 'r2', previousReleaseId: 'r1' }), 'copy')
+    assert.equal(to, 'r1')
+    assert.equal(await runner.readlink('/app/current'), null)
+    assert.equal(await runner.readFile('/app/current/a.txt'), 'v1')
   })
 
   it('没有上一版时 rollback 明确报错，不做"看起来成功"的操作', async () => {
