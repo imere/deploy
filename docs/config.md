@@ -359,7 +359,8 @@ transport.strategy = auto ← defaults（本次协商结果：tar-ssh）
 
 ## 8. 字段速查表
 
-下面这张表是**从 `dp schema` 的 JSON Schema 反查出来的**，不是手抄的 —— 抄出来的表一定会
+下面这张表是**从 `dp schema` 的 JSON Schema 反查出来的**（`node scripts/dump-schema-fields.mjs`，
+schema 改过就重跑一次），不是手抄的 —— 抄出来的表一定会
 和实现分叉，而分叉之后用户照着文档写的配置在校验期就被顶回来。
 
 （`defaults` 与 `profiles.<env>` 的字段是 `hosts` / `release` / `transport` / `activation`
@@ -400,7 +401,7 @@ transport.strategy = auto ← defaults（本次协商结果：tar-ssh）
 | `projects.*.release.owner` | 可选 | string |
 | `projects.*.release.dirMode` | 可选 | string |
 | `projects.*.release.fileMode` | 可选 | string |
-| `projects.*.release.switchStrategy` | 必填 | auto | symlink | rename | copy |
+| `projects.*.release.switchStrategy` | 必填 | auto | symlink | copy |
 | `projects.*.target` | 可选 | {} |
 | `projects.*.target.type` | 必填 | static | nginx | docker[] |
 | `projects.*.target.pick` | 必填 | auto | fail |
