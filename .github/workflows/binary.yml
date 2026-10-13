@@ -1,7 +1,11 @@
 name: 单文件产物
 
 # 各平台各出一次，不做跨构建：单文件产物是把 blob 注进运行时二进制，跨注入就得
-# 先拿到别的平台的运行时再校验完整性 —— 在目标平台上直接构建天然正确，也更快。
+# 先拿到别的平台的运行时二进制再校验完整性 —— 在目标平台上直接构建天然正确，也更快。
+#
+# 发不发 Release 由触发方式决定：推 `v*` 标签才发，推 main 与手跑只留 artifact。
+# 这样「构建」与「发布」在同一条流水线上完成 —— 发出去的就是刚自检通过的那两个文件，
+# 不会出现 Release 里挂着一份谁在自己机器上搓出来的二进制。
 on:
   push:
     branches: [main]
@@ -12,14 +16,45 @@ permissions:
   contents: read
 
 jobs:
-  binary:
-    name: ${{ matrix.os }}
+  # 只有要发版时才先跑一遍全量校验：发版物必须过门禁，而日常推 main 的校验在 ci.yml 里已经跑过
+  verify:
+    name: verify
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install pnpm
+        run: |
+          npm install -g pnpm@12.6.0
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify
+        run: pnpm verify
+
+      - name: 门禁自检（注入违规看它是否还拦得住）
+        run: pnpm run verify:selfcheck
+
+  build:
+    name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - { os: ubuntu-latest, target: linux-x64 }
+          - { os: windows-latest, target: win32-x64 }
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -40,13 +75,40 @@ jobs:
       - name: Build
         run: pnpm build
 
-      # 脚本自带自检（真跑一次 --version），跑不起来就是构建失败
+      # 显式带 --target：跑错机器就直接红，而不是产出一个挂着别家平台名的文件。
+      # 脚本自带自检（真跑一次 --version 与 --help），跑不起来就是构建失败
       - name: Package single-file binary
-        run: node scripts/build-binary.mjs
+        run: node scripts/build-binary.mjs --target ${{ matrix.target }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
-          name: dp-${{ matrix.os }}
+          name: dp-${{ matrix.target }}
           path: build/bin/*
           if-no-files-found: error
+
+  release:
+    name: 发布 Release
+    needs: [verify, build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      # merge-multiple 把两个矩阵产物的目录合到一处，发布时不用逐个点名。
+      # 少一个平台不会静默发生：fail-fast: false 只影响并行取消，任一平台失败
+      # 会让 build 这个 job 变红，release 因为 needs 而根本不跑
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
