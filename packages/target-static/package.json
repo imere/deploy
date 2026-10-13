@@ -1,6 +1,6 @@
 {
   "name": "@dp/target-static",
-  "version": "0.0.0",
+  "version": "0.0.0-alpha",
   "private": true,
   "type": "module",
   "description": "静态投放目标：releases/<id> + current 原子切换 + keep N + 回滚",

@@ -1,6 +1,6 @@
 {
   "name": "@dp/transport",
-  "version": "0.0.0",
+  "version": "0.0.0-alpha",
   "private": true,
   "type": "module",
   "description": "传输层：按两端 Facts 协商传输方式（rsync-ssh / tar-ssh / scp / sftp / local-copy），构造 argv 并执行",

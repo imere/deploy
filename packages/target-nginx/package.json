@@ -1,6 +1,6 @@
 {
   "name": "@dp/target-nginx",
-  "version": "0.0.0",
+  "version": "0.0.0-alpha",
   "private": true,
   "type": "module",
   "description": "nginx 目标：结构化配置渲染 conf、# managed by dp 所有权保护、shadow 校验与 plan 步骤。零 IO。",

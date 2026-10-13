@@ -75,7 +75,7 @@ openspec/        行为契约（source of truth）
 
 ```bash
 pnpm install
-pnpm verify        # build + lint + test + 七项静态门禁
+pnpm verify        # build + lint + test + 八项静态门禁
 pnpm run verify:selfcheck   # 门禁自检：注入违规看它们是否还拦得住
 pnpm run verify:mutation    # 变异测试
 pnpm run build:bin # 打成单文件可执行程序 → build/bin/dp-<platform>-<arch>
@@ -85,10 +85,18 @@ Node ≥ 24。产物落各包 `build/`，测试跑的是产物不是源码；lco
 
 单文件产物：把编译产物嵌进运行时二进制，启动时落到缓存目录再按 ESM 原样加载
 （不打包、不转换模块格式，所以不存在「源码跑得对、产物跑不对」这条分叉）。
-**只为构建机所在平台产出**，别的平台交给 CI 矩阵各出一次。产物自带自检，跑不起来就是构建失败。
+**只为构建机所在平台产出**，别的平台交给 CI 矩阵各出一次 —— 当前覆盖 `linux-x64` 与 `win32-x64`。
+产物自带自检（真跑一次 `--version` 与 `--help`），跑不起来就是构建失败。
 外部工具（ssh / rsync / tar / scp）**不进产物**，仍从执行环境里找，缺了会报缺的是哪个。
 
-七项门禁：`dead-code` → `check-imports` → `check-deps` → `check-tests` → `check-jsdoc` → `check-coverage` → `smoke`。纯逻辑包（`schema` / `core` / `template`）要求覆盖率 100%。
+发版：`.github/workflows/binary.yml` 里，**只有推送 `v*` 标签才发 Release**，发的是当次流水线
+构建并通过自检的那两个文件；推 main 只留 artifact 不发版。
+
+```bash
+git tag v0.0.0-alpha && git push origin v0.0.0-alpha   # 触发构建 + 发布
+```
+
+八项门禁：`check-versions` → `dead-code` → `check-imports` → `check-deps` → `check-tests` → `check-jsdoc` → `check-coverage` → `smoke`。纯逻辑包（`schema` / `core` / `template`）要求覆盖率 100%。
 
 ---
 

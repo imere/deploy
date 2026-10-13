@@ -1,6 +1,6 @@
 {
   "name": "@dp/log",
-  "version": "0.0.0",
+  "version": "0.0.0-alpha",
   "private": true,
   "type": "module",
   "description": "结构化日志：JSONL 输出 · 内置脱敏 · 字段对齐 OpenTelemetry 语义约定",

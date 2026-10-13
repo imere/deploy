@@ -1,6 +1,6 @@
 {
   "name": "@dp/target-docker",
-  "version": "0.0.0",
+  "version": "0.0.0-alpha",
   "private": true,
   "type": "module",
   "description": "docker 目标（remote-cli）：compose argv 构造 + ps 健康判定 + plan 步骤。零 IO。",

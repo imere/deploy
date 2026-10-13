@@ -1,6 +1,6 @@
 {
   "name": "@dp/cli",
-  "version": "0.0.0",
+  "version": "0.0.0-alpha",
   "private": true,
   "type": "module",
   "description": "命令行入口：唯一允许组装具体实现的地方（docs/DESIGN.md §12 第 4 条）",

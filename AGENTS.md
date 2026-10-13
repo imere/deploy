@@ -23,7 +23,7 @@ pnpm 单仓多包，包名前缀 `@dp/*`。**Node ≥ 24**。
 ```
 pnpm build                # tsc -b，产物 packages/<pkg>/build
 pnpm test                 # 构建 + node --test + 覆盖率 → build/coverage/lcov.info
-pnpm verify               # build + lint + test + 七项静态门禁（verify:gates）
+pnpm verify               # build + lint + test + 八项静态门禁（verify:gates）
 pnpm run verify:selfcheck # 门禁自检：注入违规看它们是否还拦得住
 pnpm run verify:mutation  # 变异测试（每个变异都要整包跑一遍测试，慢，常规交给 CI 周跑）
 pnpm run build:bin        # 单文件可执行程序 → build/bin/dp-<platform>-<arch>
@@ -51,7 +51,7 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：它依赖的 esbuild 平台�
 packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / target-docker / cli 均已接线）
 openspec/        行为契约（source of truth）：specs/<capability>/spec.md
 docs/           只留两份参考：config.md（配置字段）、decisions.md（决策与理由）
-scripts/        构建与七道门禁；build-binary.mjs 出单文件产物，link-workspace.mjs 补 pnpm 链接
+scripts/        构建与八道门禁；build-binary.mjs 出单文件产物，link-workspace.mjs 补 pnpm 链接
 .github/        CI：verify（门禁 + 覆盖率）与 binary（各平台各出一次产物）
 .agents/skills/ 可复用流程（与本项目无关，可整体搬到别处）：
                  subagent-dispatch（派活与验收）

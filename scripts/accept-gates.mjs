@@ -87,6 +87,9 @@ function prepareMirror() {
     copied += 1
   }
   copyTree(join(repoRoot, 'scripts'), join(MUT, 'scripts'))
+  // 根的 package.json 也要进副本：版本一致性门禁拿它当基准，副本里缺了它
+  // 对照组会直接红，而那红的是「副本没备齐」，不是门禁的结论
+  copyTree(join(repoRoot, 'package.json'), join(MUT, 'package.json'))
   copyTree(join(repoRoot, 'build', 'coverage', 'lcov.info'), join(MUT, 'build', 'coverage', 'lcov.info'))
   linkNodeModules()
   log(`副本就绪：.tmp/gate-mut/  ${copied} 个包（package.json + src + build）+ scripts/ + build/coverage/lcov.info`)
@@ -231,6 +234,27 @@ const mutImports = () => {
     transform: (src) => {
       if (src.includes('zzGateMutEdge')) return null
       return `${src}\n// 门禁自检注入：更低的层去引用最上层，这是反向跨层依赖\nimport { zzGateMutEdge } from '@dp/cli'\n`
+    },
+  }
+}
+
+/**
+ * 版本号一致性：只改一个包的版本号，让它与根不同。
+ *
+ * 单仓同版本是刻意的 —— 单独 bump 一个包之后，`dp --version` 报一个、那个包
+ * 里又是另一个，而排查的人手边往往只有其中一个。
+ */
+const mutVersions = () => {
+  const file = 'packages/ports/package.json'
+  if (!existsSync(join(MUT, file))) throw new Error(`找不到 ${file}`)
+  return {
+    gate: 'check-versions.mjs',
+    file,
+    describe: `把 ${file} 的 version 改成与根不同的值（改一处不算改）`,
+    transform: (src) => {
+      const found = /"version":\s*"([^"]+)"/.exec(src)
+      if (found === null) return null
+      return src.replace(/"version":\s*"[^"]+"/, `"version": "${found[1]}-mut"`)
     },
   }
 }
@@ -443,6 +467,7 @@ function cleanup() {
 function collectMutations() {
   return [
     ...pickDeadCodeTargets().map(mutDeadCode),
+    mutVersions(),
     mutImports(),
     mutDeps(),
     mutJsdoc(),

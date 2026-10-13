@@ -1,6 +1,6 @@
 {
   "name": "@dp/ports",
-  "version": "0.0.0",
+  "version": "0.0.0-alpha",
   "private": true,
   "type": "module",
   "description": "纯类型与错误定义：Facts / 能力集 / 布局 / Step / Runner 接口。零依赖、零 IO。",

@@ -1,6 +1,6 @@
 {
   "name": "@dp/core",
-  "version": "0.0.0",
+  "version": "0.0.0-alpha",
   "private": true,
   "type": "module",
   "description": "纯编排：plan() / 布局推导 / 发布目录推导 / 跨平台路径校验。零 IO。",
