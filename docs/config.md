@@ -205,7 +205,7 @@ activation，跨机重复运行也就安全了。
 
 ---
 
-## 6. 目标类型：nginx / docker 与自动识别
+## 6. 目标类型：nginx / docker / systemd / process 与自动识别
 
 `target` 不填时走 **TargetResolver**，两个阶段：
 
@@ -218,8 +218,9 @@ activation，跨机重复运行也就安全了。
 | `nginx.conf` / `conf.d/*.conf` / `*.nginx.conf` | `nginx` | ✅ |
 | 只有静态文件（含 `index.html`） | `static` | ✅ |
 | `Dockerfile` 且无 compose | `docker`（单镜像） | ❌ |
-| `*.service` 单元文件 | `systemd` | ❌ |
+| `*.service` 单元文件 | `systemd` | ✅ |
 | `ecosystem.config.js` | `pm2` | ❌ |
+| （无探测证据，只能显式点名） | `process` | ✅ |
 | `package.json` 有 `scripts.deploy` / `.deploy/scripts/*` | `delegate`（交给项目自带的方式） | ❌ |
 | `Caddyfile` | `caddy` | ❌ |
 | `Chart.yaml` / k8s manifests | `k8s` | ❌ |
@@ -233,7 +234,7 @@ activation，跨机重复运行也就安全了。
 
 - **0 命中** → 报错并列出「它看到了哪些文件」（超过 10 条截断并给总数），而不是假装 static
 - **1 命中** → 用它，日志打印：`检测到 docker-compose.yml → target.type=docker（可用 target.type 覆盖）`
-- **1 命中但本仓还没实现**（如只有 `Dockerfile` 的单镜像、Caddyfile、`*.service`、pm2、k8s、
+- **1 命中但本仓还没实现**（如只有 `Dockerfile` 的单镜像、Caddyfile、pm2、k8s、
   delegate）→ 报错，列出已实现的类型供显式指定，**绝不静默降级成 static**
 - **多命中** → `target.pick: fail`（默认 `auto`）直接报错，列出所有候选与排除办法；
   `auto` 取 confidence 最高的那个，**最高分有并列就报错**（并列时靠数组顺序选 = 暗选）。
@@ -335,6 +336,86 @@ activate 相反）：compose 文件是随 release 上传的，install 只做「�
 「没读到」（ps 失败只给 warning，不让 status 整条变红）；`dp rollback` 没有上一版时
 报错而不是假成功。
 
+### systemd：`target.systemd`
+
+unit **不手写**，由 `@dp/target-systemd` 从结构化配置生成。`unitDir` 也不是随手填的路径：
+它由实测可写性按 scope 推导（system → `/etc/systemd/system`，user →
+`~/.config/systemd/user`），推导不出可写的那个目录时报 `DP.PERM.UNIT_DIR_NOT_WRITABLE`
+而不是挑一个「大概是」的落点。user scope 不需要提权，但**只在用户会话存活期间运行** ——
+linger 没开的话人一注销服务就停，这是它的语义而不是缺陷，所以不自动替你选 system。
+
+```yaml
+projects:
+  api:
+    source: { root: './dist' }
+    release: { root: '/srv/api' }
+    target:
+      type: [static, systemd]      # 先按静态投放，再换 unit
+      # systemd.unitDir 不写：由实测可写性推导
+      systemd:
+        unit: '${project}.service'  # 可选，默认 <项目名>.service。不含目录，必须以 .service 结尾
+        scope: system               # system | user
+        execStart: '${release.current}/bin/api'   # 必填。${release.current} 是软链
+        workingDirectory: '${release.current}'
+        environment: { NODE_ENV: 'production' }
+        restart: on-failure         # 默认 on-failure：正常退出不该被无限重启
+        restartSec: 5
+        after: ['network.target']
+        wantedBy: 'multi-user.target'
+        extra: ['MemoryMax=512M']   # 逐行原样输出；行里带换行等于多出几条指令，会被拒
+```
+
+生效顺序固定：**渲染 → 写影子候选 → `systemd-analyze verify` → 备份 → 原子 rename →
+`daemon-reload` → `restart`**。影子候选落在版本目录下而不是 unitDir 之下 —— unitDir 会被
+systemd 递归扫描，同名的候选放那儿就是往机器里塞一份重复 unit。只覆盖带
+`# managed by dp` 的文件；遇同名未标记文件报 `DP.SYSD.UNIT_NOT_MANAGED`，需要 `force`
+才继续（仍先备份）。值里的控制字符在渲染期就被拒（unit 是一行一条指令，换行等于注入）。
+
+`dp apply` 里的位置是 install → deploy → activate：unit 里的 `ExecStart` 用
+`${release.current}` 软链，先切版本再换 unit 是安全的。`daemon-reload` 或 `restart`
+失败**都不回滚 unit 也不回滚发布** —— 盘上的 unit 是好的，退回它只会让现场更难判断。
+回滚还原 `<unit>.dp-backup` 后重新 reload + restart；首次部署没有备份 →
+`DP.SYSD.NO_PREVIOUS`，**不返回假成功**。
+
+### process：`target.process`
+
+裸进程目标，**自带极简进程管理**：pidfile 记 pid，停止走「先信号后强杀」，存活靠
+`kill -0`。不接 pm2 / supervisord 一类外部进程管理器 —— 它们要进目标机的依赖清单，
+于是「目标机没装 pm2」会在部署期被报成「打包漏了东西」，而真正的原因是环境缺件。
+
+```yaml
+projects:
+  api:
+    source: { root: './dist' }
+    release: { root: '/srv/api' }
+    target:
+      type: [static, process]      # 先按静态投放，再起进程
+      process:
+        command: '${release.current}/bin/api'   # 必填。argv[0]，不是一行 shell
+        args: ['--port', '8080']
+        workingDirectory: '${release.current}'  # 默认 current 软链
+        env: { NODE_ENV: 'production' }
+        stopSignal: SIGTERM         # 只收给进程收尾机会的那几个；SIGKILL 不给
+        stopTimeoutMs: 10000        # 优雅期，是上限而不是「等它结束」
+        # pidFile: '.dp/process.pid'   # 相对**发布根**，不跟着版本目录漂
+        # stdoutLog: '.dp/process.log'
+```
+
+启动与停止脚本跟着**版本目录**（`<release>/.dp/`），pid 与日志落在**发布根下的固定位置**
+—— 激活时要停的是「当前跑着的那个」，而那一刻还不知道 current 指向哪。命令、参数、
+环境变量、工作目录、pidfile 全在渲染期烘进脚本，运行期只跑 `sh <脚本>`，且**每个值都过
+模板渲染**：只给一半字段渲染的话，`${release.current}` 会在 args 里静默变成字面文本 ——
+它不报错、能被写进脚本，只在目标机 exec 时才以 not found 炸出来，而那一刻错误指向机器
+而不是配置。回滚要跑的是**上一版实际部署出去的那份脚本**，运行期手上只有当前配置，把
+command 当参数传进去的回滚会变成「用当前配置的命令在上一版目录里跑一次」。停止脚本在强杀之后**再查一次**，
+只发 `KILL` 就当成功是这类脚本最常见的假成功。
+
+`dp apply` 里的位置是 **deploy → install → activate**（与 systemd 相反）：脚本写在版本
+目录里，传输之前那个目录还不存在。activate 先停旧的再起新的，**旧进程停不下来就不起
+新的**（两个实例会抢同一个端口）；新进程起不来时旧进程已停，报告必须说清服务是空窗的。
+回滚跑上一版目录里的启动脚本，它不在 → `DP.PROC.NO_PREVIOUS`，**不返回假成功**。
+`process` 没有探测证据（`*.service` 之外的裸进程无从识别），只能显式写 `target.type`。
+
 ---
 
 ## 7. 覆盖优先级
@@ -403,11 +484,13 @@ schema 改过就重跑一次），不是手抄的 —— 抄出来的表一定�
 | `projects.*.release.fileMode` | 可选 | string |
 | `projects.*.release.switchStrategy` | 必填 | auto | symlink | copy |
 | `projects.*.target` | 可选 | {} |
-| `projects.*.target.type` | 必填 | static | nginx | docker[] |
+| `projects.*.target.type` | 必填 | static | nginx | docker | systemd | process[] |
 | `projects.*.target.pick` | 必填 | auto | fail |
 | `projects.*.target.confd` | 可选 | string |
 | `projects.*.target.nginx` | 可选 | {} |
 | `projects.*.target.docker` | 可选 | {} |
+| `projects.*.target.systemd` | 可选 | {} |
+| `projects.*.target.process` | 可选 | {} |
 | `projects.*.healthcheck` | 可选 | {} |
 | `projects.*.healthcheck.command` | 可选 | string |
 | `projects.*.healthcheck.http` | 可选 | {} |
@@ -429,5 +512,6 @@ schema 改过就重跑一次），不是手抄的 —— 抄出来的表一定�
 「必填」是**归一化输出**的口径：`withDefault` 的字段输入可省、输出一定有值，所以它们是必填。
 `target.type` 可以写单个值或偏好链（`[]` 表示数组），取值只有上表列出的那几种。
 
-各 target 自有段（`target.nginx.*` / `target.docker.*`）的完整形状见第 6 节，以及
+各 target 自有段（`target.nginx.*` / `target.docker.*` / `target.systemd.*` /
+`target.process.*`）的完整形状见第 6 节，以及
 `dp schema` 导出的 JSON Schema —— schema 即文档，两者不容许不一致。

@@ -63,6 +63,8 @@ packages/
   target-static/ 静态投放：releases/<id> + current 原子切换 + keep N
   target-nginx/  nginx 目标：conf 渲染 + 影子校验 + 两步 -t
   target-docker/ docker 目标：compose argv + ps 解析
+  target-systemd/ systemd 目标：unit 渲染 + 影子校验 + 原子替换 + is-active
+  target-process/ 裸进程目标：pidfile + 先信号后强杀 + kill -0
   template/      纯模板渲染，零 IO
   log/           结构化日志：JSONL + 出口脱敏
   cli/           命令行与退出码契约
@@ -114,7 +116,7 @@ git tag v0.0.0-alpha && git push origin v0.0.0-alpha   # 触发构建 + 发布
 | `release-layout` | 版本目录布局与原子切换 |
 | `rollback` | 回滚触发与失败处理 |
 | `transport` | 传输协商与执行 |
-| `target-nginx` / `target-docker` | 两类目标的行为 |
+| `target-nginx` / `target-docker` / `target-systemd` / `target-process` | 四类目标的行为 |
 | `templating` | 模板展开与危险字符校验 |
 | `logging` | 日志格式与脱敏 |
 | `privilege-layout` | 权限与布局推导 |

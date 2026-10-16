@@ -48,7 +48,7 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：它依赖的 esbuild 平台�
 ## 目录
 
 ```
-packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / target-docker / cli 均已接线）
+packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / target-docker / target-systemd / target-process / cli 均已接线）
 openspec/        行为契约（source of truth）：specs/<capability>/spec.md
 docs/           只留两份参考：config.md（配置字段）、decisions.md（决策与理由）
 scripts/        构建与八道门禁；build-binary.mjs 出单文件产物，link-workspace.mjs 补 pnpm 链接
