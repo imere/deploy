@@ -1,0 +1,32 @@
+{
+  "name": "@dp/target-process",
+  "version": "0.0.0-alpha",
+  "private": true,
+  "type": "module",
+  "description": "裸进程目标：渲染启动/停止脚��、pidfile 记录、先信号后强杀的停止与存活断言。不依赖外部进程管理器。",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "default": "./build/index.js"
+    }
+  },
+  "files": [
+    "build"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@dp/ports": "workspace:*",
+    "@dp/template": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}
