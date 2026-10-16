@@ -78,6 +78,36 @@ export const SWITCH_STRATEGIES = ['auto', 'symlink', 'copy'] as const
 export type SwitchStrategy = (typeof SWITCH_STRATEGIES)[number]
 
 /**
+ * unit 里 `Restart=` 的取值。直接抄 `systemd.service(5)` 的字面值，不起别名 ——
+ * 别名会让「配置里写的」与「写进 unit 的」分叉，而排查的人手里只有后者。
+ */
+export const SYSTEMD_RESTART_POLICIES = [
+  'no',
+  'on-success',
+  'on-failure',
+  'on-abnormal',
+  'on-watchdog',
+  'on-abort',
+  'always',
+] as const
+/** 从 SYSTEMD_RESTART_POLICIES 派生；schema 与 systemd 执行器读的是同一组字面量 */
+export type SystemdRestartPolicy = (typeof SYSTEMD_RESTART_POLICIES)[number]
+
+/**
+ * 停止进程用的信号。只收「给进程收尾机会」的那几个 —— `SIGKILL` 不给，
+ * 把它写成可配项等于给「优雅停止」开一个名不副实的口子。
+ */
+export const PROCESS_STOP_SIGNALS = [
+  'SIGTERM',
+  'SIGINT',
+  'SIGQUIT',
+  'SIGUSR1',
+  'SIGUSR2',
+] as const
+/** 从 PROCESS_STOP_SIGNALS 派生；schema 与 process 执行器读的是同一组字面量 */
+export type ProcessStopSignal = (typeof PROCESS_STOP_SIGNALS)[number]
+
+/**
  * 布局推导要试写的目录；顺序即优先级，改动等于改落点
  */
 export const POSIX_WRITE_CANDIDATES: readonly string[] = [
@@ -172,6 +202,10 @@ export const DP_ERROR_CODES = [
   'DP.PATH.NOT_WRITABLE',
   'DP.LAYOUT.MISMATCH',
   'DP.PERM.CONFD_NOT_WRITABLE',
+  // ↓ systemd 目标的 unitDir 推导。与 confd 分列：confd 不可写是「nginx 的入口目录
+  // 不可写」，unitDir 不可写是「systemd 的单元目录不可写」，排查路径完全不同，
+  // 合成一个码之后报错里就只剩一句「推导不出目录」，用户得自己分辨是哪个
+  'DP.PERM.UNIT_DIR_NOT_WRITABLE',
   'DP.PREF.UNSUPPORTED',
   'DP.VERIFY.FAILED',
   'DP.LINK.UNAVAILABLE',
@@ -217,6 +251,25 @@ export const DP_ERROR_CODES = [
   'DP.ACTIVATE.START_FAILED',
   // ↓ 多跳链式转发（@dp/ssh）追加。单列而不是复用 DP.SSH.CONNECT_FAILED：
   'DP.SSH.HOP_FAILED',
+  // ↓ systemd 目标（@dp/target-systemd）追加。前两个是**配置/渲染期**可判定的
+  // （零副作用，改配置重来即可）；后三个是**执行期**的，处置方式各不相同：
+  // unit 已落盘但没生效、unit 生效了但服务没起来，两种现场不能用同一句话描述。
+  'DP.SYSD.UNIT_INVALID',
+  'DP.SYSD.UNIT_NOT_MANAGED',
+  'DP.SYSD.TEST_FAILED',
+  'DP.SYSD.DAEMON_RELOAD_FAILED',
+  'DP.SYSD.RESTART_FAILED',
+  'DP.SYSD.NO_PREVIOUS',
+  'DP.SYSD.NOT_ACTIVE',
+  // ↓ process 目标（@dp/target-process）追加。它自带进程管理（不依赖 systemd），
+  // 所以停止/启动/存活三类失败都得自己报，不能借 systemd 那一组 —— 借了之后
+  // 「systemctl 不在 PATH」与「进程自己退了」会混成同一句。NO_PREVIOUS 是「上一版
+  // 的启动脚本已经不在了」，与 systemd 的「备份 unit 不存在」同源但不是一回事。
+  'DP.PROC.COMMAND_INVALID',
+  'DP.PROC.START_FAILED',
+  'DP.PROC.STOP_FAILED',
+  'DP.PROC.NOT_RUNNING',
+  'DP.PROC.NO_PREVIOUS',
 ] as const
 
 /** 从数组派生：加码只改上面那一个地方，类型自动跟上 */

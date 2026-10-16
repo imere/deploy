@@ -13,6 +13,7 @@
 | `DP.DISK.NOT_WRITABLE` | 预检 | ✅ | abort | `@dp/preflight`（**实证写入**） |
 | `DP.PERM.*` / `DP.LSM.SELINUX_*` | 预检 | ✅ | abort 或 auto-remedy | `@dp/preflight` + `@dp/lsm` |
 | `DP.PERM.CONFD_NOT_WRITABLE` | 装配 | ✅ | abort（**一个字节都没写就退**，不猜路径） | `@dp/cli`（`dp apply`，nginx 目标的 confd 推导） |
+| `DP.PERM.UNIT_DIR_NOT_WRITABLE` | 装配 | ✅ | abort（同上；systemd 目标的 unitDir 推导，按 scope 分候选） | `@dp/cli`（`dp apply`，systemd 目标） |
 | `DP.PORT.OCCUPIED` | 预检 | ✅ | abort（或 `portPolicy`） | `@dp/preflight` |
 | `DP.FILE.LOCKED` | 传输/激活 | ⚠️ |  | `@dp/target-*` |
 | `DP.LOCK.HELD` | 并发 | ✅ | abort + 打印持锁者 | `@dp/core` |
@@ -40,6 +41,18 @@
 | `DP.DOCKER.FILE_MISSING` | 装配（install） | ❌ | abort（compose 文件/envFile 由 `stat` 实证不在 release 目录里，一次列全） | `@dp/target-docker` |
 | `DP.DOCKER.PULL_FAILED` | 激活 | ❌ | abort（**不回滚**：只动镜像缓存，跑着的仍是上一版） | `@dp/target-docker` |
 | `DP.DOCKER.PLAN_MISMATCH` | 任意 | — | 当作**代码错误**抛（plan 与执行器不同步）；不是部署失败，按失败去回滚只会回滚一个零副作用的部署 | `@dp/target-docker` |
+| `DP.SYSD.UNIT_INVALID` | unit 渲染 | ✅ | abort（**不产出 unit 行**，更不写 unitDir） | `@dp/target-systemd` |
+| `DP.SYSD.UNIT_NOT_MANAGED` | unit 覆盖 | ✅ | abort（同名文件不带 `# managed by dp`，需 `force`） | `@dp/target-systemd` |
+| `DP.SYSD.TEST_FAILED` | unit 校验 | ✅ | abort（候选只在影子目录，unitDir 未被碰） | `@dp/target-systemd` |
+| `DP.SYSD.DAEMON_RELOAD_FAILED` | 生效 | ❌ | **不回滚 unit**：盘上的 unit 是好的，只是 systemd 还没读到 | `@dp/target-systemd` |
+| `DP.SYSD.RESTART_FAILED` | 生效 | ❌ | **不回滚 unit**：unit 已生效，起不来是服务自己的问题 | `@dp/target-systemd` |
+| `DP.SYSD.NO_PREVIOUS` | 回滚 | ✅ | abort（首次部署无备份可还原，**不返回假成功**） | `@dp/target-systemd` |
+| `DP.SYSD.NOT_ACTIVE` | 验收 | ❌ | abort（unit 不在 active）；**回不回滚由上层决定** | `@dp/target-systemd` |
+| `DP.PROC.COMMAND_INVALID` | 启动脚本渲染 | ✅ | abort（**不产出脚本**，更不启进程） | `@dp/target-process` |
+| `DP.PROC.START_FAILED` | 激活 | ❌ | abort（旧进程已停，新进程没起来 → 服务空窗，必须显式报出来） | `@dp/target-process` |
+| `DP.PROC.STOP_FAILED` | 激活 | ❌ | abort（优雅期过后的强杀仍失败；不继续起新版本，否则两个实例抢同一端口） | `@dp/target-process` |
+| `DP.PROC.NOT_RUNNING` | 验收 | ❌ | abort（pidfile 里的 pid 已不存在 → 进程自己退了）；**回不回滚由上层决定** | `@dp/target-process` |
+| `DP.PROC.NO_PREVIOUS` | 回滚 | ✅ | abort（上一版的启动脚本不在了：被 prune 或首次部署，**不返回假成功**） | `@dp/target-process` |
 | `DP.PATH.CASE_COLLISION` | 源校验 | ✅ | abort（仅大小写不同的两条路径，在 Windows 上是同一个文件） | `@dp/core` |
 | `DP.PATH.RESERVED_NAME` | 源校验 | ✅ | abort（Windows 保留名，如 `NUL` / `CON`） | `@dp/core` |
 | `DP.PATH.TOO_LONG` | 源校验 | ✅ | abort（超出平台路径上限，传到一半才炸更贵） | `@dp/core` |

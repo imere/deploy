@@ -1,7 +1,9 @@
 import {
   DpError,
   KNOWN_HOSTS_MODES,
+  PROCESS_STOP_SIGNALS,
   SWITCH_STRATEGIES,
+  SYSTEMD_RESTART_POLICIES,
   assertPortInRange,
   parseSshTarget,
 } from '@dp/ports'
@@ -215,11 +217,14 @@ export const hostSchema = constrained(
 /**
  * 目标类型全集。**全仓只有这一份**，且只收**已实现**的那几种。
  *
- * 探测能认出 systemd / caddy / k8s 等更多形态，但它们没有执行器；把它们放进这里
+ * 探测还能认出 caddy / k8s / pm2 等更多形态，但它们没有执行器；把它们放进这里
  * 等于允许用户写出一份「通过了校验、跑起来却是 static」的配置 —— 那比直接拒绝
  * 难查得多。未实现的形态由探测层显式报错（`IMPLEMENTED_KINDS`），不在这里留口子。
+ *
+ * 反过来，**写得出 `type: nginx` 却没有 `nginx` 段**也必须是错的：段才是执行器的
+ * 判据，type 只是覆盖探测的开关。这两条一起由 `targetSchema` 的一致性判定钉住。
  */
-export const TARGET_KINDS = ['static', 'nginx', 'docker'] as const
+export const TARGET_KINDS = ['static', 'nginx', 'docker', 'systemd', 'process'] as const
 
 /**
  * nginx 段。**只管形状与类型**，语义判定全部留给 @dp/target-nginx。
@@ -355,6 +360,72 @@ export const dockerSchema = obj(
 )
 
 /**
+ * 不能是空白的字符串。空白值与缺省值要能区分开 —— 空串若等价于缺省，
+ * 「用户显式写了空」与「用户没写」就成了一回事，而这种歧义正是配置校验存在的理由。
+ */
+function nonBlank(label: string): Schema<string, string, false> {
+  return constrained(str(label), (value, path) => {
+    if (value.trim() !== '') return
+    throw new DpError('DP.CONFIG.INVALID', `${label} 是空白字符串`, {
+      path,
+      hint: `删掉这个字段表示「用默认值」，写成空白表示「我要一个空的值」—— 后者在这里没有意义。${label} 不能为空`,
+    })
+  })
+}
+
+/**
+ * systemd 目标。**只管形状与类型**，语义判定（unit 行是否安全、ExecStart 是否为空）
+ * 全部留给 `@dp/target-systemd`。
+ */
+export const systemdSchema = obj(
+  {
+    /** 不含目录。默认 `<项目名>.service` */
+    unit: opt(str('unit 文件名')),
+    /** 由上层从 layout 推导后注入，不是用户随手填的相对路径 */
+    unitDir: str('unit 目录，目标机绝对路径'),
+    scope: withDefault(oneOf(['system', 'user'] as const), 'system'),
+    description: opt(str('Description 的值')),
+    execStart: nonBlank('execStart'),
+    execReload: opt(str('ExecReload 的值')),
+    workingDirectory: opt(str('WorkingDirectory 的值')),
+    user: opt(str('User 的值')),
+    group: opt(str('Group 的值')),
+    environment: opt(record(str('环境变量的值'))),
+    restart: withDefault(oneOf(SYSTEMD_RESTART_POLICIES), 'on-failure'),
+    restartSec: opt(num('RestartSec 的值，秒')),
+    after: opt(arr(str('After 的单元名'))),
+    requires: opt(arr(str('Requires 的单元名'))),
+    wantedBy: withDefault(str('WantedBy 的 target'), 'multi-user.target'),
+    /** 逃生舱：原样输出，不做转义与校验 */
+    extra: opt(arr(str('原样输出的 unit 行'))),
+  },
+  'systemd 目标。restart 默认 on-failure 而不是 always —— 正常退出不该被无限重启',
+)
+
+/**
+ * process 目标。**自带极简进程管理**：pidfile 记 pid，停止走「先信号后强杀」。
+ * 不接 pm2 / supervisord 一类外部进程管理器 —— 它们要进目标机的依赖清单，
+ * 而「目标机没装 pm2」会在部署期被报成「打包漏了东西」。
+ */
+export const processSchema = obj(
+  {
+    /** argv[0]。不是一行 shell —— 它会被原样 exec，不经 shell 解释 */
+    command: nonBlank('command'),
+    args: opt(arr(str('启动命令的参数'))),
+    /** 默认 current 软链（当前生效版本目录） */
+    workingDirectory: opt(str('工作目录')),
+    env: opt(record(str('环境变量的值'))),
+    stopSignal: withDefault(oneOf(PROCESS_STOP_SIGNALS), 'SIGTERM'),
+    /** 优雅期过后才强杀。它必须是个上限而不是「等它结束」 */
+    stopTimeoutMs: withDefault(num('停止等待上限，毫秒'), 10_000),
+    /** 相对**发布根目录** —— 激活时只读这一个位置，不跟着版本目录漂 */
+    pidFile: opt(str('pidfile 路径')),
+    stdoutLog: opt(str('stdout/stderr 落盘位置')),
+  },
+  'process 目标。pid 与日志落在发布根下的 .dp/，启动/停止脚本跟着版本目录走',
+)
+
+/**
  * 多目标类型同时命中时怎么选。**全仓只有这一份**。
  */
 export const DEFAULT_TARGET_PICK = 'auto'
@@ -363,8 +434,9 @@ export const DEFAULT_TARGET_PICK = 'auto'
 const DEFAULT_TARGET_CHAIN: readonly string[] = ['static']
 
 /**
- * 部署目标。**type 与 nginx / docker 两段必须一致**：真正决定跑哪个执行器的是段，
- * type 只是覆盖探测的开关，两者分叉就会「点名 nginx、实际按 static 部署」。
+ * 部署目标。**type 与 nginx / docker / systemd / process 各段必须一致**：真正决定
+ * 跑哪个执行器的是段，type 只是覆盖探测的开关，两者分叉就会「点名 nginx、
+ * 实际按 static 部署」。
  */
 export const targetSchema = constrained(
   obj(
@@ -374,8 +446,10 @@ export const targetSchema = constrained(
       confd: opt(str('conf.d 目录（nginx 目标）。不写则由实测能力推导')),
       nginx: opt(nginxSchema),
       docker: opt(dockerSchema),
+      systemd: opt(systemdSchema),
+      process: opt(processSchema),
     },
-    '部署目标',
+    '部署目标。段才是执行器的判据，type 只是覆盖探测的开关 —— 两者必须一致',
   ),
   (value, path) => {
     const chain = [...value.type]
@@ -384,7 +458,7 @@ export const targetSchema = constrained(
     const explicit = !(
       chain.length === DEFAULT_TARGET_CHAIN.length && chain.every((k, i) => k === DEFAULT_TARGET_CHAIN[i])
     )
-    for (const kind of ['nginx', 'docker'] as const) {
+    for (const kind of ['nginx', 'docker', 'systemd', 'process'] as const) {
       if (chain.includes(kind) && value[kind] === undefined) {
         throw new DpError('DP.CONFIG.INVALID', `target.type 点名 ${kind} 却没有 ${kind} 段`, {
           path: `${path}.${kind}`,
@@ -543,6 +617,14 @@ export type NginxInput = InputOf<typeof nginxSchema>
 export type DockerConfig = Infer<typeof dockerSchema>
 /** 配置文件里的写法，字段全部可选 */
 export type DockerInput = InputOf<typeof dockerSchema>
+/** 归一化后的 systemd 段。restart / scope / wantedBy 一定有值 */
+export type SystemdConfig = Infer<typeof systemdSchema>
+/** systemd 段的可写形态，除 unitDir 外字段全部可选 */
+export type SystemdInput = InputOf<typeof systemdSchema>
+/** 归一化后的 process 段。stopSignal / stopTimeoutMs 一定有值 */
+export type ProcessConfig = Infer<typeof processSchema>
+/** process 段的可写形态，除 command 外字段全部可选 */
+export type ProcessInput = InputOf<typeof processSchema>
 /** 归一化后的传输段，strategy 为非空的偏好链数组 */
 export type TransportConfig = Infer<typeof transportSchema>
 /** 归一化后的激活段。trialTimeout / promoteWindow 仍是时长字符串 */
@@ -599,7 +681,7 @@ export const defineRelease = (c: InputOf<typeof releaseSchema>): ReleaseConfig =
  *
  * @param c 目标段原文
  * @returns 归一化后的目标段，type 为偏好链数组
- * @throws DpError type 不在 `TARGET_KINDS` 内，或 nginx / docker 段与 type 不一致
+ * @throws DpError type 不在 `TARGET_KINDS` 内，或某个段与 type 不一致
  */
 export const defineTarget = (c: InputOf<typeof targetSchema>): TargetConfig =>
   targetSchema.parse(c, 'target')
@@ -619,6 +701,22 @@ export const defineNginx = (c: NginxInput): NginxConfig => nginxSchema.parse(c, 
  * @throws DpError compose.files 的元素里有空串（空路径在目标机上报的错指向那个空路径）
  */
 export const defineDocker = (c: DockerInput): DockerConfig => dockerSchema.parse(c, 'docker')
+/**
+ * 归一化 systemd 段。unit 省略时用 `<项目名>.service` 补齐，剩下的默认值在这一层填
+ *
+ * @param c systemd 段原文
+ * @returns 归一化后的 systemd 段
+ * @throws DpError unit 不是单个文件名，或 ExecStart 为空
+ */
+export const defineSystemd = (c: SystemdInput): SystemdConfig => systemdSchema.parse(c, 'systemd')
+/**
+ * 归一化 process 段。停止信号与优雅期在这一层补全
+ *
+ * @param c process 段原文
+ * @returns 归一化后的 process 段
+ * @throws DpError command 为空，或参数里有空串元素
+ */
+export const defineProcess = (c: ProcessInput): ProcessConfig => processSchema.parse(c, 'process')
 /**
  * 归一化传输段。strategy 缺省或写 `auto` 时展开成 `DEFAULT_TRANSPORT_CHAIN`，链全失败由 core 报 `DP.PREF.UNSUPPORTED`。
  *

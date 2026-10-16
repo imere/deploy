@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DpError } from '@dp/ports'
-import { DEFAULT_KEEP, defineBecome, defineDocker, defineHost, defineNginx, defineTarget, becomeSchema, dockerSchema, nginxSchema, releaseSchema, targetSchema, type DockerInput, type NginxInput } from './config.js'
+import { DEFAULT_KEEP, defineBecome, defineDocker, defineHost, defineNginx, defineProcess, defineSystemd, defineTarget, becomeSchema, dockerSchema, nginxSchema, releaseSchema, targetSchema, type DockerInput, type NginxInput, type ProcessInput, type SystemdInput } from './config.js'
 
 function codeOf(fn: () => unknown): { code: string; message: string; path?: string; hint?: string } {
   try {
@@ -209,6 +209,8 @@ describe('targetSchema 里的 nginx', () => {
 // ------------------------------------------------------------
 
 const DOCKER_BASE: DockerInput = { compose: { files: ['docker-compose.yml'], projectName: 'api' } }
+const SYSTEMD_BASE: SystemdInput = { unitDir: '/etc/systemd/system', execStart: '/srv/app/current/start.sh' }
+const PROCESS_BASE: ProcessInput = { command: 'node' }
 
 describe('docker · 默认值', () => {
   it('mode / pull / wait 有默认值，省略时补齐', () => {
@@ -344,19 +346,41 @@ describe('target.type 与 nginx / docker 段必须一致', () => {
     assert.equal(target.docker?.compose.projectName, 'api')
   })
 
-  it('没有执行器的类型不在选项里：systemd / process 写出来即报错', () => {
-    for (const kind of ['systemd', 'process']) {
+  it('systemd / process 有执行器，写出来就接受（段决定跑什么，不是靠探测猜）', () => {
+    assert.deepEqual(defineTarget({ type: 'systemd', systemd: SYSTEMD_BASE }).systemd?.unitDir, '/etc/systemd/system')
+    assert.equal(defineTarget({ type: 'process', process: PROCESS_BASE }).process?.command, 'node')
+  })
+
+  it('点名 systemd / process 却没有对应段 → 拒绝（没有段就没有可执行的东西）', () => {
+    for (const kind of ['systemd', 'process'] as const) {
       assert.throws(
-        () => defineTarget({ type: kind as 'static' }),
+        () => defineTarget({ type: kind }),
         (err: unknown) => {
           assert.ok(err instanceof DpError)
-          assert.match(err.message, /不被支持/)
-          assert.match(err.hint ?? '', /static, nginx, docker/)
+          assert.equal(err.code, 'DP.CONFIG.INVALID')
+          assert.equal(err.path, `target.${kind}`)
           return true
         },
-        `${kind} 不该被接受`,
+        `${kind} 缺段该被拒`,
       )
     }
+  })
+
+  it('显式写了 type 却给了链外的段 → 拒绝（段才是执行器的判据，type 不能是另一个说法）', () => {
+    assert.throws(
+      () =>
+        defineTarget({
+          type: 'nginx',
+          nginx: { server: { root: '/srv/app/current' } },
+          process: PROCESS_BASE,
+        }),
+      (err: unknown) => {
+        assert.ok(err instanceof DpError)
+        assert.equal(err.code, 'DP.CONFIG.INVALID')
+        assert.equal(err.path, 'target.type')
+        return true
+      },
+    )
   })
 })
 
@@ -375,6 +399,57 @@ describe('targetSchema 里的 docker', () => {
     const json = dockerSchema.toJsonSchema()
     assert.deepEqual(json.required, ['mode', 'compose'])
     assert.equal(json.properties?.['mode']?.default, 'remote-cli')
+  })
+})
+
+describe('targetSchema 里的 systemd', () => {
+  it('unitDir 必填：它是推导结果，不是用户随手填的相对路径', () => {
+    assert.throws(
+      () => defineSystemd({ execStart: '/srv/app/current/start.sh' } as SystemdInput),
+      (err: unknown) => {
+        assert.ok(err instanceof DpError)
+        assert.equal(err.code, 'DP.CONFIG.INVALID')
+        assert.equal(err.path, 'systemd.unitDir')
+        return true
+      },
+    )
+  })
+
+  it('restart 缺省 on-failure，scope 缺省 system', () => {
+    const unit = defineSystemd(SYSTEMD_BASE)
+    assert.equal(unit.restart, 'on-failure')
+    assert.equal(unit.scope, 'system')
+  })
+
+  it('restart 只收 systemd 自己认的字面值，不起别名', () => {
+    assert.throws(
+      () => defineSystemd({ ...SYSTEMD_BASE, restart: 'always-on' as 'always' }),
+      (err: unknown) => err instanceof DpError && err.code === 'DP.CONFIG.INVALID',
+    )
+  })
+})
+
+describe('targetSchema 里的 process', () => {
+  it('command 必填：没有启动命令就没有可执行的东西', () => {
+    assert.throws(
+      () => defineProcess({} as ProcessInput),
+      (err: unknown) => {
+        assert.ok(err instanceof DpError)
+        assert.equal(err.code, 'DP.CONFIG.INVALID')
+        assert.equal(err.path, 'process.command')
+        return true
+      },
+    )
+  })
+
+  it('停止信号与优雅期有默认值，且不给 SIGKILL 开口子', () => {
+    const proc = defineProcess(PROCESS_BASE)
+    assert.equal(proc.stopSignal, 'SIGTERM')
+    assert.equal(proc.stopTimeoutMs, 10_000)
+    assert.throws(
+      () => defineProcess({ ...PROCESS_BASE, stopSignal: 'SIGKILL' as 'SIGTERM' }),
+      (err: unknown) => err instanceof DpError && err.code === 'DP.CONFIG.INVALID',
+    )
   })
 })
 

@@ -242,10 +242,10 @@ test('已实现 + 未实现同时命中：auto 选已实现的，未实现的进
 })
 
 test('未实现的候选参与仲裁但不静默降级：全未实现时报错', () => {
-  const e = err(() => resolveTargetKind({ entries: ['Caddyfile', 'Chart.yaml', 'app.service'] }, 'auto'))
+  const e = err(() => resolveTargetKind({ entries: ['Caddyfile', 'Chart.yaml', 'ecosystem.config.js'] }, 'auto'))
   assert.match(e.message, /都还没实现/)
   const hint = e.hint ?? ''
-  for (const k of ['caddy', 'k8s', 'systemd']) assert.ok(hint.includes(k) || (e.message).includes(k))
+  for (const k of ['caddy', 'k8s', 'pm2']) assert.ok(hint.includes(k) || e.message.includes(k))
   for (const k of ['static', 'nginx', 'docker']) assert.ok(hint.includes(k), `hint 应列出已实现的 ${k}`)
 })
 
@@ -314,8 +314,14 @@ test('候选证据超过 3 项时截断并给出总数（全列出来没人读�
 })
 
 test('未实现的候选在报错里带「未实现」标记', () => {
-  const e = err(() => resolveTargetKind({ entries: ['app.service', 'ecosystem.config.js'] }, 'fail'))
-  assert.match(e.message, /systemd（app\.service，confidence 60，未实现）/)
+  const e = err(() => resolveTargetKind({ entries: ['Caddyfile', 'ecosystem.config.js'] }, 'fail'))
+  assert.match(e.message, /caddy（Caddyfile，confidence 45，未实现）/)
+})
+
+test('systemd 已实现：源里只有 .service 文件时直接选中它，不再报「本仓还没实现」', () => {
+  const r = resolveTargetKind({ entries: ['deploy/app.service'] }, 'auto')
+  assert.equal(r.kind, 'systemd')
+  assert.deepEqual(r.evidence, ['deploy/app.service'])
 })
 
 test('0 命中报的是 DP.CONFIG.INVALID，且列出的文件名已归一化', () => {

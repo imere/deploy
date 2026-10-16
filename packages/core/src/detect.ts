@@ -170,7 +170,9 @@ export function detectCandidates(input: DetectInput): readonly DetectCandidate[]
     if (files.length > 0) out.push({ kind, evidence: sortUnique(files), implemented, confidence })
   }
   push('nginx', nginxFiles, true, CONF.nginx)
-  push('systemd', serviceFiles, false, CONF.supervisor)
+  // systemd 是**已实现**的（@dp/target-systemd）。留着 false 会自相矛盾：
+  // IMPLEMENTED_KINDS 里写着它，而单命中时又报「本仓还没实现 systemd」
+  push('systemd', serviceFiles, true, CONF.supervisor)
   push('pm2', pm2Files, false, CONF.supervisor)
   push('caddy', caddyFiles, false, CONF.caddy)
   push('k8s', k8sFiles, false, CONF.k8s)
