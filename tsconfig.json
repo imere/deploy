@@ -8,6 +8,8 @@
     { "path": "./packages/target-static" },
     { "path": "./packages/target-nginx" },
     { "path": "./packages/target-docker" },
+    { "path": "./packages/target-systemd" },
+    { "path": "./packages/target-process" },
     { "path": "./packages/log" },
     { "path": "./packages/ssh" },
     { "path": "./packages/transport" },
