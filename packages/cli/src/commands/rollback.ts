@@ -9,11 +9,15 @@
  * 一次失败的回滚就可能顺手毁掉唯一的退路。
  */
 import { readReleaseState, rollback, verifyRelease } from '@dp/target-static'
-import { rollbackDocker } from '@dp/target-docker'
+import { isDockerExecFailure, rollbackDocker } from '@dp/target-docker'
+import { isProcessExecFailure, rollbackProcess } from '@dp/target-process'
+import { isSystemdExecFailure, rollbackSystemd } from '@dp/target-systemd'
 import { DpError, type TargetContext } from '@dp/ports'
 import type { HostConfig, ProjectConfig } from '@dp/schema'
 import { defaultApplyDeps } from '../deps.js'
 import { dockerConfigFor } from '../docker-config.js'
+import { processConfigFor } from '../process-config.js'
+import { resolveUnitDir, systemdConfigFor } from '../systemd-config.js'
 import { EXIT_FAILURE, EXIT_VERIFY_FAILED, exitCodeFor } from '../output.js'
 import { renderOpsJson, renderOpsPretty, type RollbackResult } from '../output-ops.js'
 import { selectTargets } from '../targets.js'
@@ -73,8 +77,31 @@ async function rollbackOne(
 ): Promise<{ readonly result: RollbackResult; readonly exitCode: number }> {
   const { host, project, logger } = input
   const warnings: string[] = []
+  /** 目标侧**成功返回**过的目标名。顺序等于「机器上已经被改过哪些东西」 */
+  const appliedTargets: string[] = []
   let resolved: Awaited<ReturnType<typeof resolveTarget>> | undefined
   let from: string | null = null
+  /**
+   * 失败之前，目标侧有没有真的在机器上留下过改动。
+   *
+   * 两条路都得算：① 某个目标的回滚**成功返回**了（appliedTargets）—— 它干完才轮到下一个；
+   * ② 某个目标的回滚跑了几步之后**自己炸了** —— 那几步的结论一样在盘上
+   * （unit 已还原、进程已停），只是后面的步骤没走到。只认①的话，「unit 换了但 restart
+   * 失败」会被报成 needsHealing: false，而那台机器上明显有件回滚了的 unit 需要人看一眼。
+   *
+   * 判据取自执行器自己的步骤轨迹（`ok` 且非 `skipped` = 在机器上留下了作用），
+   * 而不是在 CLI 里重推一遍「这一步大概做了什么」—— 重推等于又写一份。
+   */
+  const targetTouched = (err: unknown): boolean => {
+    if (appliedTargets.length > 0) return true
+    const cause = err instanceof Error ? err.cause : undefined
+    const applied = (steps: readonly { readonly ok: boolean; readonly skipped: boolean }[]): boolean =>
+      steps.some((s) => s.ok && !s.skipped)
+    if (isDockerExecFailure(cause)) return applied(cause.steps)
+    if (isSystemdExecFailure(cause)) return applied(cause.steps)
+    if (isProcessExecFailure(cause)) return applied(cause.steps)
+    return false
+  }
 
   try {
     resolved = await resolveTarget({ context, target: input, deps, logger })
@@ -106,40 +133,90 @@ async function rollbackOne(
 
     logger.info('rollback.begin', { from: state.current, to: state.previous })
 
-    // docker：**先**让 compose 回到上一版，**再**切 current。
-    // 反过来（先切 current 再 up）会在 up 失败时留下一份指向新版本、
-    // 而容器还跑着新版本 compose 的状态 —— 指针与实际服务对不上，
-    // 而 current 已经是新的，排查者会以为服务已经退回去了
+    // **ctx 的语义要按目标侧执行器的读法重建一遍**：
+    // 上面那个 ctx（给 static 的 rollback 用）里 previousReleaseId = state.current ——
+    // 那正是 static 的语义（从 current 退到 previous）。而下面三个执行器都把
+    // previousReleaseId 读成「要退回的那一版」，直接传下去会让它们拿**当前版本**的
+    // compose / 上一份 unit / 上一版脚本重跑一遍 —— 那不是回滚，而且报告会显示成功。
+    //
+    // 目标侧全部**先于**切 current：反过来（先切 current 再让目标侧退）会在它们失败时
+    // 留下一份指向新版本、而服务还停在新版本的状态 —— 指针与实际服务对不上，
+    // 而 current 已经是旧的了，排查者会以为服务已经退回去了
+    const targetCtx: TargetContext = {
+      host,
+      root: resolved.releaseRoot,
+      releaseId: state.current,
+      previousReleaseId: state.previous,
+      keep: resolved.keep,
+    }
+
     const dockerSpec = input.projectConfig.target?.docker
     if (dockerSpec !== undefined) {
-      // **ctx 的语义要按 docker 执行器的读法重建一遍**：
-      // planRollback 把 ctx.previousReleaseId 当作「要退回的那一版」，
-      // 而上面那个 ctx（给 static 的 rollback 用）里 previousReleaseId = state.current ——
-      // 正好是反的。直接传下去会让它拿**当前版本**的 compose 重新 up，
-      // 那不是回滚，那是「用同一版再起一次」，而且报告会显示成功。
       // state.previous 已经过了上面的判定，这里必然存在。
       // **不吞它的错误**：没有上一版时执行器抛 DP.DOCKER.NO_PREVIOUS，
       // 把它报成「回滚成功」是本仓最不能接受的一种假结果
-      const dockerCtx: TargetContext = {
-        host,
-        root: resolved.releaseRoot,
-        releaseId: state.current,
-        previousReleaseId: state.previous,
-        keep: resolved.keep,
-      }
       await rollbackDocker({
         runner: resolved.runner,
-        ctx: dockerCtx,
+        ctx: targetCtx,
         config: dockerConfigFor({
           project: input.project,
           env: flags.env ?? '',
           envVars: context.env,
-          targetCtx: dockerCtx,
+          targetCtx,
           now: new Date(0),
           docker: dockerSpec,
         }),
         onStep: (step) => logger.info('rollback.docker', { step: step.id, kind: step.kind }),
       })
+      appliedTargets.push('docker')
+    }
+
+    // systemd：靠 `<unit>.dp-backup` 还原上一份 unit，执行器自己管那个备份。
+    // 所以它要的是**目标机上还留着的上一份 unit**，而不是 releaseId ——
+    // 这里只保证它算出与 apply 时同一个 unitDir，否则它会去还原另一个文件
+    const systemdSpec = input.projectConfig.target?.systemd
+    if (systemdSpec !== undefined) {
+      const unitDir = resolveUnitDir({
+        facts: resolved.facts,
+        ...(input.projectConfig.target !== undefined ? { target: input.projectConfig.target } : {}),
+      })
+      await rollbackSystemd({
+        runner: resolved.runner,
+        ctx: targetCtx,
+        config: systemdConfigFor({
+          project: input.project,
+          env: flags.env ?? '',
+          envVars: context.env,
+          targetCtx,
+          now: new Date(0),
+          systemd: systemdSpec,
+          unitDir,
+        }),
+        onStep: (step) => logger.info('rollback.systemd', { step: step.id, kind: step.kind }),
+      })
+      appliedTargets.push('systemd')
+    }
+
+    // process：靠**上一版目录里那份启动脚本**起回来（脚本在渲染期就把 command /
+    // 参数 / 工作目录烘进去了，所以跑上一版的脚本才是「回到那个版本」）。
+    // 没有备份可退时执行器抛 DP.PROC.NO_PREVIOUS —— 版本被 prune 掉的现场必须报出来，
+    // 起一个空的等于报告了一次从未存在过的服务
+    const processSpec = input.projectConfig.target?.process
+    if (processSpec !== undefined) {
+      await rollbackProcess({
+        runner: resolved.runner,
+        ctx: targetCtx,
+        config: processConfigFor({
+          project: input.project,
+          env: flags.env ?? '',
+          envVars: context.env,
+          targetCtx,
+          now: new Date(0),
+          process: processSpec,
+        }),
+        onStep: (step) => logger.info('rollback.process', { step: step.id, kind: step.kind }),
+      })
+      appliedTargets.push('process')
     }
 
     const to = await rollback(resolved.runner, ctx, switchStrategyFor(input.projectConfig))
@@ -222,7 +299,18 @@ async function rollbackOne(
       exitCode: 0,
     }
   } catch (err) {
-    logger.error('rollback.failed', { code: targetErrorFields(err).code, from })
+    logger.error('rollback.failed', { code: targetErrorFields(err).code, from, appliedTargets })
+    const touched = targetTouched(err)
+    // 目标侧一旦留下过改动，current 指向哪已经无法从这里判定，所以 `to` 保持 null，
+    // 由 needsHealing 承担「要有人上机器看一眼」这件事 —— 写 false 等于用整条命令的失败
+    // 掩盖了一次已经发生的、只有一半的回滚
+    if (touched) {
+      warnings.push(
+        '目标侧的回滚已经改动了机器（' +
+          (appliedTargets.length > 0 ? `${appliedTargets.join(' / ')} 已跑完` : '执行器在半途失败，已完成的那几步留在盘上') +
+          '），随后失败 —— current 是否被切换过无法从这里判定，需要人工核对后再决定是否继续回退',
+      )
+    }
     return {
       result: {
         host,
@@ -230,7 +318,7 @@ async function rollbackOne(
         releaseRoot: resolved?.releaseRoot ?? '',
         from,
         to: null,
-        needsHealing: false,
+        needsHealing: touched,
         warnings,
         error: targetErrorFields(err),
       },

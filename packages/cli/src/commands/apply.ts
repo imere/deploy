@@ -17,6 +17,8 @@ import {
   type DockerTargetConfig,
 } from '@dp/target-docker'
 import { activateNginx, installNginx, type NginxExecResult, type NginxTargetConfig } from '@dp/target-nginx'
+import { activateProcess, installProcess, isProcessExecFailure, verifyProcess, type ProcessExecResult, type ProcessTargetConfig } from '@dp/target-process'
+import { activateSystemd, installSystemd, isSystemdExecFailure, verifySystemd, type SystemdExecResult, type SystemdTargetConfig } from '@dp/target-systemd'
 import { deploy, rollback } from '@dp/target-static'
 import { chooseTransport, type TransferRequest, type TransportKind, type TransportPreference } from '@dp/transport'
 import { DpError, type BecomeConfig, type SourceEntry, type TargetContext } from '@dp/ports'
@@ -32,6 +34,8 @@ import {
 } from '../facts-source.js'
 import { nginxConfigFor, releaseCurrentPath, resolveConfd } from '../nginx-config.js'
 import { dockerConfigFor } from '../docker-config.js'
+import { processConfigFor } from '../process-config.js'
+import { resolveUnitDir, systemdConfigFor } from '../systemd-config.js'
 import {
   exitCodeFor,
   renderApplyJson,
@@ -39,6 +43,8 @@ import {
   type ApplyTargetResult,
   type DockerTargetResult,
   type NginxTargetResult,
+  type ProcessTargetResult,
+  type SystemdTargetResult,
 } from '../output.js'
 import { releaseIdFor } from '../release-id.js'
 import { selectTargets } from '../targets.js'
@@ -487,6 +493,198 @@ function activateFailedWarning(
 }
 
 /**
+ * systemd 的四个阶段在本仓是什么关系 —— **与 nginx 同款，与 docker 相反**。
+ *
+ * 顺序是 ① install → ② deploy → ③ activate → ④ verify：
+ *  - install 放最前，因为它只写影子目录（`<release 目录>/.dp/`）并跑 `systemd-analyze verify`，
+ *    能在**碰任何生效 unit 之前**把坏 unit 挡掉。影子目录特意落在 release 目录下而不是 unitDir 之下：
+ *    systemd 会递归扫描 unit 路径，放那儿等于往机器里塞一份同名重复 unit；
+ *  - unit 的 `ExecStart` / `WorkingDirectory` 用 `${release.current}` **软链**，所以先切版本
+ *    再换 unit 是安全的。反过来（先换 unit 再切版本）会留下一份指向还没就绪目录的 unit，
+ *    而那种状态要等到下一次重启才暴露；
+ *  - verify 排在 activate 之后：`systemctl restart` 返回 0 只说明它把命令发出去了，
+ *    服务随后自己退掉时退出码仍然是 0，`is-active` 才是唯一能回答「服务现在活着吗」的那条命令。
+ */
+interface SystemdRun {
+  readonly config: SystemdTargetConfig
+  /** 推导出来的 unit 目录。推导不出会在装配期抛（DP.PERM.UNIT_DIR_NOT_WRITABLE） */
+  readonly unitDir: string
+}
+
+function systemdRunFor(
+  target: ApplyTargetInput,
+  ctx: TargetContext,
+  env: string,
+  envVars: Readonly<Record<string, string | undefined>>,
+  now: Date,
+  facts: Awaited<ReturnType<typeof acquireFactsDefault>>['facts'],
+): SystemdRun | undefined {
+  const spec = target.projectConfig.target?.systemd
+  if (spec === undefined) return undefined
+  const unitDir = resolveUnitDir({
+    facts,
+    ...(target.projectConfig.target !== undefined ? { target: target.projectConfig.target } : {}),
+  })
+  return {
+    unitDir,
+    config: systemdConfigFor({ project: target.project, env, envVars, targetCtx: ctx, now, systemd: spec, unitDir }),
+  }
+}
+
+/**
+ * 四个阶段的结论并成一段。`ownership` 取 install 的判定，理由同 nginxReport。
+ */
+function systemdReport(results: readonly SystemdExecResult[], unitDir: string): SystemdTargetResult {
+  const steps = results.flatMap((r) => r.steps.map((s) => ({ id: s.id, kind: s.kind, ok: s.ok, skipped: s.skipped })))
+  const first = results[0]
+  const last = results[results.length - 1]
+  if (first === undefined || last === undefined) {
+    // 调用点保证至少一个阶段（配了 systemd 就一定有 install），所以这是代码错误而非部署失败
+    throw new Error('systemdReport 收到了空的结果列表')
+  }
+  return {
+    unitDir,
+    file: last.file,
+    unitName: last.unitName,
+    ...(first.ownership !== undefined ? { ownership: first.ownership } : {}),
+    dryRun: last.dryRun,
+    reloaded: results.some((r) => r.reloaded),
+    restarted: results.some((r) => r.restarted),
+    skipped: steps.filter((s) => s.skipped).map((s) => s.id),
+    steps,
+    warnings: results.flatMap((r) => r.warnings),
+  }
+}
+
+/**
+ * systemd 失败时机器处在什么状态。**按失败的那一步分**而不是一句话糊过去：
+ * 「unit 已落盘但 systemd 还没读到」与「unit 已生效但服务没起来」要做的下一步完全不同，
+ * 而它们的现场都还在盘上（备份也在），处置方式相反。
+ *
+ * @param err 执行器抛出的原始错误。错误码与失败现场都从它身上取，不另传一份 ——
+ * 另传就多一处可能对不上的来源
+ * @param releaseId 本次已生效的版本号
+ * @returns 给人看的收场说明，含 systemd 的原话
+ */
+function systemdFailureWarning(err: unknown, releaseId: string): string {
+  const f = errorFields(err)
+  const failure = execFailureOf(err)
+  if (!isSystemdExecFailure(failure)) {
+    return `systemd 阶段失败 [${f.code}]：${f.message}（没能拿到结构化的失败现场，这不该发生，请连同配置报 issue）`
+  }
+  const scene =
+    failure.step === 'systemd.daemon-reload'
+      ? `版本已切到 ${releaseId}，新 unit 已写进 ${failure.file}，但 systemd daemon-reload 失败 —— 机器上生效的仍是上一份 unit（备份在 ${failure.file}.dp-backup），服务没断`
+      : `版本已切到 ${releaseId}，unit 已落盘并完成 daemon-reload，但服务没起来 —— 机器现在的状态是「新 unit + 无服务」`
+  const lines = [
+    `systemd 阶段失败 [${failure.step}]：${scene}。`,
+    '**没有回滚这次发布** —— 版本本身是好的（deploy 的健康检查过了），为了一份 unit 的问题把一次成功的发布退掉，只会把两件独立的事绑成一次失败。',
+    `失败原因 [${f.code}]：${f.message}`,
+    '下一步：按下面的原话排查服务自身（端口占用、可执行权限、WorkingDirectory 不存在都属这一类），修好后重跑 dp apply 或直接 systemctl restart。',
+  ]
+  if (failure.compensationErrors.length > 0) {
+    lines.push(`【补偿未完全成功，以下副作用留在机器上，需人工处理：${failure.compensationErrors.join('；')}】`)
+  }
+  if (failure.output !== undefined) lines.push(`systemd 原话：\n${failure.output}`)
+  return lines.join('\n')
+}
+
+/**
+ * process 的四个阶段在本仓是什么关系 —— **与 docker 同款**。
+ *
+ * 顺序是 ① deploy → ② installProcess → ③ activate → ④ verify：
+ * 启动/停止脚本写在 `<release 目录>/.dp/` 下，而那个目录由 deploy 造出来。
+ * 把 install 排在 deploy 之前只有一种结局：它要么建出一个与 deploy 无关的目录，
+ * 要么被 deploy 之后的清理顺手删掉 —— 两种情况下这个顺序都没有意义。
+ *
+ * 与 systemd 的差别不在顺序而在**回滚**：systemd 靠 `<unit>.dp-backup` 还原上一份 unit，
+ * process 靠上一版目录里那份脚本重新起。所以它的 activate 必须「先停后起」，
+ * 而停是不可撤销的 —— 停成功、起失败就是服务空窗，见 processFailureWarning。
+ */
+interface ProcessRun {
+  readonly config: ProcessTargetConfig
+}
+
+function processRunFor(
+  target: ApplyTargetInput,
+  ctx: TargetContext,
+  env: string,
+  envVars: Readonly<Record<string, string | undefined>>,
+  now: Date,
+): ProcessRun | undefined {
+  const spec = target.projectConfig.target?.process
+  if (spec === undefined) return undefined
+  return { config: processConfigFor({ project: target.project, env, envVars, targetCtx: ctx, now, process: spec }) }
+}
+
+/**
+ * 四个阶段的结论并成一段。
+ *
+ * 刻意**不含** pid：执行器的结果里只有 pidfile 位置（跨版本固定的那一份），
+ * pid 每次激活都不同。报告里报一个会变的值等于要求读的人自己去猜哪个是当前的。
+ */
+function processReport(results: readonly ProcessExecResult[]): ProcessTargetResult {
+  const steps = results.flatMap((r) => r.steps.map((s) => ({ id: s.id, kind: s.kind, ok: s.ok, skipped: s.skipped })))
+  const last = results[results.length - 1]
+  if (last === undefined) {
+    // 调用点保证配了 process 就有 install，所以这是代码错误而非部署失败
+    throw new Error('processReport 收到了空的结果列表')
+  }
+  return {
+    pidFile: last.pidFile,
+    dryRun: last.dryRun,
+    stopped: results.some((r) => r.stopped),
+    started: results.some((r) => r.started),
+    skipped: steps.filter((s) => s.skipped).map((s) => s.id),
+    steps,
+    warnings: results.flatMap((r) => r.warnings),
+  }
+}
+
+/**
+ * process 失败时机器处在什么状态。**按失败的那一步分**：
+ * 「停不掉旧进程」与「旧进程停了但新的没起来」是两种现场，而后一种是**服务空窗** ——
+ * 报成「部署失败」会让人以为线上还在跑旧版本。
+ *
+ * @param err 执行器抛出的原始错误。错误码与失败现场都从它身上取，不另传一份 ——
+ * 另传就多一处可能对不上的来源
+ * @param releaseId 本次已生效的版本号
+ * @returns 给人看的收场说明，含子进程的原话
+ */
+function processFailureWarning(err: unknown, releaseId: string): string {
+  const f = errorFields(err)
+  const failure = execFailureOf(err)
+  if (!isProcessExecFailure(failure)) {
+    return `process 阶段失败 [${f.code}]：${f.message}（没能拿到结构化的失败现场，这不该发生，请连同配置报 issue）`
+  }
+  // 两种现场的下一步不同，「要不要退版本」的结论也不同，所以两句都分开写：
+  // 合成一句就会在「旧进程还在跑」的情况下也说出「空窗」—— 那会让人以为线上没服务了
+  const stopped =
+    failure.step === 'process.stop-current'
+      ? {
+          scene: `版本已切到 ${releaseId}，但旧进程停不下来 —— **新版本没有启动**，机器上跑的还是旧进程（它仍占着 ${failure.pidFile}）`,
+          noRollback:
+            '**没有回滚这次发布** —— 版本本身是好的（deploy 的健康检查过了），而旧进程还在服务，退掉它不会让线上更好。',
+        }
+      : {
+          scene: `版本已切到 ${releaseId}，旧进程已停、新进程没起来 —— **服务现在是空窗的**，不是「还在跑旧的」`,
+          noRollback:
+            '**没有回滚这次发布** —— 版本本身是好的（deploy 的健康检查过了），而且回滚到这里是同样的空窗。',
+        }
+  const lines = [
+    `process 阶段失败 [${failure.step}]：${stopped.scene}。`,
+    stopped.noRollback,
+    `失败原因 [${f.code}]：${f.message}`,
+    `下一步：先看 stdoutLog 指向的文件拿退出原因，pidfile 在 ${failure.pidFile}；想先恢复服务就按上一版的启动脚本手动起一次。`,
+  ]
+  if (failure.compensationErrors.length > 0) {
+    lines.push(`【补偿未完全成功，以下副作用留在机器上，需人工处理：${failure.compensationErrors.join('；')}】`)
+  }
+  if (failure.output !== undefined) lines.push(`process 原话：\n${failure.output}`)
+  return lines.join('\n')
+}
+
+/**
  * docker 的「两个阶段」在本仓是什么关系 —— **与 nginx 相反**。
  *
  * 顺序是 ① deploy → ② installDocker → ③ activateDocker，不是随手排的：
@@ -581,9 +779,25 @@ function dockerFailureWarning(failure: unknown, releaseId: string): string {
   return lines.join('\n')
 }
 
-/** 从抛出的错误里取出执行器挂上去的失败现场。传错对象会让 healing 整段消失 */
-function dockerFailureOf(err: unknown): unknown {
+/** 执行器把失败现场挂在 DpError.cause 上（ports 的 DpError 走 Error 的 cause）。传错对象会让现场整段消失 —— 而那原话是用户唯一的下一步 */
+function execFailureOf(err: unknown): unknown {
   return err instanceof Error ? err.cause : undefined
+}
+
+/**
+ * 四个目标都可能失败，结果里只报一个：从原因列表里挑更严重的那个。
+ *
+ * 逐对比较会把「有四个原因」写成嵌套的两两比较，读的人得自己数一遍才知道
+ * 哪几个被比过了、哪几个没参与。折叠一次只留一个数，结论与顺序无关。
+ *
+ * @param causes 各目标抛出的原始错误，undefined 表示那个目标没失败
+ * @returns 最严重的那个**原始错误**（不是它的结构化副本）；全都没失败时 undefined
+ */
+function pickWorstError(causes: readonly unknown[]): unknown {
+  const present = causes.filter((c) => c !== undefined)
+  if (present.length === 0) return undefined
+  // pickWorseError 返回的是入参之一，所以折叠全程都是原始错误 —— 退出码仍映射得出来
+  return present.reduce((a, b) => pickWorseError(a, b))
 }
 
 /**
@@ -673,6 +887,9 @@ async function applyOne(
     // 发生时机是「一个字节都还没写」，所以它属于装配期失败而不是部署失败
     const nginx = nginxRunFor(target, ctx, flags.env ?? '', context.env, target.now, resolved.facts)
     const docker = dockerRunFor(target, ctx, flags.env ?? '', context.env, target.now)
+    // unitDir 推导同理：DP.PERM.UNIT_DIR_NOT_WRITABLE 也发生在装配期，一个字节都没写
+    const systemd = systemdRunFor(target, ctx, flags.env ?? '', context.env, target.now, resolved.facts)
+    const process = processRunFor(target, ctx, flags.env ?? '', context.env, target.now)
 
     // ④ --dry-run：算完就停，一个字节都不写
     if (flags.dryRun) {
@@ -752,6 +969,94 @@ async function applyOne(
           }),
         )
       }
+      // systemd 走**真**执行器的 dryRun：影子校验（`systemd-analyze verify`）是只读的，
+      // 它给的结论是真的；写进去的候选随即被撤销，执行器自己记 skipped。
+      // 跳掉它报个成功，等于把「这份 unit 到底起不起来」藏起来
+      const systemdDryRuns: SystemdExecResult[] = []
+      const systemdDryRunWarnings: string[] = []
+      if (systemd !== undefined) {
+        systemdDryRuns.push(
+          await installSystemd({
+            runner: resolved.runner,
+            ctx,
+            config: systemd.config,
+            dryRun: true,
+            onStep: (step) => logger.info('apply.systemd.install', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+        // activate 的备份/替换/reload/restart 在 dryRun 下全部 skipped，但所有权判定照跑 ——
+        // 跳过它就报成功，等于把「这份 unit 现在能不能被替换」藏起来了
+        systemdDryRuns.push(
+          await activateSystemd({
+            runner: resolved.runner,
+            ctx,
+            config: systemd.config,
+            dryRun: true,
+            onStep: (step) => logger.info('apply.systemd.activate', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+        // verify 照跑：`is-active` 只读，而它回答的是「服务现在活着吗」。
+        // 但它报的是**部署前**的状态（dryRun 什么都没部署），所以不通过时
+        // 记成告警而不是错误 —— 报成错误会让 --dry-run 在任何还没部署过的机器上必红，
+        // 于是没人再跑它；而那条信息本身仍然如实说出来了
+        try {
+          systemdDryRuns.push(
+            await verifySystemd({
+              runner: resolved.runner,
+              ctx,
+              config: systemd.config,
+              dryRun: true,
+              onStep: (step) => logger.info('apply.systemd.verify', { step: step.id, kind: step.kind, title: step.title }),
+            }),
+          )
+        } catch (err) {
+          systemdDryRunWarnings.push(
+            `DP.SYSD.NOT_ACTIVE（--dry-run 只报告部署前的状态）：${errorFields(err).message}。` +
+              '--dry-run 没有部署也没有重启服务，所以这是这台机器现在的状态，不是本次部署的结论',
+          )
+        }
+      }
+      // process 侧：install 把脚本写进版本目录再撤掉，activate 在 dryRun 下
+      // 既不真停也不真起（停进程不可撤销）。执行器按「机器上有没有留下作用」记 skipped
+      const processDryRuns: ProcessExecResult[] = []
+      const processDryRunWarnings: string[] = []
+      if (process !== undefined) {
+        processDryRuns.push(
+          await installProcess({
+            runner: resolved.runner,
+            ctx,
+            config: process.config,
+            dryRun: true,
+            onStep: (step) => logger.info('apply.process.install', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+        processDryRuns.push(
+          await activateProcess({
+            runner: resolved.runner,
+            ctx,
+            config: process.config,
+            dryRun: true,
+            onStep: (step) => logger.info('apply.process.activate', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+        // 同 systemd 的 verify：只读，结论真实，但描述的是部署前的现场，所以记告警
+        try {
+          processDryRuns.push(
+            await verifyProcess({
+              runner: resolved.runner,
+              ctx,
+              config: process.config,
+              dryRun: true,
+              onStep: (step) => logger.info('apply.process.verify', { step: step.id, kind: step.kind, title: step.title }),
+            }),
+          )
+        } catch (err) {
+          processDryRunWarnings.push(
+            `DP.PROC.NOT_RUNNING（--dry-run 只报告部署前的状态）：${errorFields(err).message}。` +
+              '--dry-run 没有启动任何进程，所以这是这台机器现在的状态，不是本次部署的结论',
+          )
+        }
+      }
       // --json 时 stdout 只能有那一个 JSON 文档，正文走日志
       if (flags.json) {
         logger.info('apply.dry_run', { releaseId, steps: plan.steps.length, wrote: false })
@@ -764,13 +1069,16 @@ async function applyOne(
         releaseId,
         filesWritten: 0,
         rolledBack: false,
-        warnings: dockerDryRunWarnings,
+        warnings: [...dockerDryRunWarnings, ...systemdDryRunWarnings, ...processDryRunWarnings],
         steps: plan.steps.map((s) => ({ id: s.id, kind: s.kind, ok: true })),
         probeNotes: resolved.probeNotes,
         dryRun: true,
         ...(nginx !== undefined ? { nginx: nginxReport(nginx.confd, dryRuns) } : {}),
         // install 没跑成时不造 docker 段：空段等于声称「拉过了、起过了」
         ...(docker !== undefined && dockerDryRuns.length > 0 ? { docker: dockerReport(dockerDryRuns, docker) } : {}),
+        // install 一定跑成（失败即抛，走不到这里），所以这里无条件造段
+        ...(systemd !== undefined ? { systemd: systemdReport(systemdDryRuns, systemd.unitDir) } : {}),
+        ...(process !== undefined ? { process: processReport(processDryRuns) } : {}),
       }
       return { result, exitCode: 0 }
     }
@@ -797,8 +1105,8 @@ async function applyOne(
             remoteFacts: resolved.facts,
           })
 
-    // ⑥ nginx install：**先于 deploy**。
-    // 失败时一个字节都还没写进 confd、更没碰发布根，所以直接按该错误码退，
+    // ⑥ nginx / systemd install：**都先于 deploy**。
+    // 失败时一个字节都还没写进 confd / unitDir、更没碰发布根，所以直接按该错误码退，
     // 不跑 deploy、也不回滚（没有东西可回滚）
     const nginxResults: NginxExecResult[] = []
     if (nginx !== undefined) {
@@ -808,6 +1116,20 @@ async function applyOne(
           ctx,
           config: nginx.config,
           onStep: (step) => logger.info('apply.nginx.install', { step: step.id, kind: step.kind, title: step.title }),
+        }),
+      )
+    }
+
+    // systemd 的 install 与 nginx 同款：只写影子目录 + `systemd-analyze verify`，
+    // 完全不碰 unitDir 里正在生效的 unit。顺序理由见 systemdRunFor 的注释
+    const systemdResults: SystemdExecResult[] = []
+    if (systemd !== undefined) {
+      systemdResults.push(
+        await installSystemd({
+          runner: resolved.runner,
+          ctx,
+          config: systemd.config,
+          onStep: (step) => logger.info('apply.systemd.install', { step: step.id, kind: step.kind, title: step.title }),
         }),
       )
     }
@@ -896,6 +1218,81 @@ async function applyOne(
 
     const nginxSection = nginx === undefined ? undefined : nginxReport(nginx.confd, nginxResults)
 
+    // ⑦ systemd activate + verify：**在 deploy 之后**。此时 current 已指向新版本，
+    // unit 里的 ${release.current} 软链正好服务新内容。
+    // 失败不回滚 release，理由与 nginx activate 同款：版本本身是好的，
+    // 为了一份 unit 的问题退掉一次成功的发布，只会把两件独立的事绑成一次失败。
+    // 执行器也不做补偿（unit 已落盘且已 daemon-reload，退回去也换不回服务）
+    let systemdCause: unknown
+    if (systemd !== undefined) {
+      try {
+        systemdResults.push(
+          await activateSystemd({
+            runner: resolved.runner,
+            ctx,
+            config: systemd.config,
+            onStep: (step) => logger.info('apply.systemd.activate', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+        // verify 排在 activate 之后：restart 返回 0 只说明命令发出去了，
+        // 服务随后自己退掉时退出码仍是 0，is-active 才是「活着吗」的唯一答案
+        systemdResults.push(
+          await verifySystemd({
+            runner: resolved.runner,
+            ctx,
+            config: systemd.config,
+            onStep: (step) => logger.info('apply.systemd.verify', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+      } catch (err) {
+        systemdCause = err
+        logger.error('apply.systemd.failed', { code: errorFields(err).code })
+      }
+    }
+
+    const systemdSection = systemd === undefined ? undefined : systemdReport(systemdResults, systemd.unitDir)
+
+    // ⑦ process：**install 在 deploy 之后**，activate 再其后，verify 最后。
+    // 顺序理由见 processRunFor 的注释：脚本写在 deploy 造出来的版本目录里。
+    const processResults: ProcessExecResult[] = []
+    /** 保留原对象：退出码由 exitCodeFor 按错误码映射，只留结构化副本就映射不了 */
+    let processCause: unknown
+    if (process !== undefined) {
+      try {
+        processResults.push(
+          await installProcess({
+            runner: resolved.runner,
+            ctx,
+            config: process.config,
+            onStep: (step) => logger.info('apply.process.install', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+        processResults.push(
+          await activateProcess({
+            runner: resolved.runner,
+            ctx,
+            config: process.config,
+            onStep: (step) => logger.info('apply.process.activate', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+        // verify 排在 activate 之后：start 脚本立即返回，进程随后自己退掉时退出码仍是 0，
+        // kill -0 才是唯一能证明「服务真的活着」的那条命令
+        processResults.push(
+          await verifyProcess({
+            runner: resolved.runner,
+            ctx,
+            config: process.config,
+            onStep: (step) => logger.info('apply.process.verify', { step: step.id, kind: step.kind, title: step.title }),
+          }),
+        )
+      } catch (err) {
+        // 不回滚 release。停进程不可撤销，activate 失败时机器上是什么状态由
+        // pidfile 与 ps 说话 —— 这里只保证把那句话说清楚，见 processFailureWarning
+        processCause = err
+        logger.error('apply.process.failed', { code: errorFields(err).code })
+      }
+    }
+
     // ⑦ docker：**install 在 deploy 之后**，activate 再其后。
     // 顺序理由见 dockerRunFor 的注释：compose 文件随 release 上传，install 只是 stat 确认，
     // 排在传输之前它永远失败或什么也没证明。
@@ -945,7 +1342,10 @@ async function applyOne(
     // install 失败时一个结果都没有（第一个阶段就抛了），这时**不造** docker 段：
     // 报一个「没有步骤、没有拉取、没有启动」的段，等于在结果里声称这些事发生过
     const dockerSection = docker === undefined || dockerResults.length === 0 ? undefined : dockerReport(dockerResults, docker)
-    // activate 的告警排在发布告警**之后**：它描述的是「版本已切、conf 没换」，
+    // install 失败时同样不造 process 段：它会声称「没写脚本、没启动」，
+    // 而实际发生的是「脚本写了但某个阶段抛了」—— 让读的人以为机器上什么都没动过
+    const processSection = process === undefined || processResults.length === 0 ? undefined : processReport(processResults)
+    // activate 的告警排在发布告警**之后**：它描述的是「版本已切、conf/unit 没换」，
     // 排在前面会让人以为发布本身也出了问题
     const warnings = [
       ...deployed.warnings,
@@ -953,11 +1353,20 @@ async function applyOne(
       ...(nginx !== undefined && nginxError !== undefined
         ? [activateFailedWarning(deployed.releaseId, nginx.current, nginxError)]
         : []),
+      ...(systemdSection?.warnings ?? []),
+      ...(systemdCause !== undefined ? [systemdFailureWarning(systemdCause, deployed.releaseId)] : []),
+      ...(processSection?.warnings ?? []),
+      ...(processCause !== undefined ? [processFailureWarning(processCause, deployed.releaseId)] : []),
       // docker 的告警排在最后：它描述的是「版本已切、服务没起来」，
       // 排在前面会让人以为发布本身也出了问题
       ...(dockerSection?.warnings ?? []),
-      ...(dockerCause !== undefined ? [dockerFailureWarning(dockerFailureOf(dockerCause), deployed.releaseId)] : []),
+      ...(dockerCause !== undefined ? [dockerFailureWarning(execFailureOf(dockerCause), deployed.releaseId)] : []),
     ]
+
+    // 四个目标都可能失败，结果里只报一个：取更严重的那个。
+    // 报其中一个而吞掉另一个，等于把「这次部署有两处问题」说成一处
+    const causes: readonly unknown[] = [nginxCause, systemdCause, processCause, dockerCause]
+    const worstCause = pickWorstError(causes)
 
     result = {
       project,
@@ -971,20 +1380,15 @@ async function applyOne(
       probeNotes: resolved.probeNotes,
       dryRun: false,
       ...(nginxSection !== undefined ? { nginx: nginxSection } : {}),
+      ...(systemdSection !== undefined ? { systemd: systemdSection } : {}),
+      ...(processSection !== undefined ? { process: processSection } : {}),
       ...(dockerSection !== undefined ? { docker: dockerSection } : {}),
-      // 两边都失败时取更严重的那个：nginx 报 conf 没换、docker 报服务没起来，
-      // 报其中一个而吞掉另一个，等于把「这次部署有两处问题」说成一处
-      ...(nginxError !== undefined || dockerError !== undefined
-        ? { error: pickWorseError(nginxCause, dockerCause) }
-        : {}),
+      ...(worstCause !== undefined ? { error: errorFields(worstCause) } : {}),
     }
     // 退出码不能因为「发布了但服务没起来」就报成功：CI 需要据此通知。
-    // 两个原因都可能有，取更严重的那次（映射规则全在 exitCodeFor 里）
-    if (dockerCause !== undefined) {
-      exitCode = exitCodeFor(dockerCause)
-    }
-    if (nginxCause !== undefined) {
-      exitCode = Math.max(exitCode, exitCodeFor(nginxCause))
+    // 四个目标都可能有原因，取最严重的那次（映射规则全在 exitCodeFor 里）
+    for (const cause of causes) {
+      if (cause !== undefined) exitCode = Math.max(exitCode, exitCodeFor(cause))
     }
     logger.info('apply.done', { releaseId: deployed.releaseId, filesWritten: deployed.filesWritten })
     return { result, exitCode }

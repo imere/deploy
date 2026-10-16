@@ -26,6 +26,8 @@
     "@dp/target-static": "workspace:*",
     "@dp/target-nginx": "workspace:*",
     "@dp/target-docker": "workspace:*",
+    "@dp/target-systemd": "workspace:*",
+    "@dp/target-process": "workspace:*",
     "@dp/template": "workspace:*",
     "@dp/transport": "workspace:*"
   },

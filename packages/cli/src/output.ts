@@ -327,6 +327,40 @@ export interface DockerTargetResult {
   readonly services?: ReadonlyArray<{ service: string; state: string; status: string; health: string }>
 }
 
+/**
+ * systemd 阶段的结论。字段全部来自 SystemdExecResult，不另造一套。
+ */
+export interface SystemdTargetResult {
+  readonly unitDir: string
+  /** unitDir 里的目标文件（含目录） */
+  readonly file: string
+  readonly unitName: string
+  readonly ownership?: { readonly action: string; readonly reason: string; readonly backup: boolean }
+  readonly dryRun: boolean
+  readonly reloaded: boolean
+  readonly restarted: boolean
+  /** 本次在机器上没留下作用的步骤 id */
+  readonly skipped: readonly string[]
+  readonly steps: ReadonlyArray<{ id: string; kind: string; ok: boolean; skipped: boolean }>
+  readonly warnings: readonly string[]
+}
+
+/**
+ * process 阶段的结论。字段全部来自 ProcessExecResult，不另造一套。
+ */
+export interface ProcessTargetResult {
+  /** 进程管理的落点。跨版本只有一份，所以激活时要停的「当前那个」才找得到 */
+  readonly pidFile: string
+  readonly dryRun: boolean
+  /** 停旧进程这一步真跑过（首次部署没有 pidfile、或 dryRun 时为 false） */
+  readonly stopped: boolean
+  readonly started: boolean
+  /** 本次在机器上没留下作用的步骤 id */
+  readonly skipped: readonly string[]
+  readonly steps: ReadonlyArray<{ id: string; kind: string; ok: boolean; skipped: boolean }>
+  readonly warnings: readonly string[]
+}
+
 /** 一个目标机的执行结果。刻意**不含** ok / command —— 那两个是信封级字段 */
 export interface ApplyTargetResult {
   readonly project: string
@@ -347,6 +381,10 @@ export interface ApplyTargetResult {
   readonly nginx?: NginxTargetResult
   /** 配了 target.docker 才有 */
   readonly docker?: DockerTargetResult
+  /** 配了 target.systemd 才有 */
+  readonly systemd?: SystemdTargetResult
+  /** 配了 target.process 才有 */
+  readonly process?: ProcessTargetResult
 }
 
 /**
@@ -424,6 +462,38 @@ export function renderApplyPretty(result: ApplyTargetResult): string {
     }
     if (d.warnings.length > 0) {
       lines.push('', 'docker 告警', ...d.warnings.map((w) => `  ! ${w}`))
+    }
+  }
+  if (result.systemd !== undefined) {
+    const s = result.systemd
+    lines.push('', `systemd · ${s.unitName}`)
+    lines.push(`  unitDir:  ${s.unitDir}`)
+    if (s.ownership !== undefined) lines.push(`  所有权:   ${s.ownership.action} —— ${s.ownership.reason}`)
+    lines.push(
+      `  daemon-reload: ${s.dryRun ? '未发（--dry-run）' : s.reloaded ? '已发出' : '未发'}`,
+    )
+    lines.push(`  restart:  ${s.dryRun ? '未发（--dry-run）' : s.restarted ? '已发出' : '未发'}`)
+    for (const step of s.steps) {
+      const mark = step.skipped ? '-' : step.ok ? '✓' : '✗'
+      const note = step.skipped ? '（未在机器上留下作用）' : ''
+      lines.push(`  ${mark} [${step.kind}] ${step.id}${note}`)
+    }
+    if (s.warnings.length > 0) {
+      lines.push('', 'systemd 告警', ...s.warnings.map((w) => `  ! ${w}`))
+    }
+  }
+  if (result.process !== undefined) {
+    const p = result.process
+    lines.push('', `process · ${p.pidFile}`)
+    lines.push(`  停止旧进程: ${p.dryRun ? '未停（--dry-run）' : p.stopped ? '已停' : '没有可停的（首次部署）'}`)
+    lines.push(`  启动新进程: ${p.dryRun ? '未启动（--dry-run）' : p.started ? '已启动' : '未启动'}`)
+    for (const step of p.steps) {
+      const mark = step.skipped ? '-' : step.ok ? '✓' : '✗'
+      const note = step.skipped ? '（未在机器上留下作用）' : ''
+      lines.push(`  ${mark} [${step.kind}] ${step.id}${note}`)
+    }
+    if (p.warnings.length > 0) {
+      lines.push('', 'process 告警', ...p.warnings.map((w) => `  ! ${w}`))
     }
   }
   if (result.warnings.length > 0) {

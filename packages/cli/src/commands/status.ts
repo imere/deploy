@@ -7,9 +7,13 @@
  */
 import { readReleaseState, verifyRelease } from '@dp/target-static'
 import { verifyDocker, type ComposePsEntry } from '@dp/target-docker'
+import { verifyProcess } from '@dp/target-process'
+import { verifySystemd } from '@dp/target-systemd'
 import type { TargetContext } from '@dp/ports'
 import { defaultApplyDeps } from '../deps.js'
 import { dockerConfigFor } from '../docker-config.js'
+import { processConfigFor } from '../process-config.js'
+import { resolveUnitDir, systemdConfigFor } from '../systemd-config.js'
 import { exitCodeFor } from '../output.js'
 import { renderOpsJson, renderOpsPretty, type StatusResult } from '../output-ops.js'
 import { selectTargets } from '../targets.js'
@@ -141,6 +145,58 @@ async function statusOne(
         }
       } catch (err) {
         warnings.push(`读不到 compose 状态：${targetErrorFields(err).message}`)
+      }
+    }
+
+    // systemd / process：`is-active` 与 `kill -0` 都是只读的，所以查它们不违反 status 的
+    // 零副作用。**但不新增结果字段** —— compose 那一栏装的是 ps 返回的服务条目数组，
+    // 而这两个执行器的结论里根本没有服务状态可搬；要填就得自己编一份，那就是
+    // 「报告了没发生过的事」。所以失败只进 warnings：status 的职责是报告事实，
+    // 让人在这里看到「服务现在不 active」比让整条命令变红有用得多
+    const systemdSpec = input.projectConfig.target?.systemd
+    if (systemdSpec !== undefined) {
+      try {
+        const unitDir = resolveUnitDir({
+          facts: resolved.facts,
+          ...(input.projectConfig.target !== undefined ? { target: input.projectConfig.target } : {}),
+        })
+        await verifySystemd({
+          runner: resolved.runner,
+          ctx,
+          config: systemdConfigFor({
+            project: input.project,
+            env: flags.env ?? '',
+            envVars: context.env,
+            targetCtx: ctx,
+            now: new Date(0),
+            systemd: systemdSpec,
+            unitDir,
+          }),
+          onStep: (step) => logger.info('status.systemd', { step: step.id, kind: step.kind }),
+        })
+      } catch (err) {
+        warnings.push(`读不到 systemd 服务状态：${targetErrorFields(err).message}`)
+      }
+    }
+
+    const processSpec = input.projectConfig.target?.process
+    if (processSpec !== undefined) {
+      try {
+        await verifyProcess({
+          runner: resolved.runner,
+          ctx,
+          config: processConfigFor({
+            project: input.project,
+            env: flags.env ?? '',
+            envVars: context.env,
+            targetCtx: ctx,
+            now: new Date(0),
+            process: processSpec,
+          }),
+          onStep: (step) => logger.info('status.process', { step: step.id, kind: step.kind }),
+        })
+      } catch (err) {
+        warnings.push(`读不到 process 存活状态：${targetErrorFields(err).message}`)
       }
     }
 

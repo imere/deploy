@@ -7,10 +7,14 @@
  */
 import { readReleaseState, verifyRelease } from '@dp/target-static'
 import { verifyDocker } from '@dp/target-docker'
+import { verifyProcess } from '@dp/target-process'
+import { verifySystemd } from '@dp/target-systemd'
 import { DpError, type Runner, type TargetContext } from '@dp/ports'
 import type { HostConfig, ProjectConfig } from '@dp/schema'
 import { defaultApplyDeps } from '../deps.js'
 import { dockerConfigFor } from '../docker-config.js'
+import { processConfigFor } from '../process-config.js'
+import { resolveUnitDir, systemdConfigFor } from '../systemd-config.js'
 import { exitCodeFor } from '../output.js'
 import { renderOpsJson, renderOpsPretty, type VerifyResult } from '../output-ops.js'
 import { selectTargets } from '../targets.js'
@@ -111,6 +115,49 @@ async function verifyOne(
           docker: dockerSpec,
         }),
         onStep: (step) => logger.info('verify.docker', { step: step.id, kind: step.kind }),
+      })
+    }
+
+    // systemd：`systemctl is-active` 是唯一能回答「服务活着吗」的命令
+    // （restart 返回 0 只说明命令发出去了，服务随后自己退掉时它仍是 0）
+    const systemdSpec = input.projectConfig.target?.systemd
+    if (systemdSpec !== undefined) {
+      const unitDir = resolveUnitDir({
+        facts: resolved.facts,
+        ...(input.projectConfig.target !== undefined ? { target: input.projectConfig.target } : {}),
+      })
+      await verifySystemd({
+        runner: resolved.runner,
+        ctx,
+        config: systemdConfigFor({
+          project: input.project,
+          env: flags.env ?? '',
+          envVars: context.env,
+          targetCtx: ctx,
+          now: new Date(0),
+          systemd: systemdSpec,
+          unitDir,
+        }),
+        onStep: (step) => logger.info('verify.systemd', { step: step.id, kind: step.kind }),
+      })
+    }
+
+    // process：pidfile 里的 pid + `kill -0`。它不读 ps，所以「同名进程」不会被误判成
+    // 「我们的进程」—— 而 ps 比对命令行恰恰会把那种现场判成通过
+    const processSpec = input.projectConfig.target?.process
+    if (processSpec !== undefined) {
+      await verifyProcess({
+        runner: resolved.runner,
+        ctx,
+        config: processConfigFor({
+          project: input.project,
+          env: flags.env ?? '',
+          envVars: context.env,
+          targetCtx: ctx,
+          now: new Date(0),
+          process: processSpec,
+        }),
+        onStep: (step) => logger.info('verify.process', { step: step.id, kind: step.kind }),
       })
     }
 
