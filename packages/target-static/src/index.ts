@@ -271,6 +271,10 @@ export async function deploy(input: DeployInput): Promise<DeployResult> {
     filesWritten = moved.filesWritten
     if (moved.warnings !== undefined) warnings.push(...moved.warnings)
   } else {
+    // entries 直写与钩子分支同一条前置：staging 必须先是个真目录再开写。
+    // 依赖「entries 里恰好有目录条目把它带出来」是把落盘押在清单形状上——夹具里
+    // 一份纯文件清单就会在 rename 前以「源不存在」翻车（真实盘则表现为 writeFile ENOENT）。
+    await runner.mkdir(staging, { recursive: true, mode: DIR_MODE })
     for (const entry of input.entries) {
       const target = joinPath(staging, entry.relativePath)
       if (entry.kind === 'dir') {
@@ -351,7 +355,10 @@ export async function verifyRelease(
 }
 
 /**
- * 回退到上一版。索引里没有上一版就明确报错，不做"看起来成功"的操作目标优先取**盘上索引**（releases 的倒数第二位）而不是 `ctx.previousReleaseId`：上一次部署未必是这次调用方做的，用它的认知回退会退到一个可能从未在这台机器上生效过的版本。索引读不出来时才退回 ctx —— 那是「索引丢了但调用方知道」的降级。
+ * 回退到上一版。索引里没有上一版就明确报错，不做"看起来成功"的操作。
+ * 目标优先取**盘上索引**（releases 的倒数第二位）而不是 `ctx.previousReleaseId`：
+ * 上一次部署未必是这次调用方做的，用它的认知回退会退到一个可能从未在这台机器上生效过的版本。
+ * 索引读不出来时才退回 ctx —— 那是「索引丢了但调用方知道」的降级。
  *
  * @param runner 目标机通道
  * @param ctx 发布上下文；只用 root 与 previousReleaseId（后者仅在索引不可用时兜底）
