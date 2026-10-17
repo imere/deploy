@@ -1,6 +1,8 @@
-import { DpError } from '@dp/ports'
+import { DpError, MANAGED_MARKER } from '@dp/ports'
 import { renderString, type RenderContext } from '@dp/template'
 import type { SystemdTargetConfig } from './types.js'
+
+export { isManaged, MANAGED_MARKER } from '@dp/ports'
 
 /**
  * unit 的值里不许出现的字符。
@@ -11,12 +13,6 @@ import type { SystemdTargetConfig } from './types.js'
  */
 // eslint-disable-next-line no-control-regex -- 这条规则防的是「正则里混进控制字符」，而这里要找的就是控制字符本身
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
-
-/** 标记本体。渲染时写进 unit 头部，覆盖前靠它确认归属 */
-export const MANAGED_MARKER = '# managed by dp'
-
-/** 去掉 `#` 的正文，与标记本体同源，避免两处各写一份字面量后漂移 */
-const MARKER_TEXT = MANAGED_MARKER.slice(1).trim()
 
 /**
  * `renderUnit` 的输入。unit 正文**全部来自 `config`**，另三项是渲染期要用的上下文：
@@ -140,18 +136,4 @@ function describeUnit(unitName: string): string {
 
 function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
-}
-
-/**
- * unit 里是否带 managed 标记。**只看前几行**：标记是头部注释，正文里出现同名文本
- * 不构成归属凭证。空内容同样返回 false。
- *
- * @param content unit 文件全文
- * @returns true 只说明「头部注释自称由 dp 管理」，不等于内容真是 dp 写的
- */
-export function isManaged(content: string): boolean {
-  return content
-    .split(/\r?\n/)
-    .slice(0, 5)
-    .some((line) => line.trimStart().startsWith('#') && line.includes(MARKER_TEXT))
 }

@@ -1,15 +1,10 @@
-import { DpError, RELEASES_DIR_NAME, type Step, type Target, type TargetContext } from '@dp/ports'
+import { DpError, RELEASES_DIR_NAME, joinRemotePath, type Step, type Target, type TargetContext } from '@dp/ports'
 import { renderString } from '@dp/template'
 import { renderUnit } from './unit.js'
 import type { SystemdTargetConfig } from './types.js'
 
 const BACKUP_SUFFIX = '.dp-backup'
 const NEW_SUFFIX = '.dp-new'
-
-/** 统一用 `/`：这些路径会被拼进远端的命令行，反斜杠在 Linux 上是转义而不是分隔符 */
-function joinPath(...parts: readonly string[]): string {
-  return parts.filter((p) => p !== '').join('/')
-}
 
 /**
  * unit 在目标机上的落点。**全是 ctx 的纯函数** —— 影子目录也落在 release 目录下，
@@ -48,15 +43,15 @@ export interface UnitPaths {
 export function unitPaths(ctx: TargetContext, config: SystemdTargetConfig): UnitPaths {
   assertUnitDir(config.unitDir)
   const unitName = resolveUnitName(ctx, config)
-  const file = joinPath(config.unitDir.replace(/\/+$/, ''), unitName)
-  const releaseDir = joinPath(ctx.root.replace(/\/+$/, ''), RELEASES_DIR_NAME, ctx.releaseId)
-  const shadowRoot = joinPath(releaseDir, '.dp')
+  const file = joinRemotePath(config.unitDir.replace(/\/+$/, ''), unitName)
+  const releaseDir = joinRemotePath(ctx.root.replace(/\/+$/, ''), RELEASES_DIR_NAME, ctx.releaseId)
+  const shadowRoot = joinRemotePath(releaseDir, '.dp')
   return {
     unitName,
     file,
     shadowRoot,
-    shadowDir: joinPath(shadowRoot, ctx.releaseId),
-    candidate: joinPath(shadowRoot, ctx.releaseId, unitName),
+    shadowDir: joinRemotePath(shadowRoot, ctx.releaseId),
+    candidate: joinRemotePath(shadowRoot, ctx.releaseId, unitName),
     backup: `${file}${BACKUP_SUFFIX}`,
     newFile: `${file}${NEW_SUFFIX}`,
     scopeArgv: config.scope === 'user' ? ['--user'] : [],

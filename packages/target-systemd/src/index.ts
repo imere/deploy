@@ -11,7 +11,6 @@ export {
 } from './target.js'
 export {
   activateSystemd,
-  decideUnitOverwrite,
   installSystemd,
   isSystemdExecFailure,
   rollbackSystemd,

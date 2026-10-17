@@ -1,5 +1,8 @@
 import {
   DpError,
+  describeExecFailure,
+  excerptOutput,
+  isManaged,
   type DpErrorCode,
   type ExecResult,
   type Runner,
@@ -8,19 +11,14 @@ import {
 } from '@dp/ports'
 import {
   renderUnitFor,
-  systemctlArgv,
   systemdTarget,
   unitPaths,
   type UnitPaths,
 } from './target.js'
-import { isManaged } from './unit.js'
 import type { SystemdTargetConfig } from './types.js'
 
 /** 默认命令超时。守护进程类命令（restart）会自己返回，不需要更长 */
 const DEFAULT_TIMEOUT_MS = 30_000
-
-/** 错误信息里保留多少 systemctl 输出。整段塞进去会刷屏，并把真正有用的首行挤走 */
-const OUTPUT_LIMIT = 2000
 
 const SHADOW_DIR_MODE = 0o700
 const UNIT_MODE = 0o644
@@ -111,29 +109,22 @@ export interface UnwindReport {
   readonly errors: readonly string[]
 }
 
-/** 截断长输出：8MB 的 stderr 塞进异常既刷屏又会把真正有用的首行挤走 */
-function excerpt(text: string): string {
-  const trimmed = text.trim()
-  if (trimmed.length === 0) return ''
-  return trimmed.length <= OUTPUT_LIMIT ? trimmed : `${trimmed.slice(0, OUTPUT_LIMIT)}…（已截断，原文 ${trimmed.length} 字节）`
-}
-
 /** systemctl 的原话必须进错误信息。只报「失败了」等于让用户自己上机器重跑一遍 */
 function outputOf(result: ExecResult): string {
-  const err = excerpt(result.stderr)
+  const err = excerptOutput(result.stderr)
   if (err !== '') return `systemctl stderr：\n${err}`
-  const out = excerpt(result.stdout)
+  const out = excerptOutput(result.stdout)
   if (out !== '') return `systemctl stdout（stderr 为空）：\n${out}`
   return 'systemctl 没有留下任何输出'
 }
 
-function describeError(err: unknown): string {
-  if (err instanceof DpError) return `${err.code}: ${err.message}`
-  if (err instanceof Error) return err.message
-  return String(err)
-}
-
-/** 建目录并把**最外层那级原本不存在的目录**登记成撤销目标 */
+/**
+ * 建目录并把**最外层那级原本不存在的目录**登记成撤销目标。
+ *
+ * 与 nginx / process 执行器里的 mkdirTracked 同构（同一套「建目录 + 登记撤销」台账），
+ * 差异在撤销边界（这里的 root 是显式传入）与权限位（0o700）；统一成一份要以
+ * exec-session 基件为前提，本包暂不收
+ */
 async function mkdirTracked(session: Session, dir: string, root: string): Promise<void> {
   const chain: string[] = []
   let cur = ''
@@ -195,7 +186,7 @@ async function readUnitIfExists(session: Session): Promise<string | null> {
  * @param options `force` 表示明知不带标记也要写（仍会先备份）
  * @returns `action`：新建 / 覆盖（配 `backup=true`）/ 拒绝；`reason` 给错误信息用
  */
-export function decideUnitOverwrite(
+function decideUnitOverwrite(
   existing: string | null,
   options?: { readonly force?: boolean },
 ): { readonly action: 'create' | 'replace' | 'abort'; readonly reason: string; readonly backup: boolean } {
@@ -320,7 +311,7 @@ class Session {
         await entry.run()
         done.push(entry.label)
       } catch (err) {
-        errors.push(`${entry.label} → ${describeError(err)}`)
+        errors.push(`${entry.label} → ${describeExecFailure(err)}`)
       }
     }
     return { done, errors }
@@ -511,7 +502,7 @@ export async function activateSystemd(input: SystemdExecInput): Promise<SystemdE
   if (session.dryRun) {
     session.skip(reloadStep)
   } else {
-    const reloaded = await session.exec(systemctlArgv(session.paths, 'daemon-reload'))
+    const reloaded = await session.exec(argvOf(reloadStep))
     if (reloaded.code !== 0) {
       return session.fail(reloadStep, 'DP.SYSD.DAEMON_RELOAD_FAILED', `systemctl daemon-reload 失败（退出码 ${reloaded.code}）`, {
         output: outputOf(reloaded),
@@ -533,7 +524,7 @@ export async function activateSystemd(input: SystemdExecInput): Promise<SystemdE
   if (session.dryRun) {
     session.skip(restartStep)
   } else {
-    const restarted = await session.exec(systemctlArgv(session.paths, 'restart', session.paths.unitName))
+    const restarted = await session.exec(argvOf(restartStep))
     if (restarted.code !== 0) {
       return session.fail(restartStep, 'DP.SYSD.RESTART_FAILED', `systemctl restart ${session.paths.unitName} 失败（退出码 ${restarted.code}）`, {
         output: outputOf(restarted),
@@ -569,9 +560,9 @@ export async function verifySystemd(input: SystemdExecInput): Promise<SystemdExe
 
   const step = stepAt(plan, 'systemd.is-active')
   session.begin(step)
-  const result = await session.exec(systemctlArgv(session.paths, 'is-active', session.paths.unitName))
+  const result = await session.exec(argvOf(step))
   if (result.code !== 0) {
-    const state = excerpt(result.stdout) || excerpt(result.stderr) || '(无输出)'
+    const state = excerptOutput(result.stdout) || excerptOutput(result.stderr) || '(无输出)'
     return session.fail(step, 'DP.SYSD.NOT_ACTIVE', `unit ${session.paths.unitName} 不是 active：${state}`, {
       output: outputOf(result),
       hint:
@@ -617,7 +608,7 @@ export async function rollbackSystemd(input: SystemdExecInput): Promise<SystemdE
 
   const reloadStep = stepAt(plan, 'systemd.daemon-reload-rollback')
   session.begin(reloadStep)
-  const reloaded = await session.exec(systemctlArgv(session.paths, 'daemon-reload'))
+  const reloaded = await session.exec(argvOf(reloadStep))
   if (reloaded.code !== 0) {
     return session.fail(reloadStep, 'DP.SYSD.DAEMON_RELOAD_FAILED', `还原后 systemctl daemon-reload 失败（退出码 ${reloaded.code}）`, {
       output: outputOf(reloaded),
@@ -631,7 +622,7 @@ export async function rollbackSystemd(input: SystemdExecInput): Promise<SystemdE
 
   const restartStep = stepAt(plan, 'systemd.restart-rollback')
   session.begin(restartStep)
-  const restarted = await session.exec(systemctlArgv(session.paths, 'restart', session.paths.unitName))
+  const restarted = await session.exec(argvOf(restartStep))
   if (restarted.code !== 0) {
     return session.fail(restartStep, 'DP.SYSD.RESTART_FAILED', `还原后 systemctl restart ${session.paths.unitName} 失败（退出码 ${restarted.code}）`, {
       output: outputOf(restarted),
@@ -645,9 +636,9 @@ export async function rollbackSystemd(input: SystemdExecInput): Promise<SystemdE
 
   const verifyStep = stepAt(plan, 'systemd.is-active-rollback')
   session.begin(verifyStep)
-  const checked = await session.exec(systemctlArgv(session.paths, 'is-active', session.paths.unitName))
+  const checked = await session.exec(argvOf(verifyStep))
   if (checked.code !== 0) {
-    const state = excerpt(checked.stdout) || excerpt(checked.stderr) || '(无输出)'
+    const state = excerptOutput(checked.stdout) || excerptOutput(checked.stderr) || '(无输出)'
     return session.fail(verifyStep, 'DP.SYSD.NOT_ACTIVE', `回滚后 unit ${session.paths.unitName} 不是 active：${state}`, {
       output: outputOf(checked),
       hint:
