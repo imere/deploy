@@ -370,6 +370,18 @@ async function scenarioStatic() {
     '第一次部署后 current 指向的版本内容不对',
   )
 
+  // verify 要在部署成功后给出「healthy」三件套：退出 0、ok、指到当前版本。
+  // releaseId 记下来，回滚后再 verify 时必须回到同一个 —— 内容断言管「文件对不对」，
+  // 这个管「current 的版本号对不对」，二者对不上说明状态层在漂。
+  const checked = await dp(['verify', '--json', '--config', '/work/static.json'])
+  assert.equal(checked.code, 0, `verify 退出 ${checked.code}：${checked.why}`)
+  assert.equal(checked.json?.ok, true, 'verify 报调用了 healthy 却没在 JSON 里给出 ok')
+  const verifiedRelease = checked.json?.releaseId
+  assert.ok(
+    typeof verifiedRelease === 'string' && verifiedRelease.length > 0,
+    `verify 没报出 releaseId：${JSON.stringify(verifiedRelease)}`,
+  )
+
   await swapSource('static', '<h1>static-v2</h1>')
   const second = await dp(['apply', '--json', '--config', '/work/static.json'])
   assert.equal(second.code, 0, `第二次 apply：${second.why}`)
@@ -389,6 +401,15 @@ async function scenarioStatic() {
     (await execIn(TARGET, 'cat /srv/static/current/index.html')).stdout.trim(),
     '<h1>static-v1</h1>',
     '回滚后内容不是上一版',
+  )
+
+  const rechecked = await dp(['verify', '--json', '--config', '/work/static.json'])
+  assert.equal(rechecked.code, 0, `回滚后 verify：${rechecked.why}`)
+  assert.equal(rechecked.json?.ok, true)
+  assert.equal(
+    rechecked.json?.releaseId,
+    verifiedRelease,
+    `回滚后 verify 指到的版本和首次部署记下的不一致：${String(rechecked.json?.releaseId)} ≠ ${String(verifiedRelease)}`,
   )
 
   const status = await dp(['status', '--json', '--config', '/work/static.json'])
