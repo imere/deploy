@@ -17,6 +17,7 @@
     { "path": "../target-nginx" },
     { "path": "../target-docker" },
     { "path": "../template" },
-    { "path": "../transport" }
+    { "path": "../transport" },
+    { "path": "../testkit" }
   ]
 }

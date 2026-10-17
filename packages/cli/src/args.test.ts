@@ -11,7 +11,7 @@ import {
   VALUE_FLAGS,
   ALL_FLAGS,
 } from './args.js'
-import { DpError } from '@dp/ports'
+import { caught } from '@dp/testkit'
 
 describe('args · 形状', () => {
   it('空 argv：没有命令、没有位置参数', () => {
@@ -90,7 +90,7 @@ describe('args · 形状', () => {
 
 describe('args · 拒绝歧义（铁律 2）', () => {
   it('未知长选项报错，且 hint 指向 --help', () => {
-    const err = caughtThrows(() => parseArgs(['--nope'])) as DpError
+    const err = caught(() => parseArgs(['--nope']))
     assert.equal(err.code, 'DP.CONFIG.INVALID')
     assert.equal(err.path, '--nope')
     assert.match(err.hint ?? '', /--help/)
@@ -98,39 +98,39 @@ describe('args · 拒绝歧义（铁律 2）', () => {
   })
 
   it('未知短选项报错', () => {
-    caughtThrows(() => parseArgs(['-z']), CliUsageError)
+    caught(() => parseArgs(['-z']), CliUsageError)
   })
 
   it('值选项缺值报错（末尾）', () => {
-    const err = caughtThrows(() => parseArgs(['--config'])) as CliUsageError
+    const err = caught(() => parseArgs(['--config']), CliUsageError)
     assert.match(err.message, /需要一个值/)
   })
 
   it('值选项后面紧跟另一个选项 → 视为缺值', () => {
-    caughtThrows(() => parseArgs(['--config', '--json']), CliUsageError)
+    caught(() => parseArgs(['--config', '--json']), CliUsageError)
   })
 
   it('值选项后面紧跟 -- → 视为缺值', () => {
-    caughtThrows(() => parseArgs(['--config', '--']), CliUsageError)
+    caught(() => parseArgs(['--config', '--']), CliUsageError)
   })
 
   it('--name= 后面空值报错（而不是静默接受空串）', () => {
-    caughtThrows(() => parseArgs(['--config=']), CliUsageError)
+    caught(() => parseArgs(['--config=']), CliUsageError)
   })
 
   it('布尔开关带值报错：--json=1 不会静默生效', () => {
-    caughtThrows(() => parseArgs(['--json=1']), CliUsageError)
+    caught(() => parseArgs(['--json=1']), CliUsageError)
   })
 
   it('-h=x 同样报错', () => {
-    caughtThrows(() => parseArgs(['-h=x']), CliUsageError)
+    caught(() => parseArgs(['-h=x']), CliUsageError)
   })
 })
 
 describe('args · 跨命令串用', () => {
   it('assertAllowedFlags 拒绝别的命令的开关', () => {
     const p = parseArgs(['facts', '--all'])
-    const err = caughtThrows(() => assertAllowedFlags(p, ['json', 'host'])) as CliUsageError
+    const err = caught(() => assertAllowedFlags(p, ['json', 'host']), CliUsageError)
     assert.match(err.message, /facts 不支持选项 --all/)
     assert.equal(err.path, '--all')
   })
@@ -158,19 +158,3 @@ describe('args · 读取辅助', () => {
     assert.deepEqual([...ALL_FLAGS].sort(), [...new Set([...BOOLEAN_FLAGS, ...VALUE_FLAGS])].sort())
   })
 })
-
-// assert.throws/rejects 在本仓的 @types/node 下返回 void，拿不到错误对象。
-// 统一走这两个 helper：类型上直接是 DpError。
-function caughtThrows(fn: () => unknown, ctor?: Function): DpError {
-  try {
-    fn()
-  } catch (err) {
-    // 第二个参数必须真的校验：忽略它就等于「只要抛了任何东西就算过」，
-    // 实现改成抛别的错误类型（退出码也跟着变）测试照样绿。
-    if (ctor !== undefined) {
-      assert.ok(err instanceof ctor, `期望抛 ${ctor.name}，实际是 ${(err as Error)?.name}: ${String(err)}`)
-    }
-    return err as DpError
-  }
-  throw new Error('期望抛错，但没有')
-}

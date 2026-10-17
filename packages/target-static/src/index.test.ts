@@ -3,147 +3,13 @@
  *
  * 为什么要有这一层：Release/切换/清理的语义与文件系统无关，
  * 把它抽出来就能在任何平台上断言，不需要真 Windows / 真 macOS 机器
- * （ —— 纯函数夹具层）。
+ * （ —— 纯函数夹具层）。内存 Runner 与 facts 夹具取自 @dp/testkit。
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import {
-  DpError,
-  type ExecResult,
-  type Facts,
-  type FileStat,
-  type Runner,
-  type TargetContext,
-} from '@dp/ports'
+import { DpError, type TargetContext } from '@dp/ports'
+import { currentReleaseId, defaultFacts, MemoryRunner } from '@dp/testkit'
 import { deploy, prune, rollback, staticTarget, verifyRelease, type StaticTargetConfig } from './index.js'
-
-// ------------------------------------------------------------
-// 内存 Runner：把文件系统语义实现到刚好够用
-// ------------------------------------------------------------
-
-interface Node {
-  kind: 'dir' | 'file' | 'link'
-  content?: string
-  target?: string
-  mode?: number
-}
-
-class MemoryRunner implements Runner {
-  readonly id = 'memory'
-  readonly facts: Facts
-  private readonly tree = new Map<string, Node>()
-
-  constructor(facts: Facts) {
-    this.facts = facts
-    this.tree.set('/', { kind: 'dir' })
-  }
-
-  private childDir(p: string): string[] {
-    const out: string[] = []
-    for (const key of this.tree.keys()) {
-      if (key.startsWith(`${p}/`) && !key.slice(p.length + 1).includes('/')) out.push(key)
-    }
-    return out
-  }
-
-  async exec(): Promise<ExecResult> {
-    throw new DpError('DP.CONFIG.INVALID', '内存 Runner 不执行命令')
-  }
-
-  async stat(path: string): Promise<FileStat | null> {
-    const n = this.tree.get(path)
-    if (n === undefined) return null
-    return {
-      isDirectory: n.kind === 'dir',
-      isSymbolicLink: n.kind === 'link',
-      size: n.content?.length ?? 0,
-      mtimeMs: 0,
-    }
-  }
-
-  async listDir(path: string): Promise<readonly string[]> {
-    return this.childDir(path).map((k) => k.slice(path.length + 1))
-  }
-
-  async mkdir(path: string): Promise<void> {
-    this.tree.set(path, { kind: 'dir' })
-  }
-
-  async writeFile(path: string, data: string | Uint8Array): Promise<void> {
-    this.tree.set(path, {
-      kind: 'file',
-      content: typeof data === 'string' ? data : new TextDecoder().decode(data),
-    })
-  }
-
-  async readBinary(path: string): Promise<Uint8Array> {
-    return new TextEncoder().encode(await this.readFile(path))
-  }
-
-  async readFile(path: string): Promise<string> {
-    const n = this.tree.get(path)
-    if (n === undefined) throw new DpError('DP.PATH.NOT_WRITABLE', `不存在：${path}`)
-    return n.content ?? ''
-  }
-
-  async remove(path: string): Promise<void> {
-    for (const key of [...this.tree.keys()]) {
-      if (key === path || key.startsWith(`${path}/`)) this.tree.delete(key)
-    }
-  }
-
-  async rename(from: string, to: string): Promise<void> {
-    const nodes = [...this.tree.entries()].filter(([k]) => k === from || k.startsWith(`${from}/`))
-    await this.remove(to)
-    for (const [k, v] of nodes) {
-      this.tree.set(to + k.slice(from.length), v)
-      this.tree.delete(k)
-    }
-  }
-
-  async symlink(target: string, linkPath: string): Promise<void> {
-    if (!this.facts.capabilities.canSymlink) throw new DpError('DP.PATH.NOT_WRITABLE', '不支持软链')
-    this.tree.set(linkPath, { kind: 'link', target })
-  }
-
-  async readlink(path: string): Promise<string | null> {
-    return this.tree.get(path)?.target ?? null
-  }
-
-  async realpath(path: string): Promise<string> {
-    return path
-  }
-
-  /** 测试辅助：直接读 resolved 后的 current 指向 */
-  async resolvedCurrent(root: string): Promise<string | null> {
-    const link = await this.readlink(`${root}/current`)
-    if (link === null) return null
-    return link.slice(link.lastIndexOf('/') + 1)
-  }
-}
-
-function makeFacts(over: Partial<Facts> = {}): Facts {
-  return {
-    host: 'memory',
-    platform: 'linux',
-    arch: 'x64',
-    init: 'systemd',
-    homedir: '/home/u',
-    tmpdir: '/tmp',
-    env: {},
-    capabilities: {
-      canWrite: {},
-      canChown: [],
-      canSymlink: true,
-      systemdScope: 'none',
-      lingerEnabled: false,
-      canBindPrivilegedPort: false,
-      sudoAllowlist: [],
-    },
-    tools: {},
-    ...over,
-  }
-}
 
 function fileEntry(relativePath: string, content: string) {
   return { kind: 'file' as const, relativePath, read: async () => new TextEncoder().encode(content) }
@@ -177,19 +43,19 @@ describe('static target · plan', () => {
 
 describe('static target · deploy', () => {
   it('首次部署后 current 指向新版本', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     const result = await deploy({
       runner,
       ctx: makeCtx(),
       entries: [fileEntry('index.html', '<html>')],
     })
     assert.equal(result.filesWritten, 1)
-    assert.equal(await runner.resolvedCurrent('/app'), 'r1')
+    assert.equal(await currentReleaseId(runner, '/app'), 'r1')
     assert.equal(await runner.readFile('/app/releases/r1/index.html'), '<html>')
   })
 
   it('第二次部署后 current 换到新版本，旧版本仍在', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await deploy({ runner, ctx: makeCtx(), entries: [fileEntry('a.txt', 'v1')] })
     const second = await deploy({
       runner,
@@ -197,13 +63,13 @@ describe('static target · deploy', () => {
       entries: [fileEntry('a.txt', 'v2')],
     })
     assert.equal(second.previousReleaseId, 'r1')
-    assert.equal(await runner.resolvedCurrent('/app'), 'r2')
+    assert.equal(await currentReleaseId(runner, '/app'), 'r2')
     assert.equal(await runner.readFile('/app/releases/r1/a.txt'), 'v1')
     assert.equal(await runner.readFile('/app/releases/r2/a.txt'), 'v2')
   })
 
   it('健康检查失败时自动回退到上一版并抛错', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await deploy({ runner, ctx: makeCtx(), entries: [fileEntry('index.html', 'v1')] })
 
     await assert.rejects(
@@ -220,11 +86,11 @@ describe('static target · deploy', () => {
       },
     )
     // 关键断言：回退后 current 仍在旧版本，服务没有悬空
-    assert.equal(await runner.resolvedCurrent('/app'), 'r1')
+    assert.equal(await currentReleaseId(runner, '/app'), 'r1')
   })
 
   it('source 为空时直接拒绝，并把现场收拾干净', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await assert.rejects(
       deploy({ runner, ctx: makeCtx(), entries: [] }),
       (err: unknown) => {
@@ -240,7 +106,7 @@ describe('static target · deploy', () => {
 
   it('不支持软链时退化为复制，源 release 目录仍完好', async () => {
     const runner = new MemoryRunner(
-      makeFacts({ capabilities: { ...makeFacts().capabilities, canSymlink: false } }),
+      defaultFacts({ capabilities: { canSymlink: false } }),
     )
     const result = await deploy({ runner, ctx: makeCtx(), entries: [fileEntry('a.txt', 'v1')] })
     assert.match(result.warnings.join(), /DP\.LINK\.UNAVAILABLE/)
@@ -254,7 +120,7 @@ describe('static target · deploy', () => {
 
   it('switch: symlink 时建不了软链就失败，绝不静默换成复制', async () => {
     const runner = new MemoryRunner(
-      makeFacts({ capabilities: { ...makeFacts().capabilities, canSymlink: false } }),
+      defaultFacts({ capabilities: { canSymlink: false } }),
     )
     await assert.rejects(
       deploy({
@@ -277,7 +143,7 @@ describe('static target · deploy', () => {
   })
 
   it('switch: copy 时即使支持软链也不建 —— 挂载点上的软链可能不被服务进程认', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     const result = await deploy({
       runner,
       ctx: makeCtx(),
@@ -292,7 +158,7 @@ describe('static target · deploy', () => {
 
 describe('static target · transfer 钩子', () => {
   it('给了钩子就不再逐条 writeFile：换向/校验照常走完', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     // read() 是惰性的（ports 的 SourceFile 契约），所以它就是「逐条写」有没有发生的探针
     let reads = 0
     const spy = (content: string) => ({
@@ -321,11 +187,11 @@ describe('static target · transfer 钩子', () => {
     assert.equal(result.filesWritten, 1)
     assert.match(result.warnings.join(), /来自传输层的告警/, '传输的 warning 必须进 DeployResult')
     assert.equal(await runner.readFile('/app/releases/r1/index.html'), 'from-transfer')
-    assert.equal(await runner.resolvedCurrent('/app'), 'r1')
+    assert.equal(await currentReleaseId(runner, '/app'), 'r1')
   })
 
   it('钩子搬了 0 个文件 → 抛 DP.SOURCE.EMPTY，且 staging 被清掉', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await assert.rejects(
       deploy({
         runner,
@@ -351,7 +217,7 @@ describe('static target · transfer 钩子', () => {
 
 describe('static target · prune 与 rollback', () => {
   it('保留 keep 个版本，且永不清理当前版本与上一版', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     for (const id of ['r1', 'r2', 'r3', 'r4', 'r5']) {
       // 这里的 releases 目录要真实存在，prune 才有的可扫
       await runner.mkdir(`/app/releases/${id}`)
@@ -363,7 +229,7 @@ describe('static target · prune 与 rollback', () => {
   })
 
   it('rollback 把 current 指回上一版', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await deploy({ runner, ctx: makeCtx(), entries: [fileEntry('a.txt', 'v1')] })
     await deploy({
       runner,
@@ -372,11 +238,11 @@ describe('static target · prune 与 rollback', () => {
     })
     const back = await rollback(runner, makeCtx({ releaseId: 'r2', previousReleaseId: 'r1' }))
     assert.equal(back, 'r1')
-    assert.equal(await runner.resolvedCurrent('/app'), 'r1')
+    assert.equal(await currentReleaseId(runner, '/app'), 'r1')
   })
 
   it('rollback 沿用部署时的切换方式，两次操作后 current 形态一致', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await deploy({
       runner,
       ctx: makeCtx({ releaseId: 'r1' }),
@@ -397,7 +263,7 @@ describe('static target · prune 与 rollback', () => {
   })
 
   it('没有上一版时 rollback 明确报错，不做"看起来成功"的操作', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await assert.rejects(rollback(runner, makeCtx()), (err: unknown) => {
       assert.ok(err instanceof DpError)
       return true
@@ -405,7 +271,7 @@ describe('static target · prune 与 rollback', () => {
   })
 
   it('verifyRelease 能用必需文件清单判定', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     const ctx = makeCtx()
     await runner.mkdir('/app/releases/r1')
     const cfg: StaticTargetConfig = { healthcheck: { fileExists: ['index.html'] } }

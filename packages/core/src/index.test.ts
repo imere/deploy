@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError, type Facts, type Platform } from '@dp/ports'
+import { DpError } from '@dp/ports'
+import { defaultFacts } from '@dp/testkit'
 import { defineProject } from '@dp/schema'
 import {
   checkSourcePaths,
@@ -9,37 +10,6 @@ import {
   makePlan,
   pickReleaseRoot,
 } from './index.js'
-
-// ------------------------------------------------------------
-// Facts 夹具：注入，不含任何 IO
-// ------------------------------------------------------------
-
-function makeFacts(over: {
-  platform?: Platform
-  canWrite?: Readonly<Record<string, boolean>>
-  sudoAllowlist?: readonly string[]
-  homedir?: string
-}): Facts {
-  return {
-    host: 'test-host',
-    platform: over.platform ?? 'linux',
-    arch: 'x64',
-    init: 'systemd',
-    homedir: over.homedir ?? '/home/deploy',
-    tmpdir: '/tmp',
-    env: {},
-    capabilities: {
-      canWrite: over.canWrite ?? {},
-      canChown: [],
-      canSymlink: true,
-      systemdScope: 'none',
-      lingerEnabled: false,
-      canBindPrivilegedPort: false,
-      sudoAllowlist: over.sudoAllowlist ?? [],
-    },
-    tools: {},
-  }
-}
 
 // ------------------------------------------------------------
 // 模板展开
@@ -87,15 +57,15 @@ test('expandTemplate: Windows 变量', () => {
 // ------------------------------------------------------------
 
 test('deriveLayout: 系统目录可写 → system', () => {
-  assert.equal(deriveLayout(makeFacts({ canWrite: { '/var/lib': true } })), 'system')
+  assert.equal(deriveLayout(defaultFacts({ capabilities: { canWrite: { '/var/lib': true } } })), 'system')
 })
 
 test('deriveLayout: 有 sudo 白名单 → hybrid', () => {
-  assert.equal(deriveLayout(makeFacts({ sudoAllowlist: ['systemctl daemon-reload'] })), 'hybrid')
+  assert.equal(deriveLayout(defaultFacts({ capabilities: { sudoAllowlist: ['systemctl daemon-reload'] } })), 'hybrid')
 })
 
 test('deriveLayout: 什么都没有 → user（不假设 root）', () => {
-  assert.equal(deriveLayout(makeFacts({})), 'user')
+  assert.equal(deriveLayout(defaultFacts()), 'user')
 })
 
 // ------------------------------------------------------------
@@ -104,7 +74,7 @@ test('deriveLayout: 什么都没有 → user（不假设 root）', () => {
 
 test('pickReleaseRoot: 取候选序列中首个可写者，并记录跳过原因', () => {
   const choice = pickReleaseRoot({
-    facts: makeFacts({ platform: 'linux', canWrite: { '/opt/web': true } }),
+    facts: defaultFacts({ platform: 'linux', capabilities: { canWrite: { '/opt/web': true } } }),
     layout: 'system',
     name: 'web',
   })
@@ -117,7 +87,11 @@ test('pickReleaseRoot: 取候选序列中首个可写者，并记录跳过原因
 
 test('pickReleaseRoot: user 布局落在 home 下', () => {
   const choice = pickReleaseRoot({
-    facts: makeFacts({ platform: 'linux', canWrite: { '/home/deploy/apps/web': true } }),
+    facts: defaultFacts({
+      homedir: '/home/deploy',
+      platform: 'linux',
+      capabilities: { canWrite: { '/home/deploy/apps/web': true } },
+    }),
     layout: 'user',
     name: 'web',
   })
@@ -127,7 +101,7 @@ test('pickReleaseRoot: user 布局落在 home 下', () => {
 test('pickReleaseRoot: 显式 root 优先，但仍要实证', () => {
   assert.equal(
     pickReleaseRoot({
-      facts: makeFacts({ canWrite: { '/custom': true } }),
+      facts: defaultFacts({ capabilities: { canWrite: { '/custom': true } } }),
       layout: 'user',
       name: 'web',
       explicitRoot: '/custom',
@@ -138,7 +112,7 @@ test('pickReleaseRoot: 显式 root 优先，但仍要实证', () => {
   assert.throws(
     () =>
       pickReleaseRoot({
-        facts: makeFacts({}),
+        facts: defaultFacts({}),
         layout: 'user',
         name: 'web',
         explicitRoot: '/custom',
@@ -149,7 +123,7 @@ test('pickReleaseRoot: 显式 root 优先，但仍要实证', () => {
 
 test('pickReleaseRoot: 全部不可写 → 报错且 hint 列出候选', () => {
   try {
-    pickReleaseRoot({ facts: makeFacts({ platform: 'linux' }), layout: 'system', name: 'web' })
+    pickReleaseRoot({ facts: defaultFacts({ platform: 'linux' }), layout: 'system', name: 'web' })
     assert.fail('应当抛错')
   } catch (e) {
     assert.ok(e instanceof DpError)
@@ -164,7 +138,7 @@ test('pickReleaseRoot: 布局是用户点名的 → 一个候选都不可写时�
   assert.throws(
     () =>
       pickReleaseRoot({
-        facts: makeFacts({ platform: 'linux' }),
+        facts: defaultFacts({ platform: 'linux' }),
         layout: 'system',
         name: 'web',
         layoutExplicit: true,
@@ -228,7 +202,7 @@ test('makePlan: 纯函数产出完整计划', () => {
   const plan = makePlan({
     name: 'web',
     project: defineProject({ source: { root: './dist' } }),
-    facts: makeFacts({ platform: 'linux', canWrite: { '/var/lib': true, '/srv/web': true } }),
+    facts: defaultFacts({ platform: 'linux', capabilities: { canWrite: { '/var/lib': true, '/srv/web': true } } }),
     releaseId: 'r-abc123',
     sourceEntries: ['index.html', 'assets/app.js'],
   })
@@ -246,7 +220,7 @@ test('makePlan: 无 healthcheck 时告警 autoPromote 退化', () => {
   const plan = makePlan({
     name: 'web',
     project: defineProject({ source: { root: './dist' }, activation: { mode: 'trial-promote' } }),
-    facts: makeFacts({ platform: 'linux', canWrite: { '/var/lib': true, '/srv/web': true } }),
+    facts: defaultFacts({ platform: 'linux', capabilities: { canWrite: { '/var/lib': true, '/srv/web': true } } }),
     releaseId: 'r-1',
     sourceEntries: ['index.html'],
   })
@@ -259,7 +233,7 @@ test('makePlan: 源里有保留名时在计划阶段就失败（零副作用）'
       makePlan({
         name: 'web',
         project: defineProject({ source: { root: './dist' } }),
-        facts: makeFacts({ platform: 'win32', canWrite: { 'C:/ProgramData/web': true } }),
+        facts: defaultFacts({ platform: 'win32', capabilities: { canWrite: { 'C:/ProgramData/web': true } } }),
         releaseId: 'r-1',
         sourceEntries: ['CON'],
       }),
