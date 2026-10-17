@@ -1,22 +1,22 @@
 # 故障分类表
 
-每个故障有稳定 code，供 hook、通知、文档与测试用例共同引用。`packages/ports` 有一条断言把「每个能抛出的码都在册」钉住，所以这张表是代码与文档共用的同一份名单。
+每个故障有稳定 code，供 hook、通知、文档与测试用例共同引用。`packages/ports` 有一条断言把「每个能抛出的码都在册」钉住，所以这张表是代码与文档共用的同一份名单。反向不成立：标着「预留（未实现）」的行是设计期登记的分类骨架，当前没有任何包抛出它——这类行只许收敛、不许再添。
 
 | code | 阶段 | 可预检 | 默认响应 | 谁负责 |
 |---|---|---|---|---|
-| `DP.CONN.*` | 连接 | ✅ | abort（零副作用） | `@dp/transport` |
-| `DP.AUTH.*` | 认证/提权 | ✅ | abort | `@dp/transport` |
-| `DP.INTERACTIVE_PROMPT_DETECTED` | 任意 | ✅ | **立即杀进程并 abort** | `@dp/transport` |
-| `DP.TIMEOUT.*` | 任意 | ❌ | abort（挂起=失败） | 全局超时兜底 |
-| `DP.DISK.INSUFFICIENT` | 预检 | ✅ | abort | `@dp/preflight` |
-| `DP.DISK.INODE_EXHAUSTED` | 预检 | ✅ | abort | `@dp/preflight` |
-| `DP.DISK.NOT_WRITABLE` | 预检 | ✅ | abort | `@dp/preflight`（**实证写入**） |
-| `DP.PERM.*` / `DP.LSM.SELINUX_*` | 预检 | ✅ | abort 或 auto-remedy | `@dp/preflight` + `@dp/lsm` |
+| `DP.CONN.*` | 连接 | ✅ | abort（零副作用） | 预留（未实现） |
+| `DP.AUTH.*` | 认证/提权 | ✅ | abort | 预留（未实现） |
+| `DP.INTERACTIVE_PROMPT_DETECTED` | 任意 | ✅ | **立即杀进程并 abort** | `@dp/local` / `@dp/transport` / `@dp/ssh`（子进程输出嗅探） |
+| `DP.TIMEOUT.*` | 任意 | ❌ | abort（挂起=失败） | `DP.TIMEOUT.EXEC` 由 `@dp/local` / `@dp/transport` / `@dp/ssh` 的超时兜底抛出；族里其余码未实现 |
+| `DP.DISK.INSUFFICIENT` | 预检 | ✅ | abort | 预留（未实现） |
+| `DP.DISK.INODE_EXHAUSTED` | 预检 | ✅ | abort | 预留（未实现） |
+| `DP.DISK.NOT_WRITABLE` | 预检 | ✅ | abort | 预留（未实现） |
+| `DP.PERM.*` / `DP.LSM.SELINUX_*` | 预检 | ✅ | abort 或 auto-remedy | 预留（未实现；已落地的只有下面两行点名的两个码） |
 | `DP.PERM.CONFD_NOT_WRITABLE` | 装配 | ✅ | abort（**一个字节都没写就退**，不猜路径） | `@dp/cli`（`dp apply`，nginx 目标的 confd 推导） |
 | `DP.PERM.UNIT_DIR_NOT_WRITABLE` | 装配 | ✅ | abort（同上；systemd 目标的 unitDir 推导，按 scope 分候选） | `@dp/cli`（`dp apply`，systemd 目标） |
-| `DP.PORT.OCCUPIED` | 预检 | ✅ | abort（或 `portPolicy`） | `@dp/preflight` |
-| `DP.FILE.LOCKED` | 传输/激活 | ⚠️ |  | `@dp/target-*` |
-| `DP.LOCK.HELD` | 并发 | ✅ | abort + 打印持锁者 | `@dp/core` |
+| `DP.PORT.OCCUPIED` | 预检 | ✅ | abort（或 `portPolicy`） | 预留（未实现） |
+| `DP.FILE.LOCKED` | 传输/激活 | ⚠️ |  | 预留（未实现） |
+| `DP.LOCK.HELD` | 并发 | ✅ | abort + 打印持锁者 | 预留（未实现） |
 | `DP.STATE.INCONSISTENT` | 运行期 | ✅ | abort + 打印索引现状（**不**静默改动 current） | `@dp/cli`（`dp rollback`） |
 | `DP.TPL.UNKNOWN_VAR` | 配置渲染 | ✅ | abort（**绝不留下 `${x}` 原文**） | `@dp/template` |
 | `DP.TPL.MISSING_ENV` | 配置渲染 | ✅ | abort（空值同缺值处理） | `@dp/template` |
@@ -57,10 +57,10 @@
 | `DP.PATH.RESERVED_NAME` | 源校验 | ✅ | abort（Windows 保留名，如 `NUL` / `CON`） | `@dp/core` |
 | `DP.PATH.TOO_LONG` | 源校验 | ✅ | abort（超出平台路径上限，传到一半才炸更贵） | `@dp/core` |
 | `DP.PATH.ILLEGAL_CHAR` | 源校验 | ✅ | abort（**零副作用**：此时还没传第一个字节） | `@dp/core` / `@dp/ssh` |
-| `DP.PATH.NOT_WRITABLE` | 发布根 | ❌ | abort（**实证写入**得知，不靠 uid 推断）；列出全部候选让用户授权其一 | `@dp/core` |
+| `DP.PATH.NOT_WRITABLE` | 发布根 | ❌ | abort（**实证写入**得知，不靠 uid 推断）；列出全部候选让用户授权其一 | `@dp/core`；runner 层的同族路径错误由 `@dp/local` / `@dp/ssh` 抛 |
 | `DP.LAYOUT.MISMATCH` | 布局推导 | ✅ | abort（显式指定的 layout 与实测能力不符） | `@dp/core` |
 | `DP.PREF.UNSUPPORTED` | 传输协商 | ✅ | abort（**不静默降级**：偏好链里第一项不可用就直说，换一个不告之等于暗改行为） | `@dp/transport` |
-| `DP.LINK.UNAVAILABLE` | 激活 | ❌ | abort（软链不可用，原子切换无从谈起） | `@dp/core` |
+| `DP.LINK.UNAVAILABLE` | 激活 | ❌ | abort（软链不可用，原子切换无从谈起） | `@dp/target-static` |
 | `DP.SOURCE.EMPTY` | 源枚举 | ✅ | abort（**在连目标机之前**就知道，此时零代价） | `@dp/transport` / `@dp/cli` |
 | `DP.SSH.CONNECT_FAILED` | 连接 | ❌ | abort（零副作用） | `@dp/ssh` |
 | `DP.SSH.AUTH_FAILED` | 认证 | ❌ | abort（含 `SSH_ASKPASS` 取密码失败） | `@dp/ssh` |
@@ -70,11 +70,11 @@
 | `DP.SSH.DRIVER_UNAVAILABLE` | 驱动选择 | ❌ | abort（native-ssh 与 ssh2 都不可用；不退化成「假装连上」） | `@dp/ssh` |
 | `DP.SSH.TUNNEL_FAILED` | 多跳 | ❌ | abort（`ProxyJump` / `ProxyCommand` 都建不起来） | `@dp/ssh` |
 | `DP.SSH.HOP_FAILED` | 多跳 | ❌ | abort（链上第 N 跳没通；`path` 给出第几跳，已建好的跳会逆序关掉，**不留孤儿会话**；`direct-tcpip` 与 `nc` 都试过时 message 逐项列出各自原因） | `@dp/ssh` |
-| `DP.TRANSFER.INTERRUPTED` | 传输 | ❌ | 幂等重试 → abort | `@dp/transfer` |
-| `DP.TRANSFER.CHECKSUM_MISMATCH` | 传输 | ❌ | abort（staging 作废） | `@dp/transfer` |
-| `DP.ACTIVATE.START_FAILED` | 激活 | ❌ | 回滚到上一版 | `@dp/target-service` |
-| `DP.VERIFY.HEALTH_TIMEOUT` | 验收 | ❌ | 回滚（trial 自动过期） | `@dp/verify` |
-| `DP.VERIFY.FAILED` | 验收 | ❌ | abort + 带上读到的实际状态；**回不回滚由上层决定**（`dp apply` 看这个码） | `@dp/target-docker`（首个实际使用方） |
-| `DP.RESOURCE.OOM_KILLED` | 运行期 | ❌ | 由护栏兜底 + 通知 | guard |
-| `DP.GUARD.TRIAL_EXPIRED` | 运行期 | ❌ | 自动停用 + 切回 | guard timer |
-| `DP.DISK.FULL_RUNTIME` | 运行期 | ❌ | 通知 + 可选自动 prune | guard |
+| `DP.TRANSFER.INTERRUPTED` | 传输 | ❌ | 幂等重试 → abort | 预留（未实现） |
+| `DP.TRANSFER.CHECKSUM_MISMATCH` | 传输 | ❌ | abort（staging 作废） | 预留（未实现） |
+| `DP.ACTIVATE.START_FAILED` | 激活 | ❌ | 回滚到上一版 | `@dp/target-docker`（服务起不来，现唯一抛出点） |
+| `DP.VERIFY.HEALTH_TIMEOUT` | 验收 | ❌ | 回滚（trial 自动过期） | 预留（未实现） |
+| `DP.VERIFY.FAILED` | 验收 | ❌ | abort + 带上读到的实际状态；**回不回滚由上层决定**（`dp apply` 看这个码） | `@dp/cli` / `@dp/transport` / 各 `@dp/target-*`（执行器与回滚共用） |
+| `DP.RESOURCE.OOM_KILLED` | 运行期 | ❌ | 由护栏兜底 + 通知 | 预留（未实现） |
+| `DP.GUARD.TRIAL_EXPIRED` | 运行期 | ❌ | 自动停用 + 切回 | 预留（未实现） |
+| `DP.DISK.FULL_RUNTIME` | 运行期 | ❌ | 通知 + 可选自动 prune | 预留（未实现） |

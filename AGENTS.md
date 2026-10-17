@@ -15,7 +15,7 @@ pnpm 单仓多包，包名前缀 `@dp/*`。**Node ≥ 24**。
 2. **歧义靠拒绝，不靠默认值。** source 路径写法、多 target 命中 —— 无法判定时报错并给出可选写法，绝不猜。
 3. **安全不让步**：路径归一化 + 允许根校验、显式 mode、传输后哈希校验、主机密钥默认 strict、凭据不进日志。
 4. **临时文件一律进 `.tmp/`**，不得散落仓库。
-5. **所有产物进 `build/`**（含覆盖率）；包的 `files` 只写 `dist`，不直接写 `build`。
+5. **编译产物在 `packages/<pkg>/build`**（`tsc -b` 产出，包的 `files` 指到它）；根 `build/` 只放跨包的汇总物（覆盖率 `build/coverage/`、单文件可执行 `build/bin/`），不手塞别的东西进去。
 6. **文档保持精炼**，改代码顺手改对应文档，不新增说明性 markdown。
 
 ## 命令
@@ -52,7 +52,7 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：它依赖的 esbuild 平台�
 packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / target-docker / target-systemd / target-process / cli 均已接线）
 tests/          真机集成测试：容器靶机（sshd / nginx / systemd）+ 跑构建产物的客户端
 openspec/        行为契约（source of truth）：specs/<capability>/spec.md
-docs/           只留两份参考：config.md（配置字段）、decisions.md（决策与理由）
+docs/           三份参考：config.md（配置字段）、decisions.md（决策与理由）、failures.md（故障分类表）
 scripts/        构建与八道门禁；build-binary.mjs 出单文件产物，link-workspace.mjs 补 pnpm 链接
 .github/        CI：verify（门禁 + 覆盖率）与 binary（各平台各出一次产物）
 .agents/skills/ 可复用流程（与本项目无关，可整体搬到别处）：
@@ -112,7 +112,7 @@ build/          覆盖率产物所在根目录（已 gitignore）
   推导只有一份（`@dp/cli` 的 `resolveSshEndpoint`），`facts-source` 与 `apply` 共用 ——
   各写一份是分叉的标准形状。逐跳 `auth` **绝不继承**，中间跳没给就留空让驱动报错
   （替它补一个，等于把目标机的钥匙递给跳板机）
-- **模板**：渲染一律走 `@dp/template`，变量表以 为准（不发明变量名）；
+- **模板**：渲染一律走 `@dp/template`，变量表以 `@dp/template` 的 `KNOWN_VARS` 为准（不发明变量名）；
   `$host` / `$request_uri` / `$1` 之类**必须原样保留**（吃掉它们产出的 nginx conf 直接废掉），
   要字面量 `${x}` 写 `$${x}`。包本身零 IO：环境变量、git 状态、时钟都由调用方注入，
   否则 `makePlan()` 就不再是纯函数。缺值与空值一律报 `DP.TPL.*`，**绝不留下 `${x}` 原文**

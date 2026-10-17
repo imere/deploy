@@ -5,7 +5,7 @@ deploy-kit：把目录或文件部署到静态目录 / nginx / docker / systemd 
 ## 技术栈
 
 - TypeScript strict，Node ≥ 24，构建用 `tsc -b`（composite）
-- pnpm workspace，12 个包，统一版本（`private: true`，changesets 推导版本与 CHANGELOG）
+- pnpm workspace，14 个 `@dp/*` 包，统一版本（`private: true`，changesets 推导版本与 CHANGELOG）
 - 测试用 Node 内置 `node --test`，跑的是**构建产物**不是源码；lcov 落 `build/coverage/`
 - 零运行时依赖（`ssh2` 是可选依赖，运行时按需加载）
 
@@ -19,7 +19,7 @@ deploy-kit：把目录或文件部署到静态目录 / nginx / docker / systemd 
 
 ## 约定
 
-- 命令一律 argv，`quote()` 是 shell 转义的唯一出口
+- 命令一律 argv，`quoteArg` / `quoteArgv` 是 shell 转义的唯一出口
 - 默认值保守：`--delete`、覆盖非托管文件、prune 旧版本、`knownHosts: none`、不抗量子的连接，都要显式打开
 - 永不交互：不弹凭据窗、不等 stdin、所有子进程带超时
 - 能力靠实证探测，不靠 uid 或版本号推断

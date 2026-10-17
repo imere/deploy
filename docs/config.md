@@ -26,36 +26,39 @@ export default defineConfig({
     },
   },
   hosts: {
-    prod: { ssh: 'deploy@10.0.0.7' }   // ssh 连接串：user@host[:port]。当前只支持单跳
+    prod: { ssh: 'deploy@10.0.0.7' }   // ssh 连接串：user@host[:port]。串内只能写一跳；多跳用下面的 hops
   },
 })
 ```
 
 跑起来：`dp deploy web --env prod`。
 
-**上面的配置里省掉了什么？** 传输方式（自动协商 rsync/tar-ssh/sftp）、target 类型（自动识别）、release 布局与回滚（默认开启）、日志脱敏（默认开启）、是否提权（探测后再决定要不要问密码）、CONF passiert 步骤（没有 target 就不需要）。
+**上面的配置里省掉了什么？** 传输方式（自动协商 rsync/tar-ssh/sftp）、target 类型（自动识别）、release 布局与回滚（默认开启）、日志脱敏（默认开启）、是否提权（探测后再决定要不要问密码）、target 的生效步骤（没有 target 就不需要）。
 
 只有三个字段是真正必填的：**谁（source）、去哪（host）、放哪（to 或 target）**。
 
 ---
 
-## 2. 同样的配置，写成 YAML / JSON
+## 2. 同样的配置，写成 JSON
 
-完全等价，`dp` 自动按顺序找 `deploy.config.ts | .js | .mjs | .yaml | .yml | .json`，也支持 `--config` 指定：
+`dp` 按顺序自动发现 `deploy.config.ts | .js | .json`（前者能写逻辑，后者最通用），也支持 `--config` 指定。JSON 里就是同一个对象：
 
-```yaml
-# yaml-language-server: $schema=./.dp/deploy.schema.json
-projects:
-  web:
-    source: ./dist
-    host: prod
-    to: /var/www/web
-hosts:
-  prod:
-    ssh: deploy@10.0.0.7
+```json
+{
+  "projects": {
+    "web": {
+      "source": "./dist",
+      "host": "prod",
+      "to": "/var/www/web"
+    }
+  },
+  "hosts": {
+    "prod": { "ssh": "deploy@10.0.0.7" }
+  }
+}
 ```
 
-`dp schema` 会导出 JSON Schema。把它写进 `$schema` 那一行，**编辑器就能做字段名补全、类型校验、悬停文档** —— 这就是「ts/json/schema 保证参数提示」的具体落地。
+字段提示有三条路：TS / JS 写法直接吃 `defineConfig()` 的类型；JSON 写法跑 `dp schema` 拿 JSON Schema（默认输出到 stdout，`--out <路径>` 会写到指定文件），在编辑器的 JSON Schema 关联设置里把它绑到 `deploy.config.json`。配置文件本身**不收** `$schema` 这类元键：schema 拒未知字段，写了过不了校验。
 
 文件与对象走同一份 schema：`defineConfig()` 就是配置文件的编程式入口，不存在「文件里能写的比对象里多」。
 
@@ -119,8 +122,11 @@ scheme 目前只有 `env:`（环境变量）一种 —— 别的来源没有实�
 ## 4. 主机与多跳、提权、传输
 
 > **这一节混了「已落地」与「设计形态」，逐项标注如下，别照抄。**
-> 已落地的字段：`ssh`（单跳连接串）、`hops`（多跳，两种驱动都支持）、`local`、`become`、`layout`、`transport`。
-> **未落地**：`crypto` / `knownHosts` / `timeouts` —— 这三个 schema 里没有，
+> 已落地的字段：`ssh`（单跳连接串）、`hops`（多跳，两种驱动都支持）、`hops[].knownHosts`
+> （每跳的主机密钥**策略**枚举 strict / accept-new / tofu / off，不是 known_hosts 文件路径）、
+> `local`、`become`、`layout`、`transport`。
+> **未落地**：`crypto`、主机连接层的 `timeouts` —— schema 里没有这两样
+> （nginx 反代的代理超时、健康检查的超时是各自的专属字段，与这项无关），
 > 抗量子目前由驱动偏好链决定（只能走 `native-ssh`，`ssh2` 不支持 PQC），不是配置项。
 
 已落地的写法：

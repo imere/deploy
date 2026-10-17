@@ -1,4 +1,4 @@
-# 决策清单（第 3–24 条）
+# 决策清单
 
 格式：每条给**决策 / 理由 / 落点**。有实测依据的标注来源。
 
@@ -38,20 +38,20 @@
 
 - `runtime`：`node` / `java` / `python` / `static` / `docker` / `other`
   每个 profile 提供：detect 证据、默认 build 命令、产物形态、默认健康检查、默认资源预算、unit 模板默认值。
-  - Java：检测 `pom.xml` / `build.gradle` / `*.jar`；`MemoryMax` 按 `Xmx × 1.35` 算（直接对症第 14 条的 OOM）；单元默认 `ExecStart=java -jar`
+  - Java：检测 `pom.xml` / `build.gradle` / `*.jar`；`MemoryMax` 按 `Xmx × 1.35` 算，直接对症 OOM；单元默认 `ExecStart=java -jar`
   - Python：检测 `requirements.txt` / `pyproject.toml` / `Pipfile` / `poetry.lock` / `uv.lock`；venv 路径、gunicorn/uvicorn 入口
 - `service.managers`：允许**同时配置多个**，运行时按探测结果激活实际存在的那个
 
 ```ts
 service: defineService({
-  managers: ['systemd', 'sysvinit', 'openrc', 'supervisor'], // 偏好链，见第 5 条
+  managers: ['systemd', 'sysvinit', 'openrc', 'supervisor'], // 偏好链：都探测不到时报逐项失败原因
   // 全部会被渲染出来，只有探测到的那个被激活；其余作为 fallback 留在目标机上
 })
 ```
 
 **理由**：老 CentOS 6 只有 sysvinit，Alpine 是 OpenRC，容器里可能什么都没有。同时写多个 = 一份配置走天下，且"写了但不激活"不会有任何副作用。
 
-**落点**：`docs/config.md` runtime 段；新包 `@dp/target-service` 渲染层。
+**落点**：设计期条目，**预留（未实现）** —— `service.managers` 字段与 `@dp/target-service` 渲染层包都没落地（`docs/config.md` 没有 runtime 段）。现状只到探测层：init / supervisor 识别在 `@dp/core` / `@dp/local` / `@dp/ssh`，unit 与进程守护落在 `@dp/target-systemd` / `@dp/target-process`。
 
 ---
 
@@ -70,7 +70,7 @@ defineEnv     defineResources  defineLsm
 
 **理由**：类型提示、可跳转、可组合。`define*` 不做事，所以不会成为性能或调试负担。
 
-**落点**：`@dp/schema` 导出全部 `define*`；`dp schema --emit` 输出 JSON Schema。
+**落点**：`@dp/schema` 导出全部 `define*`；`dp schema --out` 输出 JSON Schema。
 
 ---
 
@@ -84,16 +84,18 @@ jump:      ['direct-tcpip', 'nc', 'ssh-relay']
 transfer:  ['rsync', 'tar-ssh', 'sftp', 'scp']
 ```
 
-全链失败时输出**结构化错误**（不是"failed"）：
+全链失败时输出**结构化错误**（不是"failed"）。已落地的一处是传输协商，报 `DP.PREF.UNSUPPORTED`，message 逐项列出链上每一项的失败原因，`hint` 给出可执行的出路：
 
 ```
-DP.CHAIN.EXHAUSTED  kind=transport
-  ├ native-ssh   ✗ 未找到 ssh 可执行文件（PATH 中无 ssh）
-  ├ ssh2         ✗ cryptoPolicy=pq-required，但 ssh2 不支持任何 PQC KEX
-  └ 建议：安装 OpenSSH ≥9.9，或将 cryptoPolicy 降为 pq-preferred（会失去抗量子）
+DP.PREF.UNSUPPORTED  path=transport.preferred
+
+没有可用的传输方式。逐项结论（偏好链：rsync-ssh > tar-ssh > sftp > scp）：
+  - rsync-ssh：rsync 需要两端都装：目标机未检测到 rsync（缺一端就退化成全量传输）
+  - tar-ssh：目标机没有 tar，无法解包归档流
+  - sftp：sftp 子系统被显式禁用
 ```
 
-每项带：名称、失败原因、**可执行建议**。机器可读（`--json`）。
+每项带：名称、失败原因，`hint` 带可执行建议（「本地装上其中之一即可恢复：…」）。机器可读（`--json`）。
 
 **理由**：这一条是被 spike 逼出来的（S1/S4）。多跳和抗量子都无法用单一实现覆盖。
 
@@ -197,7 +199,7 @@ commands: {
 
 ## 13 · scp（确实漏了，补上）
 
-**决策**：`@dp/transfer` 四个驱动，scp 是最后一个：
+**决策**：`@dp/transport` 四个驱动，scp 是最后一个：
 
 | 驱动 | 依赖 | 增量 | 何时用 |
 |---|---|---|---|
@@ -240,20 +242,20 @@ commands: {
 - **TOCTOU**：校验与写入之间不允许重新解析路径——先 `open` 拿到 fd 再校验 fd
 - **权限**：显式 `mode`（默认文件 `0640`、目录 `0750`），**拒绝 `0777`/`0666`**；umask 显式设置；临时目录 `0700`
 - **完整性**：传输后校验 sha256，不匹配即整体作废（staging 丢弃，不动 current）
-- **凭据**：不落盘、不进日志（见第 7 条脱敏）、SSH_ASKPASS 助手文件 `0700` 且用完即删
+- **凭据**：不落盘、不进日志（日志走统一脱敏出口）、SSH_ASKPASS 助手文件 `0700` 且用完即删
 - **主机密钥**：默认 `strict`，`knownHosts: none` 必须显式打开并被 `dp check --security` 列出
-- **目录链逐层校验**：不只看目标路径本身的 mode，要**从根逐级校验 owner + 可写性**，判定基准是「owner == **布局所有者**」（不是"是否为 root"—— 见 `privilege.md`）。两处必检：① 带外脚本所在代码域（提权面，`DP.SEC.RESCUE_UNSAFE_PATH` → 拒绝）② 状态目录（伪造租约锁 = 可用性攻击）。**这是预检项，不是运行时警告**
-- **代码/数据分离**：被 root 定时执行的代码与可变数据**不得同目录**。状态文件取出的值只作引用过的参数 + allowlist 校验，永不 `eval`。 与
+- **目录链逐层校验**：不只看目标路径本身的 mode，要**从根逐级校验 owner + 可写性**，判定基准是「owner == **布局所有者**」（不是"是否为 root"—— 布局与提权方式按实测能力推导、不按身份推断，见 `openspec/specs/privilege-layout/spec.md`）。两处必检：① 带外脚本所在代码域（提权面，`DP.SEC.RESCUE_UNSAFE_PATH` → 拒绝）② 状态目录（伪造租约锁 = 可用性攻击）。**这是预检项，不是运行时警告**
+- **代码/数据分离**：被 root 定时执行的代码与可变数据**不得同目录**。状态文件取出的值只作引用过的参数 + allowlist 校验，永不 `eval`。
 
 ---
 
 ## 17 · 测试全面性
 
-在 `docs/testing.md` 五层基础上**再加三层**：
+在纯函数夹具、真实 IO、错误路径断言这层单测之上，**再加三层**：
 
-6. **故障注入层**：用 podman 靶机真实注入——`AllowTcpForwarding no`、`busybox su`、磁盘写满、只读目录、服务 crash loop、网络中断
-7. **契约层**：把 spike 的结论固化成回归测试——rsync `--rsh` argv 契约、`%h` 不替换、不经 shell、scp `-O` 兼容
-8. **矩阵层**：`{linux, darwin, win32, freebsd} × {systemd, sysvinit, openrc, launchd, winsvc, none} × {rsync, tar-ssh, sftp, scp} × {become: sudo|su|none} × {layout: system|hybrid|user} × {release.root: 显式|推导}` —— 组合数大，但每一项都是注入 Facts 的纯函数，不需要真机器
+- **故障注入层**：用 podman 靶机真实注入——`AllowTcpForwarding no`、`busybox su`、磁盘写满、只读目录、服务 crash loop、网络中断
+- **契约层**：把 spike 的结论固化成回归测试——rsync `--rsh` argv 契约、`%h` 不替换、不经 shell、scp `-O` 兼容
+- **矩阵层**：`{linux, darwin, win32, freebsd} × {systemd, sysvinit, openrc, launchd, winsvc, none} × {rsync, tar-ssh, sftp, scp} × {become: sudo|su|none} × {layout: system|hybrid|user} × {release.root: 显式|推导}` —— 组合数大，但每一项都是注入 Facts 的纯函数，不需要真机器
 
 覆盖率产物 → `build/coverage/`。
 
@@ -264,22 +266,21 @@ commands: {
 - 每个命令/子命令都有 `description`、`examples`（可直接复制）、`exit codes`
 - `--help` 分级：`dp --help` / `dp deploy --help` / `dp deploy --help=config`
 - **`--json`**：所有命令支持机器可读输出（agent 用）
-- **稳定 exit code**：`0` 成功 / `1` 通用失败 / `2` 配置错误 / `3` 预检失败 / `4` 传输失败 / `5` 验收失败 / `6` 已回滚 / `7` 并发锁占用
-- `dp explain`：打印解析合并后的**有效配置**（含来源文件与行号）——排查"为什么这个值生效了"
-- `dp schema --emit`：导出 JSON Schema 供编辑器提示
+- **稳定 exit code**：`0` 成功 / `1` 未知错误（或部署失败且已完整回滚）/ `2` 用法/参数错或验证失败且已回滚（用 `--json` 的 error.code 区分）/ `3` 配置错 / `4` 环境缺依赖
+- `dp explain`：打印解析合并后的**有效配置**（含来源文件与行号）——排查"为什么这个值生效了"（未实现）
+- `dp schema --out <路径>`：导出 JSON Schema 为文件（不给 `--out` 则打印到 stdout），供编辑器提示
 
 ---
 
 ## 19 · 产物统一进 build 目录
 
 ```
+packages/<pkg>/build/   # 每个包的 tsc -b 编译产物（测试就在产物上跑）
 build/
-  packages/<pkg>/dist/      # 每个包的编译产物（published files 指向这里，相对路径 dist）
-  coverage/                 # 覆盖率
-  spikes/                   # spike 输出
-  reports/
+  coverage/             # 覆盖率（根 test script 产出 lcov）
+  bin/                  # 单文件可执行
 ```
-每个包 `outDir` 指向 `build/packages/<pkg>/dist`，`files` 字段写 `["dist"]`——**不直接写 `build`**（否则测试产物会进发布包）。
+包的 `files` 字段写 `["build"]`——发布包只收自己 `build/` 里的东西；根 `build/` 不进发布包，所以覆盖率与可执行文件放那里不会跟着出去。
 
 ---
 
@@ -290,8 +291,9 @@ build/
 **起始版本 `0.0.0-alpha`**：包全是 `private: true`，一个都没上过 npm，所以不能从 `0.0.0` 起步 ——
 那等于声称已经发过正式版。
 
-一致性由门禁 `scripts/check-versions.mjs` 卡（第一道，最便宜）：根与 12 个包的 `version`
-必须与根一致，不一致直接红。光靠人同步 13 份 package.json 一定会漏，漏了之后的表现是
+一致性由门禁 `scripts/check-versions.mjs` 卡（第一道，最便宜）：根与 `packages/` 下**所有包**的
+`version` 必须与根一致，不一致直接红（包数由门禁自己 readdir 得出，没有写死的数字）。
+光靠人同步一沓 package.json 一定会漏，漏了之后的表现是
 `dp --version` 报一个、某个包里报另一个 —— 而排查的人手边往往只有其中一个。
 
 ---
@@ -301,16 +303,19 @@ build/
 合并原则：能加 flag 的就不新建脚本；该是测试的就写成测试。
 
 ```
-dev  build  test  lint [--fix]  typecheck  format [--check]  doc  release
+build  lint  test  integration  clean  build:bin  postinstall
+verify（= build + lint + test + verify:gates）与它的三个口径：
+  verify:gates  verify:selfcheck  verify:mutation
 ```
-（目标是 ≤10 个，且 `lint --fix` / `format --check` 这类只留一个入口）
+
+（不再设 dev / typecheck / format / doc / release 这类分身。）
 
 ---
 
 ## 22 · AGENTS.md 与 agents/skills
 
-- 根目录 `AGENTS.md`：仓库约定、命令、目录职责、提交规范（**保持 <100 行**）
-- `.agents/skills/`：**只放真正可复用的操作流程**（如 `dp-spike-env` 靶机环境搭建），不堆积说明性文档
+- 根目录 `AGENTS.md`：仓库约定、命令、目录职责、提交规范（只收一手约定，细节留给代码与契约）
+- `.agents/skills/`：**只放真正可复用的操作流程**（如 `subagent-dispatch` 派活与验收、`mutation-verify` 变异验证闭环），不堆积说明性文档
 
 ---
 
