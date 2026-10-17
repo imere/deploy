@@ -35,4 +35,6 @@ RUN printf '%s\n' \
   && rm -f /etc/nginx/sites-enabled/default
 
 EXPOSE 22 8080
-CMD ["/usr/sbin/sshd", "-D", "-e"]
+# 1 号进程是 sleep 而不是 sshd：sshd 由集成脚本显式拉起（起不来时能拿到它的原话，
+# 而让 CMD 去跑它只会得到一个 Status: exited）。systemd 那台会用自己的命令覆盖这一行
+CMD ["sleep", "infinity"]

@@ -80,7 +80,7 @@ const hosts = {}
 
 async function resolveHost(name) {
   const r = await pod(['inspect', name], { timeoutMs: 30_000 })
-  let nets = {}
+  let nets
   try {
     nets = JSON.parse(r.stdout)[0]?.NetworkSettings?.Networks ?? {}
   } catch {
@@ -209,7 +209,13 @@ async function waitForSsh(name, host) {
       { timeoutMs: 30_000 },
     )
     if (r.code === 0 && r.stdout.trim() === 'ok') return
-    if (Date.now() > deadline) throw new Error(`${name} 的 sshd 一直没就绪：${r.stderr.trim()}`)
+    if (Date.now() > deadline) {
+      // 只看 ssh 的原话会漏掉真因（容器已经 exited / sshd 起不来），把容器自己的日志一并带出来
+      const logs = await pod(['logs', '--tail', '30', name], { timeoutMs: 30_000 })
+      throw new Error(
+        `${name} 的 sshd 一直没就绪：${r.stderr.trim()}\n容器日志：${(logs.stdout + logs.stderr).trim()}`,
+      )
+    }
     await new Promise((r2) => setTimeout(r2, 1000))
   }
 }
@@ -478,8 +484,11 @@ async function startContainers() {
   for (const name of [TARGET, TARGET_SYSD]) {
     await pod(['cp', join(WORK, 'key.pub'), `${name}:/home/dp/.ssh/authorized_keys`])
     await execIn(name, 'chown dp:dp /home/dp/.ssh/authorized_keys && chmod 600 /home/dp/.ssh/authorized_keys')
-    await execIn(name, 'mkdir -p /run/sshd && /usr/sbin/sshd')
   }
+  // sshd 不交给 CMD：让 1 号进程去跑它，起不来的后果是容器直接退出，只剩一句
+  // 「exited」而看不出为什么。这里显式起并接住它的原话
+  const sshd = await execIn(TARGET, 'mkdir -p /run/sshd && /usr/sbin/sshd -e 2>&1')
+  if (sshd.code !== 0) throw new Error(`靶机的 sshd 起不来：${sshd.stdout.trim() || sshd.stderr.trim()}`)
   await waitForSsh(TARGET, hosts[TARGET])
 
   // systemd 靶机的 sshd 由 systemd 管，等它自己起来
