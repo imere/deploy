@@ -146,6 +146,30 @@ async function dumpTree(name) {
   log(`    靶机 ${scenario.root} 的实际内容：\n${r.stdout.trim().split('\n').map((l) => `      ${l}`).join('\n')}`)
 }
 
+/**
+ * 用两条裸 rsync 对照 dp 的那一条：一条不带 `--rsync-path`，一条带上。
+ *
+ * 分的是「rsync 本身就没传」与「--rsync-path=sudo 这条路上没传」——
+ * 两者的报错在 dp 这一层长得一模一样（退出 0、0 个文件），只有分开跑才看得出来。
+ */
+async function dumpRsync() {
+  const ip = hosts[TARGET]
+  const rsh =
+    'ssh -p 22 -i /root/.ssh/id_ed25519 -o BatchMode=yes ' +
+    '-o UserKnownHostsFile=/root/.ssh/known_hosts -o StrictHostKeyChecking=accept-new'
+  const base = `rsync -a --stats -e '${rsh}' /work/src/static/index.html dp@${ip}`
+  for (const [label, extra] of [
+    ['不带 --rsync-path', ''],
+    ['--rsync-path=sudo', " --rsync-path='sudo -n -u root rsync'"],
+  ]) {
+    const r = await execIn(CLIENT, `${base}${extra}:/srv/static/releases/probe-${label === '不带 --rsync-path' ? 'plain' : 'sudo'}/ 2>&1`, {
+      timeoutMs: 60_000,
+    })
+    const out = (r.stdout + r.stderr).trim().split('\n').slice(-8).map((l) => `      ${l}`).join('\n')
+    log(`    裸 rsync（${label}）：退出 ${r.code}\n${out}`)
+  }
+}
+
 async function scenario(name, fn) {
   if (only !== undefined && only !== name) {
     results.push({ name, state: 'skipped', detail: '未选中' })
@@ -166,6 +190,7 @@ async function scenario(name, fn) {
     log(`  ✖ ${name}\n${String(err?.message ?? err)}`)
     await dumpFacts(name)
     await dumpTree(name)
+    if (name === 'static') await dumpRsync()
   }
 }
 
