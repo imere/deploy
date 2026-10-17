@@ -534,3 +534,102 @@ export interface Elevation {
   /** 不可用时的原因（远端原话脱敏后），或可用的实测依据 */
   readonly reason?: string
 }
+
+// 目标机文件与输出的公共件 —— 各目标执行器逐字同文的那几份，收口到这里
+
+/**
+ * 「这个文件是不是 dp 写的」的标记本体。nginx conf / systemd unit / process 启停脚本
+ * 共用同一份：归属判定只有一种回答才算数，多一种就多一处会漂移的字面量。
+ * 渲染时写进文件头部，覆盖判定在文件头部前几行找它。
+ */
+export const MANAGED_MARKER = '# managed by dp'
+
+/** 去掉 `#` 的正文，与标记本体同源，避免各处再写一份字面量后漂移 */
+const MANAGED_MARKER_TEXT = MANAGED_MARKER.slice(1).trim()
+
+/**
+ * 内容是否带 managed 标记。**只看前几行**：标记是头部注释，正文里出现同形文本
+ * 不构成归属凭证 —— 否则文件里恰好引用了这串字面量就能骗过覆盖判定。
+ * 空内容返回 false —— 它不可能是 dp 写的。
+ *
+ * 标记必须落在**注释行**里（行首是 `#`）：它首先是给人看的声明，不是该文件格式的
+ * 有效语法；一个会被解释器当语法吃掉的标记，不能当归属凭证。
+ *
+ * @param content 目标机上那份文件的全文。读不到就让它抛错，**不要**拿空串顶替 ——
+ * 「读不了」被当成「不存在」时，下一次判定就直接是一次覆盖
+ * @returns true 只说明「头部注释自称由 dp 管理」，不说明内容真是 dp 写的；覆盖前仍要备份
+ */
+export function isManaged(content: string): boolean {
+  return content
+    .split(/\r?\n/)
+    .slice(0, 5)
+    .some((line) => line.trimStart().startsWith('#') && line.includes(MANAGED_MARKER_TEXT))
+}
+
+/**
+ * 错误信息里保留多少子进程输出。整段塞进去会刷屏，并把真正有用的首行挤走
+ */
+export const EXEC_OUTPUT_LIMIT = 2000
+
+/**
+ * 截断长输出。数 MB 的 stderr 塞进异常既刷屏又会把真正有用的首行挤走；截断必须
+ * 连同「原文多长」一起告诉读者，否则看不出丢掉了多少现场。
+ *
+ * @param text 原始输出
+ * @param limit 保留上限，缺省 {@link EXEC_OUTPUT_LIMIT}
+ * @returns 去掉首尾空白后的文本；超限时截断到 limit 并附加「已截断」说明
+ */
+export function excerptOutput(text: string, limit: number = EXEC_OUTPUT_LIMIT): string {
+  const trimmed = text.trim()
+  if (trimmed.length === 0) return ''
+  return trimmed.length <= limit
+    ? trimmed
+    : `${trimmed.slice(0, limit)}…（已截断，原文 ${trimmed.length} 字节）`
+}
+
+/**
+ * 把 unknown 摊成一句可读文本。补偿失败这类「错误里的错误」都经它进文本 ——
+ * 它自己绝不抛错，非 Error 对象、任意值都能落成一句话。
+ *
+ * @param err 任意出错对象（DpError 带码，普通 Error 取 message，其余 String 化）
+ * @returns 一句可读文本，格式：`码: 文案` / `message` / `String(err)`
+ */
+export function describeExecFailure(err: unknown): string {
+  if (err instanceof DpError) return `${err.code}: ${err.message}`
+  if (err instanceof Error) return err.message
+  return String(err)
+}
+
+/**
+ * 目标机路径拼接。**一律用 `/`**：这些路径会进远端的 conf 与命令行，反斜杠在 Linux 上
+ * 是转义而不是分隔符，Windows 上的 Node fs 又认正斜杠 —— 为分隔符写两套分支只会让
+ * 同一份配置在两端算出两个落点。空段直接丢弃：可选前缀缺省时不必先自己过滤一遍。
+ * @param parts 路径段；空段与缺省段直接丢弃
+ * @returns 以 `/` 连接的路径；全空入参得到空串
+ */
+export function joinRemotePath(...parts: readonly string[]): string {
+  return parts.filter((p) => p !== '').join('/')
+}
+
+/**
+ * ssh 与 local 两份工具探测表**都含**的工具，顺序 = ssh 侧现顺序。
+ *
+ * 两端各有一批只在一端探的工具，不进这份清单：
+ * - 仅 ssh 侧：`sudo` / `su` / `doas`（提权包装只发生在连接之上）、`scp` / `sftp` /
+ *   `base64`（ssh 传输通道的备选与二进制通道）、`openssl`（探到即记，仓内暂无消费者）；
+ * - 仅 local 侧：`sc`（Windows 服务控制器，本机 winsvc 探测用）。
+ */
+export const PROBE_TOOLS_SHARED: readonly string[] = [
+  'ssh',
+  'rsync',
+  'tar',
+  'gzip',
+  'systemctl',
+  'loginctl',
+  'nginx',
+  'docker',
+  'git',
+  'python3',
+  'node',
+  'java',
+]
