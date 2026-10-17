@@ -1,15 +1,17 @@
 /**
- * rsync argv 与退出码映射。
+ * rsync 计划与退出码映射。
  *
- * 两个重点：
- *  1. argv 里远端 path 必须过 `@dp/ssh` 的 `quoteArg`（唯一转义出口）
- *  2. 23/24 是**部分传输**，必须变成 warning 而不是成功
+ * 三个重点：
+ *  1. 计划里远端 path 必须过 `@dp/ssh` 的 `quoteArg`（唯一转义出口）
+ *  2. 嵌套条目按父目录分组：rsync 的「多源一目的」只保 basename，混在一组会把路径拍平
+ *  3. 23/24 是**部分传输**，必须变成 warning 而不是成功
  */
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { DpError } from '@dp/ports'
-import { buildRsyncArgv, buildRsyncPath, classifyRsyncExit, parseRsyncOutput, runRsync } from './rsync.js'
+import { buildRsyncPath, buildRsyncPlan, classifyRsyncExit, parseRsyncOutput, runRsyncPlan } from './rsync.js'
 import { fakeSpawn } from './fake-spawn.js'
+import type { RsyncPlan } from './rsync.js'
 import type { TransferRequest } from './types.js'
 
 const req: TransferRequest = {
@@ -26,63 +28,107 @@ const opts = {
   remoteTarget: 'dp-user@dp-target',
 }
 
-describe('buildRsyncArgv', () => {
+const flat: TransferRequest = { ...req, entries: ['index.html'] }
+
+describe('buildRsyncPlan', () => {
   /**
    * `--human-readable=0` 这条曾经写在实现里，而 rsync 根本不认 ——
    * `-h` 只吃「重复次数」、不吃 `=级别`，真机上直接 `option does not take an argument` 退出 1。
    * 降到 0 的唯一写法是 `--no-h`。这条断言钉的就是「不许再写回 =0」。
    */
   test('机器可读选项齐备：itemize / no-human-readable / out-format / stats', () => {
-    const argv = buildRsyncArgv(req, opts)
-    assert.ok(argv.includes('--itemize-changes'))
-    assert.ok(argv.includes('--no-human-readable'), '必须是 --no-human-readable；--human-readable=0 会被 rsync 拒')
-    assert.equal(
-      argv.some((a) => a.startsWith('--human-readable')),
-      false,
-      '--human-readable 的任何 = 形式都不存在，rsync 不接受它带参数',
-    )
-    assert.ok(argv.includes('--out-format=%i %n'))
-    assert.ok(argv.includes('--stats'))
+    const plan = buildRsyncPlan(req, opts)
+    for (const argv of plan.argvs) {
+      assert.ok(argv.includes('--itemize-changes'))
+      assert.ok(argv.includes('--no-human-readable'), '必须是 --no-human-readable；--human-readable=0 会被 rsync 拒')
+      assert.equal(
+        argv.some((a) => a.startsWith('--human-readable')),
+        false,
+        '--human-readable 的任何 = 形式都不存在，rsync 不接受它带参数',
+      )
+      assert.ok(argv.includes('--out-format=%i %n'))
+      assert.ok(argv.includes('--stats'))
+    }
   })
 
   test('-a 但默认不带 -o -g（多数部署用户没有 chown 权限）', () => {
-    const argv = buildRsyncArgv(req, opts)
-    assert.ok(argv.includes('-a'))
-    assert.ok(!argv.includes('-o'), '不该有裸 -o；保留 owner/group 必须显式开')
-    assert.deepEqual(buildRsyncArgv(req, { ...opts, preserveOwner: true }).slice(0, 5).includes('-o'), true)
+    const plan = buildRsyncPlan(req, opts)
+    assert.ok(plan.argvs[0]!.includes('-a'))
+    assert.ok(!plan.argvs[0]!.includes('-o'), '不该有裸 -o；保留 owner/group 必须显式开')
+    const kept = buildRsyncPlan(req, { ...opts, preserveOwner: true })
+    assert.ok(kept.argvs[0]!.slice(0, 5).includes('-o'))
   })
 
   test('--delete 默认关，显式开才有', () => {
-    assert.ok(!buildRsyncArgv(req, opts).includes('--delete'))
-    assert.ok(buildRsyncArgv({ ...req, deleteExtraneous: true }, opts).includes('--delete'))
+    assert.ok(!buildRsyncPlan(req, opts).argvs[0]!.includes('--delete'))
+    assert.ok(buildRsyncPlan({ ...req, deleteExtraneous: true }, opts).argvs[0]!.includes('--delete'))
   })
 
-  test('dryRun 加 --dry-run', () => {
-    assert.ok(buildRsyncArgv({ ...req, dryRun: true }, opts).includes('--dry-run'))
+  test('dryRun：计划标出来，且每组都带 --dry-run', () => {
+    const plan = buildRsyncPlan({ ...req, dryRun: true }, opts)
+    assert.equal(plan.dryRun, true)
+    for (const argv of plan.argvs) assert.ok(argv.includes('--dry-run'))
+  })
+
+  /**
+   * 真机实测（rsync 3.2.7）：把 `assets/app.js` 与 `index.html` 一起列进同一个目的目录，
+   * 落盘出来的是 `<dest>/app.js` —— 多源一目的只保 basename。分组是这条实测的直接后果。
+   */
+  test('嵌套条目按父目录分组，各用自己的目的目录（不拍平路径）', () => {
+    const plan = buildRsyncPlan(req, opts)
+    assert.equal(plan.argvs.length, 2)
+    assert.ok(plan.argvs[0]!.includes('/work/dist/index.html'))
+    assert.equal(plan.argvs[0]!.at(-1), 'dp-user@dp-target:/srv/www/current/')
+    assert.ok(plan.argvs[1]!.includes('/work/dist/assets/app.js'))
+    assert.equal(plan.argvs[1]!.at(-1), 'dp-user@dp-target:/srv/www/current/assets/')
+  })
+
+  test('平铺清单只有一组，形态与「一个目的目录」完全一致', () => {
+    const plan = buildRsyncPlan(flat, opts)
+    assert.equal(plan.argvs.length, 1)
+    assert.deepEqual(plan.remoteDirs, [])
+  })
+
+  test('remoteDirs 只列嵌套目录：最后一段 rsync 自己会建，缺的只是中间层', () => {
+    assert.deepEqual([...buildRsyncPlan(req, opts).remoteDirs], ['/srv/www/current/assets'])
+    assert.deepEqual([...buildRsyncPlan(flat, opts).remoteDirs], [])
+  })
+
+  test('mkdir 前奏是 ssh argv，建的就是那几个嵌套目录', () => {
+    const plan = buildRsyncPlan(req, opts)
+    const argv = plan.mkdirArgv
+    assert.ok(argv !== undefined, '有嵌套目录就必须有建目录的 argv')
+    assert.equal(argv[0], '/usr/bin/ssh')
+    assert.equal(argv.at(-2), 'dp-user@dp-target')
+    assert.equal(argv.at(-1), 'mkdir -p /srv/www/current/assets')
+  })
+
+  test('become → mkdir 前奏带提权包装，且 -- 之后才是 mkdir', () => {
+    const plan = buildRsyncPlan({ ...req, become: { type: 'sudo', user: 'root' } }, opts)
+    assert.equal(plan.mkdirArgv?.at(-1), 'sudo -n -u root -- mkdir -p /srv/www/current/assets')
+  })
+
+  test('无嵌套目录时 mkdirArgv 这个键根本不出现', () => {
+    const plan = buildRsyncPlan(flat, opts)
+    assert.equal('mkdirArgv' in plan, false, '有键而值是空数组会被当成一条空命令去 spawn')
   })
 
   test('远端写成 user@host:path，且 path 走 quoteArg', () => {
-    const argv = buildRsyncArgv({ ...req, remoteRoot: '/srv/my app' }, opts)
-    const target = argv[argv.length - 1]!
-    assert.equal(target, "dp-user@dp-target:'/srv/my app/'")
-  })
-
-  test('本地源是 root/entry 形式', () => {
-    const argv = buildRsyncArgv(req, opts)
-    assert.ok(argv.includes('/work/dist/index.html'))
-    assert.ok(argv.includes('/work/dist/assets/app.js'))
+    const plan = buildRsyncPlan({ ...req, remoteRoot: '/srv/my app' }, opts)
+    assert.equal(plan.argvs[0]!.at(-1), "dp-user@dp-target:'/srv/my app/'")
+    assert.equal(plan.argvs[1]!.at(-1), "dp-user@dp-target:'/srv/my app/assets/'")
   })
 
   test('空源 → DP.SOURCE.EMPTY（不传输空的"成功"）', () => {
     assert.throws(
-      () => buildRsyncArgv({ ...req, entries: [] }, opts),
+      () => buildRsyncPlan({ ...req, entries: [] }, opts),
       (err: unknown) => err instanceof DpError && err.code === 'DP.SOURCE.EMPTY',
     )
   })
 
   test('空远端目标 → 拒绝，不猜', () => {
     assert.throws(
-      () => buildRsyncArgv(req, { ...opts, remoteTarget: '  ' }),
+      () => buildRsyncPlan(req, { ...opts, remoteTarget: '  ' }),
       (err: unknown) => err instanceof DpError && err.code === 'DP.CONFIG.INVALID',
     )
   })
@@ -179,24 +225,64 @@ describe('parseRsyncOutput', () => {
   })
 })
 
-describe('runRsync · fake spawn 驱动', () => {
-  test('正常退出 → 统计出文件数', async () => {
+describe('runRsyncPlan · fake spawn 驱动', () => {
+  const simple: RsyncPlan = { argvs: [['/usr/bin/rsync', '-a']], remoteDirs: [], dryRun: false }
+
+  test('各组统计累加，command 是按组展开的全部 argv', async () => {
     const fake = fakeSpawn({
       exitCode: 0,
       stdout: 'Number of regular files transferred: 3\nTotal file size: 55 bytes\n',
     })
-    const result = await runRsync(['/usr/bin/rsync', '-a'], { spawnImpl: fake.impl, timeoutMs: 5000 })
+    const plan: RsyncPlan = { ...simple, argvs: [['/usr/bin/rsync', '-a'], ['/usr/bin/rsync', '-a']] }
+    const result = await runRsyncPlan(plan, { spawnImpl: fake.impl, timeoutMs: 5000 })
     assert.equal(result.exitCode, 0)
-    assert.equal(result.filesTransferred, 3)
-    assert.equal(result.bytes, 55)
-    assert.deepEqual([...result.warnings], [])
-    // argv 原样回传，且不含凭据
-    assert.deepEqual([...result.command], ['/usr/bin/rsync', '-a'])
+    assert.equal(result.filesTransferred, 6, '两组各 3 个文件，总数必须是 6 而不是最后一组的 3')
+    assert.equal(result.bytes, 110)
+    assert.deepEqual([...result.command], ['/usr/bin/rsync', '-a', '/usr/bin/rsync', '-a'])
+  })
+
+  test('有一组读不出字节数就不报总数：部分已知 + 部分未知 ≠ 一个总数', async () => {
+    const fake = fakeSpawn({ exitCode: 0, stdout: 'Number of regular files transferred: 3\n' })
+    const plan: RsyncPlan = { ...simple, argvs: [['/usr/bin/rsync'], ['/usr/bin/rsync']] }
+    const result = await runRsyncPlan(plan, { spawnImpl: fake.impl, timeoutMs: 5000 })
+    assert.equal(result.filesTransferred, 6)
+    assert.equal(result.bytes, undefined)
+  })
+
+  test('mkdir 前奏排在所有组之前，失败就抛 DP.PATH.NOT_WRITABLE（传输一次都没起）', async () => {
+    const fake = fakeSpawn({ exitCode: 1, stderr: 'mkdir: cannot create directory: Permission denied' })
+    const plan: RsyncPlan = {
+      argvs: [['/usr/bin/rsync', '-a']],
+      remoteDirs: ['/srv/www/current/assets'],
+      mkdirArgv: ['/usr/bin/ssh', 'dp-user@dp-target', 'mkdir -p /srv/www/current/assets'],
+      dryRun: false,
+    }
+    await assert.rejects(
+      () => runRsyncPlan(plan, { spawnImpl: fake.impl, timeoutMs: 5000 }),
+      (err: unknown) => err instanceof DpError && err.code === 'DP.PATH.NOT_WRITABLE',
+    )
+    assert.equal(fake.count(), 1, '前奏失败后不该再起 rsync')
+    assert.equal(fake.records[0]!.file, '/usr/bin/ssh')
+  })
+
+  test('dryRun 不跑 mkdir 前奏：演练不在机器上留目录', async () => {
+    const fake = fakeSpawn({ exitCode: 0, stdout: 'Number of regular files transferred: 9\n' })
+    const plan: RsyncPlan = {
+      argvs: [['/usr/bin/rsync', '-a', '--dry-run']],
+      remoteDirs: ['/srv/www/current/assets'],
+      mkdirArgv: ['/usr/bin/ssh', 'dp-user@dp-target', 'mkdir -p /srv/www/current/assets'],
+      dryRun: true,
+    }
+    const result = await runRsyncPlan(plan, { spawnImpl: fake.impl, timeoutMs: 5000 })
+    assert.equal(fake.count(), 1)
+    assert.equal(fake.records[0]!.file, '/usr/bin/rsync')
+    assert.equal(result.dryRun, true)
+    assert.equal(result.filesTransferred, 0, '演练不报文件数：一个从清单推出来的数字会让人以为真搬了')
   })
 
   test('退出 23 → warning 而不是静默成功', async () => {
     const fake = fakeSpawn({ exitCode: 23, stderr: 'some file vanished' })
-    const result = await runRsync(['/usr/bin/rsync'], { spawnImpl: fake.impl, timeoutMs: 5000 })
+    const result = await runRsyncPlan(simple, { spawnImpl: fake.impl, timeoutMs: 5000 })
     assert.equal(result.partial, true)
     assert.equal(result.warnings.length, 1)
     assert.match(result.warnings[0]!, /部分传输/)
@@ -205,7 +291,7 @@ describe('runRsync · fake spawn 驱动', () => {
   test('退出 255 → 抛 DP.SSH.*，stderr 原样带出', async () => {
     const fake = fakeSpawn({ exitCode: 255, stderr: 'Permission denied (publickey,password).' })
     await assert.rejects(
-      () => runRsync(['/usr/bin/rsync'], { spawnImpl: fake.impl, timeoutMs: 5000 }),
+      () => runRsyncPlan(simple, { spawnImpl: fake.impl, timeoutMs: 5000 }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
         assert.equal(err.code, 'DP.SSH.AUTH_FAILED')
@@ -218,7 +304,7 @@ describe('runRsync · fake spawn 驱动', () => {
   test('超时 → 杀进程并抛 DP.TIMEOUT.EXEC（不允许无限等）', async () => {
     const fake = fakeSpawn({ autoClose: false })
     await assert.rejects(
-      () => runRsync(['/usr/bin/rsync'], { spawnImpl: fake.impl, timeoutMs: 20 }),
+      () => runRsyncPlan(simple, { spawnImpl: fake.impl, timeoutMs: 20 }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
         assert.equal(err.code, 'DP.TIMEOUT.EXEC')
@@ -230,7 +316,7 @@ describe('runRsync · fake spawn 驱动', () => {
 
   test('输出里出现 prompt → 立刻杀并报 DP.INTERACTIVE_PROMPT_DETECTED', async () => {
     const fake = fakeSpawn({ autoClose: false })
-    const promise = runRsync(['/usr/bin/rsync'], { spawnImpl: fake.impl, timeoutMs: 5000 })
+    const promise = runRsyncPlan(simple, { spawnImpl: fake.impl, timeoutMs: 5000 })
     fake.emit(0, 'stderr', '[sudo] password for dp-user: ')
     await assert.rejects(
       () => promise,
@@ -241,12 +327,5 @@ describe('runRsync · fake spawn 驱动', () => {
       },
     )
     assert.deepEqual([...fake.records[0]!.killed], ['SIGKILL'])
-  })
-
-  test('dryRun 结果标明 dryRun 且不报文件数', async () => {
-    const fake = fakeSpawn({ exitCode: 0, stdout: 'Number of regular files transferred: 9\n' })
-    const result = await runRsync(['/usr/bin/rsync'], { spawnImpl: fake.impl, timeoutMs: 5000, dryRun: true })
-    assert.equal(result.dryRun, true)
-    assert.equal(result.filesTransferred, 0)
   })
 })

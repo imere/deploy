@@ -3,6 +3,7 @@ import { quoteArg, wrapCommand } from '@dp/ssh'
 import { redact } from '@dp/log'
 import { runProcess, summarizeFailure, type RunProcessResult } from './proc.js'
 import { buildRshArgv, rshValueForRsync, type RshOptions } from './rsh.js'
+import { buildSshMkdirArgv, ensureRemoteDirs, groupByParentDir, nestedDirs } from './groups.js'
 import type { TransferRequest, TransferResult, SpawnImpl } from './types.js'
 
 /**
@@ -20,9 +21,6 @@ export interface RsyncArgvOptions {
   readonly preserveOwner?: boolean
 }
 
-const rsyncPath = (req: TransferRequest): string =>
-  req.remoteRoot.endsWith('/') ? req.remoteRoot : `${req.remoteRoot}/`
-
 /**
  * `--rsync-path` 的值：用提权命令把远端 `rsync` **这一个词**包起来。
  *
@@ -36,18 +34,45 @@ export function buildRsyncPath(become: TransferRequest['become']): string | unde
 }
 
 /**
- * 纯函数：rsync 的完整 argv。
+ * rsync 的执行计划。
+ *
+ * 目的目录是**按父目录逐组**给的：rsync 的「多源一目的」只保每个文件的 basename，
+ * 显式列多个文件时嵌套路径会被拍平（真机实测：rsync 3.2.7 把 `assets/app.js`
+ * 直接放进目的目录变成 `app.js`）。所以嵌套条目以父目录分组、各用各的目的目录；
+ * 平铺清单只有一组一条 argv，与旧的单一 argv 形态完全一致。
+ */
+export interface RsyncPlan {
+  readonly argvs: readonly (readonly string[])[]
+  /**
+   * 嵌套条目的目的目录（绝对路径）。rsync 只会建目的串的最后一段，中间层它不管
+   * （实测定案：真跑缺中间层 exit 11）。这些目录由 mkdir 前奏先建。
+   */
+  readonly remoteDirs: readonly string[]
+  /**
+   * 建目录用的 ssh argv（含 become 提权包装）。**无嵌套目录时这个键不出现** ——
+   * 「没有这个键」与「有键但值是空数组」是两件事，后者会被当成一条空命令去 spawn
+   */
+  readonly mkdirArgv?: readonly string[]
+  /**
+   * 演练与否。dryRun 下 mkdir 前奏不跑：演练不在机器上留任何东西，而 rsync
+   * `--dry-run` 自己就能模拟全套（实测：目的目录缺父链时 dry-run 仍是 exit 0）
+   */
+  readonly dryRun: boolean
+}
+
+/**
+ * 纯函数：rsync 的完整执行计划。
  *
  * @param req 传输声明。清单为空直接拒绝 —— 空清单会让"部署成功"变成一句无法证伪的话
  * @param options rsync 路径、rsh、目标标识，以及是否额外保留属主
- * @returns 可直接 spawn 的 argv，不经 shell
+ * @returns 每组一条可直接 spawn 的 argv，不经 shell，外加 mkdir 前奏
  * @throws DpError DP.SOURCE.EMPTY（清单为空）、DP.CONFIG.INVALID（目标标识为空串）；
  * rsh 含空白时由 `rshValueForRsync` 抛
  */
-export function buildRsyncArgv(
+export function buildRsyncPlan(
   req: TransferRequest,
   options: RsyncArgvOptions,
-): readonly string[] {
+): RsyncPlan {
   if (req.entries.length === 0) {
     throw new DpError('DP.SOURCE.EMPTY', '源清单为空，拒绝传输', {
       hint: '构建产物为空，或 include/exclude 把所有文件都排除了',
@@ -57,29 +82,52 @@ export function buildRsyncArgv(
     throw new DpError('DP.CONFIG.INVALID', '远端目标标识为空', { hint: 'remote 传输需要 sshTarget 或 host' })
   }
 
-  const argv: string[] = [options.rsyncPath, '-a']
-
-  if (options.preserveOwner === true) argv.push('-o', '-g')
-  if (req.deleteExtraneous === true) argv.push('--delete')
-  if (req.dryRun === true) argv.push('--dry-run')
-
-  // --no-human-readable 而不是 --human-readable=0：后者 rsync 直接拒
-  // （`option does not take an argument`）—— -h 只吃「重复次数」不吃 =级别，
-  // 降到 0 的唯一写法是 --no-h。要的是纯数字，否则 --stats 里的字节数会带 K/M 后缀，
-  // 解析层拿到的是「1.23M」这种没法比大小的串。
-  argv.push('--itemize-changes', '--no-human-readable', '--out-format=%i %n', '--stats')
-  argv.push('-e', rshValueForRsync(buildRshArgv(options.rsh)))
-
+  // rshValue / rsync-path 只算一次：rsh 含空白时在这里就抛，不等循环里每组长一遍
+  const rshValue = rshValueForRsync(buildRshArgv(options.rsh))
   const rsyncPathOpt = buildRsyncPath(req.become)
-  if (rsyncPathOpt !== undefined) argv.push(`--rsync-path=${rsyncPathOpt}`)
 
   // 源是本地路径；远端写成 `host:path`，path 走 @dp/ssh 的 quoteArg（唯一转义出口）
   const src = `${req.localRoot.replace(/\/+$/, '')}/`
-  for (const e of req.entries) {
-    argv.push(`${src}${e.split('/').join('/')}`)
+  const destRoot = req.remoteRoot.endsWith('/') ? req.remoteRoot : `${req.remoteRoot}/`
+
+  const argvs = groupByParentDir(req.entries).map((group) => {
+    const argv: string[] = [options.rsyncPath, '-a']
+
+    if (options.preserveOwner === true) argv.push('-o', '-g')
+    if (req.deleteExtraneous === true) argv.push('--delete')
+    if (req.dryRun === true) argv.push('--dry-run')
+
+    // --no-human-readable 而不是 --human-readable=0：后者 rsync 直接拒
+    // （`option does not take an argument`）—— -h 只吃「重复次数」不吃 =级别，
+    // 降到 0 的唯一写法是 --no-h。要的是纯数字，否则 --stats 里的字节数会带 K/M 后缀，
+    // 解析层拿到的是「1.23M」这种没法比大小的串。
+    argv.push('--itemize-changes', '--no-human-readable', '--out-format=%i %n', '--stats')
+    argv.push('-e', rshValue)
+    if (rsyncPathOpt !== undefined) argv.push(`--rsync-path=${rsyncPathOpt}`)
+
+    for (const e of group.files) argv.push(`${src}${e}`)
+    // 本组的目的目录：父链由 mkdir 前奏保险，最后一段 rsync 自己会建
+    const dest = group.dir === '' ? destRoot : `${destRoot}${group.dir}/`
+    argv.push(`${options.remoteTarget}:${quoteArg(dest)}`)
+    return argv
+  })
+
+  const remoteDirs = nestedDirs({ entries: req.entries, remoteRoot: req.remoteRoot })
+  return {
+    argvs,
+    remoteDirs,
+    dryRun: req.dryRun === true,
+    ...(remoteDirs.length > 0
+      ? {
+          mkdirArgv: buildSshMkdirArgv({
+            rsh: options.rsh,
+            remoteTarget: options.remoteTarget,
+            dirs: remoteDirs,
+            ...(req.become !== undefined ? { become: req.become } : {}),
+          }),
+        }
+      : {}),
   }
-  argv.push(`${options.remoteTarget}:${quoteArg(rsyncPath(req))}`)
-  return argv
 }
 
 // 退出码 → 结果
@@ -217,49 +265,84 @@ export function parseRsyncOutput(stdout: string): RsyncStats {
 export interface RunRsyncOptions {
   readonly timeoutMs?: number
   readonly spawnImpl?: SpawnImpl
-  readonly dryRun?: boolean
 }
 
 /**
- * 起 rsync 并把退出码翻译成结果。23/24 走 warning，不静默当成功。
+ * 跑一个 rsync 计划，把各组结果汇总成一次传输的结论。23/24 走 warning，不静默当成功。
  *
- * @param argv `buildRsyncArgv` 的产出，不经 shell
- * @param options 超时 / spawn 注入 / dryRun。dryRun 下 `filesTransferred` 恒为 0：
- * 一个从清单推出来的数字会让人以为真的搬了东西
- * @returns rsync 路径的传输结果，外加 `partial`（部分传输）。`command` 是脱敏后的 argv
- * @throws DpError 由 `classifyRsyncExit` 判定出的那个码（认证 / 主机密钥 / 连接 / 权限 / 缺工具 /
- * 验证失败）；超时与 prompt 由 `runProcess` 抛
+ * @param plan `buildRsyncPlan` 的产出。mkdir 前奏在真跑时排在所有组之前：
+ * rsync 只会建目的串的最后一段，中间层的缺失只能在传输开始前补
+ * @param options 超时 / spawn 注入。演练与否由计划携带
+ * @returns rsync 路径的传输结果，外加 `partial`（任一组部分传输）。`command`
+ * 是按组展开的全部 argv —— 计划不是一条命令时，报告必须看得出它实际是几条
+ * @throws DpError 由 `classifyRsyncExit` 判定出的那个码（认证 / 主机密钥 / 连接 /
+ * 权限 / 缺工具 / 验证失败）、DP.PATH.NOT_WRITABLE（mkdir 前奏失败）；
+ * 超时与 prompt 由 `runProcess` 抛。之前各组的 partial 结论会折进 hint，
+ * 不能因为一组失败就吞掉已发生的事实
  */
-export async function runRsync(
-  argv: readonly string[],
+export async function runRsyncPlan(
+  plan: RsyncPlan,
   options: RunRsyncOptions = {},
 ): Promise<TransferResult & { readonly partial: boolean }> {
-  const result: RunProcessResult = await runProcess(argv, {
-    ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
-    ...(options.spawnImpl !== undefined ? { spawnImpl: options.spawnImpl } : {}),
-    label: 'rsync',
-  })
-
-  const verdict = classifyRsyncExit(result.code, result.stderr)
-  if (verdict.error !== undefined) throw verdict.error
-
-  const stats = parseRsyncOutput(result.stdout)
-  const warnings: string[] = []
-  if (verdict.partial) {
-    warnings.push(
-      `rsync 部分传输（exit ${result.code}）：有文件在传输过程中被改动或消失。目标上的内容可能与源不一致，请重跑一次核对`,
-    )
+  if (plan.remoteDirs.length > 0 && plan.mkdirArgv !== undefined && plan.dryRun !== true) {
+    const mkdir = await ensureRemoteDirs(plan.mkdirArgv, options)
+    if (mkdir.code !== 0) {
+      throw new DpError('DP.PATH.NOT_WRITABLE', `远端建父目录失败：${summarizeFailure(redactString(mkdir.stderr))}`, {
+        hint: '确认发布根存在且当前身份可写。需要提权就配 hosts.*.become（我们只包装，不替你改 sudoers）',
+      })
+    }
   }
-  for (const v of stats.vanished) warnings.push(`rsync 报告：${v}`)
+
+  const warnings: string[] = []
+  let files = 0
+  let bytes: number | undefined
+  let bytesKnown = true
+  let partial = false
+  let exitCode = 0
+  const commands: string[] = []
+
+  for (const argv of plan.argvs) {
+    commands.push(...argv)
+    const result: RunProcessResult = await runProcess(argv, {
+      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options.spawnImpl !== undefined ? { spawnImpl: options.spawnImpl } : {}),
+      label: 'rsync',
+    })
+
+    const verdict = classifyRsyncExit(result.code, result.stderr)
+    const stats = parseRsyncOutput(result.stdout)
+    if (verdict.error !== undefined) {
+      if (warnings.length === 0) throw verdict.error
+      // 之前组也是「传输过、有保留」的见证，丢掉它们 = 报告只讲最后一组的事
+      throw new DpError(verdict.error.code, verdict.error.message, {
+        hint: [...warnings, verdict.error.hint].filter(Boolean).join('；'),
+      })
+    }
+
+    if (verdict.partial) {
+      partial = true
+      warnings.push(
+        `rsync 部分传输（exit ${result.code}）：有文件在传输过程中被改动或消失。目标上的内容可能与源不一致，请重跑一次核对`,
+      )
+    }
+    for (const v of stats.vanished) warnings.push(`rsync 报告：${v}`)
+
+    files += stats.filesTransferred
+    if (stats.bytes === undefined) bytesKnown = false
+    else if (bytes === undefined) bytes = stats.bytes
+    else bytes += stats.bytes
+    if (result.code !== 0) exitCode = result.code
+  }
 
   return {
     kind: 'rsync-ssh',
-    filesTransferred: options.dryRun === true ? 0 : stats.filesTransferred,
-    ...(stats.bytes !== undefined ? { bytes: stats.bytes } : {}),
-    command: argv,
-    exitCode: result.code,
+    filesTransferred: plan.dryRun === true ? 0 : files,
+    // 有任何一组读不出统计就不报总字节数 —— 部分值加部分未知 ≠ 一个总数
+    ...(bytesKnown && bytes !== undefined ? { bytes } : {}),
+    command: commands,
+    exitCode,
     warnings,
-    partial: verdict.partial,
-    ...(options.dryRun === true ? { dryRun: true } : {}),
+    partial,
+    ...(plan.dryRun === true ? { dryRun: true } : {}),
   }
 }

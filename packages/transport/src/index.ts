@@ -3,8 +3,8 @@ import { createLogger, type Logger } from '@dp/log'
 import { hostTarget, type KnownHostsMode, type SshAuthKind } from '@dp/ssh'
 import { chooseTransport } from './availability.js'
 import { copyLocal } from './local-copy.js'
-import { buildRsyncArgv, runRsync } from './rsync.js'
-import { buildScpArgv, runScp } from './scp.js'
+import { buildRsyncPlan, runRsyncPlan } from './rsync.js'
+import { buildScpPlan, runScpPlan } from './scp.js'
 import { buildSftpPlan, runSftp } from './sftp.js'
 import { buildTarArgv, runTarSsh } from './tar-ssh.js'
 import type { RshOptions } from './rsh.js'
@@ -26,15 +26,16 @@ export {
   type RshOptions,
 } from './rsh.js'
 export {
-  buildRsyncArgv,
+  buildRsyncPlan,
   buildRsyncPath,
   classifyRsyncExit,
   parseRsyncOutput,
-  runRsync,
+  runRsyncPlan,
   type RsyncArgvOptions,
+  type RsyncPlan,
   type RsyncStats,
 } from './rsync.js'
-export { buildScpArgv, runScp, type ScpArgvOptions } from './scp.js'
+export { buildScpPlan, runScpPlan, type ScpArgvOptions, type ScpPlan } from './scp.js'
 export { buildSftpPlan, runSftp, type SftpArgvOptions, type SftpPlan, type RunSftpOptions } from './sftp.js'
 export { buildTarArgv, remoteExtractCommand, runTarSsh, type TarArgvOptions, type TarArgvPair } from './tar-ssh.js'
 export { copyLocal } from './local-copy.js'
@@ -165,11 +166,10 @@ async function runRemote(
           hint: '重新探测 Facts 后再协商；不要在这里偷偷换成 tar —— 那会让 plan 与实际执行不一致',
         })
       }
-      const argv = buildRsyncArgv(req, { rsyncPath, rsh, remoteTarget })
-      return runRsync(argv, {
+      const argv = buildRsyncPlan(req, { rsyncPath, rsh, remoteTarget })
+      return runRsyncPlan(argv, {
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
         ...(spawnImpl !== undefined ? { spawnImpl } : {}),
-        ...(req.dryRun !== undefined ? { dryRun: req.dryRun } : {}),
       })
     }
     case 'tar-ssh': {
@@ -199,8 +199,8 @@ async function runRemote(
           hint: '重新探测 Facts 后再协商',
         })
       }
-      const argv = buildScpArgv(req, { scpPath, rsh, remoteTarget })
-      return runScp(argv, {
+      const argv = buildScpPlan(req, { scpPath, rsh, remoteTarget })
+      return runScpPlan(argv, {
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
         ...(spawnImpl !== undefined ? { spawnImpl } : {}),
         ...(req.dryRun !== undefined ? { dryRun: req.dryRun } : {}),
