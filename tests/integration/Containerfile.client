@@ -4,11 +4,9 @@
 # ~/.ssh 的权限语义、缺 rsync 这类差异，会让同一个结果在不同机器上真假难辨。
 FROM docker.io/library/node:24-bookworm
 
-# 同靶机：显式清空机器上可能存在的过期代理
-ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY=
-ENV no_proxy= NO_PROXY=
-
-RUN apt-get update \
+# 同靶机：代理清空交给 run.mjs 的 --build-arg，这里不写 ENV（会反过来压掉 build-arg）
+RUN printf '%s\n' 'Acquire::Retries "8";' > /etc/apt/apt.conf.d/80dp-it-retries \
+  && apt-get update \
   && apt-get install -y --no-install-recommends \
        ca-certificates openssh-client rsync curl procps jq \
   && rm -rf /var/lib/apt/lists/*

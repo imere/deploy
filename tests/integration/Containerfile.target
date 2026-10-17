@@ -3,11 +3,12 @@
 # 这里刻意**不用 alpine**：要用 GNU coreutils 那一侧的 stat / tar / install 行为，
 # 它们与 busybox 的差异正是 pure-function 单测覆盖不到的部分。
 FROM docker.io/library/node:24-bookworm
+# 代理清空不写成 ENV：podman 会把宿主侧代理注进 RUN，而这层 image ENV 又会**压掉**
+# run.mjs 里的 --build-arg（image ENV 晚写入，win 过全局）—— 注入与清空就都由
+# ensureImages 的 --build-arg 一处表达，Containerfile 里再写一行就会分叉失效
 
-# 有些机器的 podman 会把过期的代理写进 engine env，代理不通时 apt 会一直挂着重试。
-# 显式清空等价于告诉构建过程「走直连」；没代理的机器上这行是空操作。
-ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY=
-ENV no_proxy= NO_PROXY=
+# apt 的重试要写在 apt 之前：代理链路偶发断流时给它几次机会，而不是一断就整个步骤失败
+RUN printf '%s\n' 'Acquire::Retries "8";' > /etc/apt/apt.conf.d/80dp-it-retries
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \

@@ -11,10 +11,11 @@
  *   node tests/integration/run.mjs            # 全跑
  *   node tests/integration/run.mjs --only nginx
  *   node tests/integration/run.mjs --keep     # 失败时保留容器供排查
+ *   DP_IT_BUILD_PROXY=http://… 跑在前面      # 机器无裸外网时喂给构建期 RUN 的代理（配隧道等宿主侧入口）
  */
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { configFor, scenarioByName, sshHost } from './scenarios.mjs'
@@ -91,6 +92,15 @@ async function resolveHost(name) {
   // 认死一个键等于把「连到了别的网络上」当成了「没连上」
   const ip = nets[NET]?.IPAddress ?? Object.values(nets).map((n) => n?.IPAddress ?? '').find((v) => v !== '') ?? ''
   if (ip === '') {
+    const running = JSON.parse(r.stdout)[0]?.State?.Running === true
+    if (!running) {
+      // 拿不到地址最常见的一类真因：容器压根没活着。点名 `podman logs`，
+      // 别把 inspect 原文甩给人猜
+      throw new Error(
+        `${name} 已经不在跑（Status: ${JSON.parse(r.stdout)[0]?.State?.Status ?? '未知'}）。` +
+          `先 podman logs ${name} 看它的原话；多数是起手就退（比如镜像还是老编排，让 CMD 直接跑 sshd）`,
+      )
+    }
     throw new Error(
       `拿不到 ${name} 的地址：它连着的网络是 ${Object.keys(nets).join(',') || '（没有）'}，` +
         `inspect 原文 ${r.stdout.slice(0, 400)}`,
@@ -542,14 +552,54 @@ async function ensureImages() {
     [IMAGE_CLIENT, 'Containerfile.client'],
   ]) {
     const has = await pod(['image', 'exists', tag])
+    // 复用要答一个问题：这份镜像还代表当前这个 Containerfile 吗？
+    // 只看「tag 存在」的话，本机上任何一次编排语义变化（比如 CMD 从跑 sshd 改成
+    // sleep infinity）都会让旧镜像按老形状起容器，然后死得莫名其妙 ——
+    // 所以镜像创建时间早于 Containerfile 的修改时间就强制重建
+    let stale = false
     if (has.code === 0) {
+      const meta = await pod(
+        ['image', 'inspect', tag, '--format', '{{.Created}}'],
+        { timeoutMs: 30_000 },
+      )
+      const created = Date.parse(meta.stdout.trim())
+      stale = Number.isNaN(created) || created < statSync(join(HERE, file)).mtimeMs
+    }
+    if (has.code === 0 && !stale) {
       log(`  镜像 ${tag} 已存在，复用`)
       continue
     }
-    const built = await pod(['build', '-t', tag, '-f', join(HERE, file), HERE], { timeoutMs: 600_000 })
+    if (stale) log(`  镜像 ${tag} 比它的 Containerfile 旧，重建（旧形状起出来的容器会按老编排死得没头绪）`)
+    const built = await pod(['build', ...buildNetArgs(), '-t', tag, '-f', join(HERE, file), HERE], { timeoutMs: 600_000 })
     if (built.code !== 0) throw new Error(`构建 ${tag} 失败：${built.stderr.slice(-800)}`)
   }
 }
+
+/**
+ * 构建期网络：podman 机器会把宿主侧代理原样注进 RUN 环境，宿主代理一停，
+ * apt 就按死代理反复重试（Containerfile 里清 ENV 压不过这层注入）。
+ * 设 `DP_IT_BUILD_PROXY=http://…` 显式喂代理并切 host 网络（RUN 走 pasta 默认连网时
+ * 够不到机器 loopback 的隧道口）；不设就显式清空，即 Containerfile 声明的「走直连」。
+ */
+function buildNetArgs() {
+  const proxy = process.env.DP_IT_BUILD_PROXY
+  if (proxy !== undefined && proxy !== '') {
+    return [
+      '--network', 'host',
+      '--build-arg', `http_proxy=${proxy}`, '--build-arg', `https_proxy=${proxy}`,
+      '--build-arg', `HTTP_PROXY=${proxy}`, '--build-arg', `HTTPS_PROXY=${proxy}`,
+      '--build-arg', 'no_proxy=localhost,127.0.0.1', '--build-arg', 'NO_PROXY=localhost,127.0.0.1',
+    ]
+  }
+  return [
+    '--build-arg', 'http_proxy=', '--build-arg', 'https_proxy=',
+    '--build-arg', 'HTTP_PROXY=', '--build-arg', 'HTTPS_PROXY=',
+    '--build-arg', 'no_proxy=*', '--build-arg', 'NO_PROXY=*',
+  ]
+}
+
+/** 集成的容器只与 dp-it-net 内部对话，不需要任何外网，把机器注进来的代理环境一并摘掉 */
+const noProxyEnv = ['-e', 'http_proxy=', '-e', 'https_proxy=', '-e', 'HTTP_PROXY=', '-e', 'HTTPS_PROXY=']
 
 /** 容器是否还活着。退出码只能说明启动时那一下，活没活着得问状态 */
 async function isRunning(name) {
@@ -576,7 +626,7 @@ async function putKey(name) {
  */
 async function startSystemdTarget() {
   const base = [
-    'run', '-d', '--name', TARGET_SYSD, '--network', `${NET}:ip=${IP_SYSD}`,
+    'run', '-d', ...noProxyEnv, '--name', TARGET_SYSD, '--network', `${NET}:ip=${IP_SYSD}`,
     '--systemd=always', '--cgroupns=private',
     // /run/lock 少了这一条，systemd 会在起来之前就因为 mkdir 失败退出，而日志里什么都不留
     '--tmpfs', '/run', '--tmpfs', '/run/lock', '--tmpfs', '/tmp',
@@ -640,14 +690,14 @@ async function startContainers() {
   const net = await pod(['network', 'create', '--subnet', SUBNET, NET])
   if (net.code !== 0) throw new Error(`建网络失败：${net.stderr}`)
 
-  const client = await pod(['run', '-d', '--name', CLIENT, '--network', `${NET}:ip=${IP_CLIENT}`, IMAGE_CLIENT])
+  const client = await pod(['run', '-d', ...noProxyEnv, '--name', CLIENT, '--network', `${NET}:ip=${IP_CLIENT}`, IMAGE_CLIENT])
   if (client.code !== 0) throw new Error(`起客户端失败：${client.stderr}`)
 
-  const target = await pod(['run', '-d', '--name', TARGET, '--network', `${NET}:ip=${IP_TARGET}`, IMAGE_TARGET])
+  const target = await pod(['run', '-d', ...noProxyEnv, '--name', TARGET, '--network', `${NET}:ip=${IP_TARGET}`, IMAGE_TARGET])
   if (target.code !== 0) throw new Error(`起靶机失败：${target.stderr}`)
 
   await pod(['exec', CLIENT, 'sh', '-c', 'ssh-keygen -q -t ed25519 -N "" -f /root/.ssh/id_ed25519'])
-  await pod(['cp', `${CLIENT}:/root/.ssh/id_ed25519.pub`, join(WORK, 'key.pub')])
+  await podCp(`${CLIENT}:/root/.ssh/id_ed25519.pub`, join(WORK, 'key.pub'))
   await resolveHost(TARGET)
   await putKey(TARGET)
   // sshd 不交给 CMD：让 1 号进程去跑它，起不来的后果是容器直接退出，只剩一句
@@ -660,20 +710,54 @@ async function startContainers() {
   await startSystemdTarget()
 
   await execIn(CLIENT, 'mkdir -p /opt/dp /work')
-  await pod(['cp', join(ROOT, 'packages'), `${CLIENT}:/opt/dp/packages`])
-  await pod(['cp', join(WORK, 'src'), `${CLIENT}:/work/src`])
+  await podCp(stagePackages(), `${CLIENT}:/opt/dp/`)
+  await podCp(join(WORK, 'src'), `${CLIENT}:/work/src`)
   // workspace 包在仓库里靠 pnpm 链进 node_modules，进容器后那份链接没有意义 ——
   // 这里按同样形状补一份，跑的就是产物，与 CI 上 `pnpm install` 之后的形态一致
-  await execIn(
+  const links = await execIn(
     CLIENT,
     'mkdir -p /opt/dp/node_modules/@dp ' +
       '&& for d in /opt/dp/packages/*/; do n=$(basename "$d"); ln -sfn "/opt/dp/packages/$n" "/opt/dp/node_modules/@dp/$n"; done',
   )
+  if (links.code !== 0) {
+    throw new Error(`容器里补 @dp 链接失败：${(links.stderr || links.stdout).trim()}`)
+  }
   const selfcheck = await execIn(CLIENT, 'node /opt/dp/packages/cli/build/bin.js --version')
   if (selfcheck.code !== 0) {
     throw new Error(`产物在容器里跑不起来：${selfcheck.stderr}（先跑 pnpm build）`)
   }
   log(`  客户端里的 dp：${selfcheck.stdout.trim()}`)
+}
+
+/**
+ * 只把**运行时需要的形状**打进容器：每个 workspace 包的 package.json + build/。
+ * 整棵 packages/ 直接 cp 会把宿主侧的 node_modules 一并扫进去 —— Windows 上那是手工
+ * junction，podman 的 tar 头直接报 unknown file mode，整条 cp 失败；测试产物（*.test.js、
+ * fixtures）对跑部署没有意义，带上只会让传输量与排查时的噪声一起膨胀。
+ */
+function stagePackages() {
+  const stage = join(WORK, 'cp', 'packages')
+  rmSync(join(WORK, 'cp'), { recursive: true, force: true })
+  const srcRoot = join(ROOT, 'packages')
+  for (const name of readdirSync(srcRoot).sort()) {
+    if (name === 'testkit') continue // 测试公共件，不在部署链里，进容器只是多余噪声
+    const from = join(srcRoot, name)
+    if (statSync(from).isDirectory() === false) continue
+    if (existsSync(join(from, 'build')) === false) {
+      throw new Error(`${name}/build 不存在 —— 先 pnpm build 再跑集成`)
+    }
+    const dst = join(stage, name)
+    mkdirSync(dst, { recursive: true })
+    cpSync(join(from, 'package.json'), join(dst, 'package.json'))
+    cpSync(join(from, 'build'), join(dst, 'build'), { recursive: true })
+  }
+  return stage
+}
+
+/** 每条 `podman cp` 都在动容器文件系统，退出码不查会把失败传给几步之后毫不相关的报错 */
+async function podCp(source, dest) {
+  const r = await pod(['cp', source, dest])
+  if (r.code !== 0) throw new Error(`容器拷贝失败 ${source} → ${dest}：${(r.stderr || r.stdout).trim()}`)
 }
 
 async function main() {
