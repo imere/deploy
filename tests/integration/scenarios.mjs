@@ -10,16 +10,25 @@
  * @property {string} name     场景名，也是配置文件名
  * @property {string} project  项目名（进 unit 名、conf 名，所以是有意义的）
  * @property {string} src      客户端里的源目录（/work/src/<src>）
+ * @property {string} srcMode  contents = 只放目录内容；self = 连目录本身一起放过去
  * @property {string} root     靶机上的发布根
  * @property {object} target   projects.*.target 整段
  */
 
-/** @type {readonly Scenario[]} */
+/**
+ * `srcMode` 是刻意分开的：两种写法在传输层拼出的源路径差一层目录名
+ * （`self` 把 `app/server.js` 相对到 root 的父目录），真机上错一次就是
+ * rsync exit 23 + 0 个文件，而报告里看不出是路径拼错。所以静态与 nginx 走
+ * contents（版本目录里就是站点内容），process / systemd 走 self（版本目录里
+ * 带一层源目录名）—— 两条路都必须在真机上被跑过。
+ *
+ * @type {readonly Scenario[]} */
 export const SCENARIOS = [
   {
     name: 'static',
     project: 'static-site',
     src: 'static',
+    srcMode: 'contents',
     root: '/srv/static',
     target: { type: 'static' },
   },
@@ -27,6 +36,7 @@ export const SCENARIOS = [
     name: 'nginx',
     project: 'web',
     src: 'nginx',
+    srcMode: 'contents',
     root: '/srv/nginx',
     target: {
       type: 'nginx',
@@ -45,13 +55,15 @@ export const SCENARIOS = [
     name: 'process',
     project: 'app',
     src: 'app',
+    srcMode: 'self',
     root: '/srv/proc',
     target: {
       type: 'process',
       process: {
         command: '/usr/local/bin/node',
-        args: ['${release.current}/server.js', '8082', '${release.current}/index.html'],
-        workingDirectory: '${release.current}',
+        // self 模式：版本目录里带一层源目录名，脚本在 <release>/app/ 下
+        args: ['${release.current}/app/server.js', '8082', '${release.current}/app/index.html'],
+        workingDirectory: '${release.current}/app',
         pidFile: '.dp/app.pid',
         stdoutLog: '.dp/app.log',
       },
@@ -61,14 +73,15 @@ export const SCENARIOS = [
     name: 'systemd',
     project: 'sysd',
     src: 'app',
+    srcMode: 'self',
     root: '/srv/sysd',
     target: {
       type: 'systemd',
       systemd: {
         unit: 'dp-it-app.service',
         description: 'integration fixture',
-        execStart: '/usr/local/bin/node ${release.current}/server.js',
-        workingDirectory: '${release.current}',
+        execStart: '/usr/local/bin/node ${release.current}/app/server.js',
+        workingDirectory: '${release.current}/app',
         environment: { PORT: '8083' },
         user: 'dp',
         scope: 'system',
@@ -85,12 +98,14 @@ export const SCENARIOS = [
  * @returns 配置文件的内容
  */
 export function configFor(scenario, host) {
+  // `**` 表「目录内容」，不写就是「目录本身」—— 两种写法在传输层差一层目录名
+  const root = scenario.srcMode === 'contents' ? `/work/src/${scenario.src}/**` : `/work/src/${scenario.src}`
   return {
     hosts: { target: host },
     projects: {
       [scenario.project]: {
         hosts: ['target'],
-        source: { root: `/work/src/${scenario.src}` },
+        source: { root },
         release: { root: scenario.root, keep: 3 },
         target: scenario.target,
       },
