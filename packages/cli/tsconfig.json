@@ -16,6 +16,8 @@
     { "path": "../target-static" },
     { "path": "../target-nginx" },
     { "path": "../target-docker" },
+    { "path": "../target-systemd" },
+    { "path": "../target-process" },
     { "path": "../template" },
     { "path": "../transport" },
     { "path": "../testkit" }
