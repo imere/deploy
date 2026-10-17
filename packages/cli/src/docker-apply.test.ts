@@ -15,7 +15,8 @@ import { describe, it } from 'node:test'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DpError, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
+import { DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
+import { assertExecInvariants, linuxFacts } from '@dp/testkit'
 import { main } from './index.js'
 import type { ApplyDeps } from './deps.js'
 
@@ -41,8 +42,12 @@ class FakeRunner implements Runner {
   readonly facts: Facts
   /** 事件时间线。顺序类断言只看它 */
   readonly events: string[] = []
-  /** 每次 exec 的 argv + cwd。元素级断言用它，不用事件串 */
-  readonly execs: { readonly argv: readonly string[]; readonly cwd: string | undefined }[] = []
+  /** 每次 exec 的 argv + cwd + options。argv/cwd 供元素级断言，options 供铁律 0 的检查 */
+  readonly execs: {
+    readonly argv: readonly string[]
+    readonly cwd: string | undefined
+    readonly options?: ExecOptions
+  }[] = []
   private readonly tree = new Map<string, string | null>()
   /** 命中 argv 时强制给一个结论（优先于默认） */
   failWhen: (argv: readonly string[]) => ExecDecision | undefined = () => undefined
@@ -54,9 +59,9 @@ class FakeRunner implements Runner {
     this.tree.set('/', null)
   }
 
-  async exec(argv: readonly string[], options?: { readonly cwd?: string }): Promise<ExecResult> {
+  async exec(argv: readonly string[], options?: ExecOptions): Promise<ExecResult> {
     this.events.push(`exec ${argv.join(' ')}`)
-    this.execs.push({ argv: [...argv], cwd: options?.cwd })
+    this.execs.push({ argv: [...argv], cwd: options?.cwd, ...(options !== undefined ? { options } : {}) })
     const forced = this.failWhen(argv)
     if (forced !== undefined) return { code: forced.code, stdout: forced.stdout ?? '', stderr: forced.stderr ?? '' }
     // ps 是只读查询，给一份可解析的输出；其余命令成功且无输出
@@ -147,25 +152,12 @@ class FakeRunner implements Runner {
 }
 
 function remoteFacts(): Facts {
-  return {
+  return linuxFacts({
     host: 'prod',
-    platform: 'linux',
-    arch: 'x64',
-    init: 'systemd',
     homedir: '/home/deployer',
-    tmpdir: '/tmp',
-    env: {},
-    capabilities: {
-      canWrite: { '/srv/app': true },
-      canChown: [],
-      canSymlink: true,
-      systemdScope: 'system',
-      lingerEnabled: false,
-      canBindPrivilegedPort: false,
-      sudoAllowlist: [],
-    },
+    capabilities: { canWrite: { '/srv/app': true } },
     tools: { ssh: '/usr/bin/ssh', rsync: '/usr/bin/rsync', tar: '/bin/tar', scp: '/usr/bin/scp' },
-  }
+  })
 }
 
 interface DockerOptions {
@@ -261,6 +253,8 @@ async function withWorkspace(fn: (ws: Workspace) => Promise<void>, options: Dock
         writeErr: () => {},
         isTTY: false,
       })
+      // 铁律 0 的收尾检查：这一趟发出去的每条命令都带了 timeoutMs、没喂 stdin
+      assertExecInvariants(runner)
       return { code, stdout: out.join('') }
     }
     await fn({ dir, runner, run })

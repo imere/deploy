@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { deriveLayout, pickReleaseRoot } from '@dp/core'
 import { DpError, type Facts, type Platform } from '@dp/ports'
+import { caught, caughtAsync } from '@dp/testkit'
 import { EXIT_CONFIG, EXIT_OK } from '../output.js'
 import { collectProjectFacts } from '../project-facts.js'
 import { releaseRootCandidates } from '../facts-source.js'
@@ -27,28 +28,6 @@ async function withProject(fn: (dir: string) => Promise<void>): Promise<void> {
   } finally {
     await fs.rm(dir, { recursive: true, force: true })
   }
-}
-
-// cause 带上是刻意的：断言失败时真正要看的是**被测代码抛的那个东西**的栈，
-// 只留一句「实际是 X」就把现场丢了，而这里恰恰是最需要现场的地方。
-function caught(fn: () => unknown): DpError {
-  try {
-    fn()
-  } catch (err) {
-    if (err instanceof DpError) return err
-    throw new Error(`期望 DpError，实际是 ${String(err)}`, { cause: err })
-  }
-  throw new Error('期望抛错，但没有')
-}
-
-async function caughtAsync(p: Promise<unknown>): Promise<DpError> {
-  try {
-    await p
-  } catch (err) {
-    if (err instanceof DpError) return err
-    throw new Error(`期望 DpError，实际是 ${String(err)}`, { cause: err })
-  }
-  throw new Error('期望抛错，但没有')
 }
 
 async function writeSource(root: string, files: Readonly<Record<string, string>>): Promise<void> {

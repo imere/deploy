@@ -8,6 +8,7 @@ import {
   type Runner,
   type TargetContext,
 } from '@dp/ports'
+import { linuxFacts } from '@dp/testkit'
 import {
   activateSystemd,
   installSystemd,
@@ -113,28 +114,6 @@ class FakeRunner implements Runner {
   }
 }
 
-function makeFacts(): Facts {
-  return {
-    host: 'fake',
-    platform: 'linux',
-    arch: 'x64',
-    init: 'systemd',
-    homedir: '/home/u',
-    tmpdir: '/tmp',
-    env: {},
-    capabilities: {
-      canWrite: {},
-      canChown: [],
-      canSymlink: true,
-      systemdScope: 'system',
-      lingerEnabled: false,
-      canBindPrivilegedPort: false,
-    sudoAllowlist: [],
-    },
-    tools: {},
-  }
-}
-
 function makeConfig(over: Partial<SystemdTargetConfig> = {}): SystemdTargetConfig {
   return {
     unitDir: '/etc/systemd/system',
@@ -150,7 +129,7 @@ function makeCtx(over: Partial<TargetContext> = {}): TargetContext {
 
 describe('systemd 执行器 · install', () => {
   it('成功时把候选写进影子目录，且**不碰**生效的 unit 文件', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     const ctx = makeCtx()
     const result = await installSystemd({ runner, ctx, config: makeConfig() })
 
@@ -172,7 +151,7 @@ describe('systemd 执行器 · install', () => {
   })
 
   it('候选过不了 systemd-analyze verify → DP.SYSD.TEST_FAILED，unitDir 未被写', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.handler = (argv) =>
       argv[0] === 'systemd-analyze'
         ? { code: 1, stdout: '', stderr: 'api.service:9: Unknown key name' }
@@ -193,7 +172,7 @@ describe('systemd 执行器 · install', () => {
   })
 
   it('生效 unit 存在但不带 managed 标记 → DP.SYSD.UNIT_NOT_MANAGED，连影子目录都不建', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set('/etc/systemd/system/api.service', '[Unit]\nDescription=hand written\n')
     await assert.rejects(
       () => installSystemd({ runner, ctx: makeCtx(), config: makeConfig() }),
@@ -208,7 +187,7 @@ describe('systemd 执行器 · install', () => {
   })
 
   it('force 时允许覆盖，但仍然先备份', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set('/etc/systemd/system/api.service', '[Unit]\nDescription=hand written\n')
     const result = await installSystemd({ runner, ctx: makeCtx(), config: makeConfig({ force: true }) })
     assert.equal(result.ownership?.action, 'replace')
@@ -216,7 +195,7 @@ describe('systemd 执行器 · install', () => {
   })
 
   it('--dry-run 只跑只读校验：结束后不留文件与目录，也不发 daemon-reload / restart', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     const dirsBefore = new Set(runner.dirs)
     const result = await installSystemd({
       runner,
@@ -241,7 +220,7 @@ describe('systemd 执行器 · install', () => {
 
 describe('systemd 执行器 · activate', () => {
   it('备份 → 原子替换 → daemon-reload → restart', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set('/etc/systemd/system/api.service', `${MANAGED_MARKER}\n[Unit]\n`)
     const result = await activateSystemd({ runner, ctx: makeCtx(), config: makeConfig() })
 
@@ -259,14 +238,14 @@ describe('systemd 执行器 · activate', () => {
   })
 
   it('user scope 时 systemctl 带 --user，且范围选项排在子命令之前', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     await activateSystemd({ runner, ctx: makeCtx(), config: makeConfig({ scope: 'user' }) })
     assert.deepEqual(runner.calls[0], ['systemctl', '--user', 'daemon-reload'])
     assert.deepEqual(runner.calls[1], ['systemctl', '--user', 'restart', 'api.service'])
   })
 
   it('restart 失败 → DP.SYSD.RESTART_FAILED，且不还原 unit（为一个服务问题退掉一次成功的发布更糟）', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set('/etc/systemd/system/api.service', `${MANAGED_MARKER}\n[Unit]\n`)
     runner.handler = (argv) =>
       argv.includes('restart') ? { code: 1, stdout: '', stderr: 'Job failed' } : { code: 0, stdout: '', stderr: '' }
@@ -287,7 +266,7 @@ describe('systemd 执行器 · activate', () => {
 
 describe('systemd 执行器 · verify', () => {
   it('is-active 退出码 0 → 通过', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     const result = await verifySystemd({ runner, ctx: makeCtx(), config: makeConfig() })
     assert.equal(result.phase, 'verify')
     assert.equal(result.steps[0]?.ok, true)
@@ -295,7 +274,7 @@ describe('systemd 执行器 · verify', () => {
   })
 
   it('is-active 非 0 → DP.SYSD.NOT_ACTIVE，并把读到的状态带上', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.handler = () => ({ code: 3, stdout: 'failed', stderr: '' })
     await assert.rejects(
       () => verifySystemd({ runner, ctx: makeCtx(), config: makeConfig() }),
@@ -311,7 +290,7 @@ describe('systemd 执行器 · verify', () => {
 
 describe('systemd 执行器 · rollback', () => {
   it('没有备份 unit → DP.SYSD.NO_PREVIOUS，不返回假成功', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     await assert.rejects(
       () => rollbackSystemd({ runner, ctx: makeCtx({ previousReleaseId: 'r1' }), config: makeConfig() }),
       (err: unknown) => {
@@ -323,7 +302,7 @@ describe('systemd 执行器 · rollback', () => {
   })
 
   it('有备份时：还原 → daemon-reload → restart → 复验', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set('/etc/systemd/system/api.service.dp-backup', `${MANAGED_MARKER}\n[Unit]\nDescription=old\n`)
     const result = await rollbackSystemd({
       runner,

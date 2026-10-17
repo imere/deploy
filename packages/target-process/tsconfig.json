@@ -5,5 +5,5 @@
     "outDir": "build"
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../ports" }, { "path": "../template" }]
+  "references": [{ "path": "../ports" }, { "path": "../template" }, { "path": "../testkit" }]
 }

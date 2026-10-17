@@ -17,8 +17,9 @@ import { describe, it } from 'node:test'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DpError, type ExecResult, type Facts, type FileStat, type Runner, type TargetContext } from '@dp/ports'
+import { DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner, type TargetContext } from '@dp/ports'
 import { defineProject, type SystemdConfig } from '@dp/schema'
+import { assertExecInvariants, type ExecCall, linuxFacts as baseFacts } from '@dp/testkit'
 import { main } from './index.js'
 import { resolveUnitDir, systemdConfigFor, type UnitDirSource } from './systemd-config.js'
 import type { ApplyDeps } from './deps.js'
@@ -41,8 +42,8 @@ class FakeRunner implements Runner {
   readonly facts: Facts
   /** 事件时间线。顺序类断言只看它 */
   readonly events: string[] = []
-  /** 每次 exec 的 argv。元素级断言用它，不用事件串 */
-  readonly execs: (readonly string[])[] = []
+  /** 每次 exec 的 argv + options。元素级断言用它，不用事件串；铁律 0 的检查也读它 */
+  readonly execs: ExecCall[] = []
   private readonly tree = new Map<string, string | null>()
   /** 命中 argv 时强制给一个结论（优先于默认） */
   failWhen: (argv: readonly string[]) => ExecDecision | undefined = () => undefined
@@ -54,9 +55,9 @@ class FakeRunner implements Runner {
     this.tree.set('/', null)
   }
 
-  async exec(argv: readonly string[]): Promise<ExecResult> {
+  async exec(argv: readonly string[], options?: ExecOptions): Promise<ExecResult> {
     this.events.push(`exec ${argv.join(' ')}`)
-    this.execs.push([...argv])
+    this.execs.push({ argv: [...argv], ...(options !== undefined ? { options } : {}) })
     const forced = this.failWhen(argv)
     if (forced !== undefined) return { code: forced.code, stdout: forced.stdout ?? '', stderr: forced.stderr ?? '' }
     if (argv.includes('is-active')) {
@@ -156,26 +157,13 @@ class FakeRunner implements Runner {
 }
 
 function linuxFacts(canWrite: Readonly<Record<string, boolean>>, overrides: Partial<Facts> = {}): Facts {
-  return {
+  return baseFacts({
     host: 'prod',
-    platform: 'linux',
-    arch: 'x64',
-    init: 'systemd',
     homedir: '/home/deployer',
-    tmpdir: '/tmp',
-    env: {},
-    capabilities: {
-      canWrite: { '/srv/app': true, ...canWrite },
-      canChown: [],
-      canSymlink: true,
-      systemdScope: 'system',
-      lingerEnabled: false,
-      canBindPrivilegedPort: false,
-      sudoAllowlist: [],
-    },
+    capabilities: { canWrite: { '/srv/app': true, ...canWrite } },
     tools: { ssh: '/usr/bin/ssh', rsync: '/usr/bin/rsync', tar: '/bin/tar', scp: '/usr/bin/scp' },
     ...overrides,
-  }
+  })
 }
 
 const CTX: TargetContext = { host: 'prod', root: '/srv/app', releaseId: 'r9', keep: 5 }
@@ -281,6 +269,8 @@ async function withWorkspace(fn: (ws: Workspace) => Promise<void>, options: Syst
         writeErr: (t) => err.push(t),
         isTTY: false,
       })
+      // 铁律 0 的收尾检查：这一趟发出去的每条命令都带了 timeoutMs、没喂 stdin
+      assertExecInvariants(runner)
       return { code, stdout: out.join(''), stderr: err.join('') }
     }
     await fn({ runner, run })
@@ -294,7 +284,7 @@ function resultOf(stdout: string): Record<string, unknown> {
 }
 
 function systemctlExecs(runner: FakeRunner): readonly (readonly string[])[] {
-  return runner.execs.filter((argv) => argv[0] === 'systemctl' || argv[0] === 'systemd-analyze')
+  return runner.execs.filter((e) => e.argv[0] === 'systemctl' || e.argv[0] === 'systemd-analyze').map((e) => e.argv)
 }
 
 // ------------------------------------------------------------
@@ -926,7 +916,7 @@ describe('没配 target.systemd 时', () => {
       async ({ runner, run }) => {
         const { code } = await run('apply', ['--json'])
         assert.equal(code, 0)
-        assert.ok(runner.execs.some((argv) => argv.includes('restart')))
+        assert.ok(runner.execs.some((e) => e.argv.includes('restart')))
       },
       { systemd: true, type: ['static'] },
     )

@@ -15,5 +15,8 @@
   },
   "dependencies": {
     "@dp/ports": "workspace:*"
+  },
+  "devDependencies": {
+    "@dp/testkit": "workspace:*"
   }
 }

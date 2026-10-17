@@ -19,6 +19,7 @@ import {
   type Runner,
   type TargetContext,
 } from '@dp/ports'
+import { assertExecInvariants, caughtAsync, type ExecCall, defaultFacts } from '@dp/testkit'
 import {
   activateDocker,
   installDocker,
@@ -33,11 +34,6 @@ import type { DockerTargetConfig } from './types.js'
 // ------------------------------------------------------------
 // 内存 Runner
 // ------------------------------------------------------------
-
-interface ExecCall {
-  readonly argv: readonly string[]
-  readonly options?: ExecOptions
-}
 
 class MemoryRunner implements Runner {
   readonly id = 'memory'
@@ -130,28 +126,6 @@ class MemoryRunner implements Runner {
   }
 }
 
-function makeFacts(): Facts {
-  return {
-    host: 'web-01',
-    platform: 'linux',
-    arch: 'x64',
-    init: 'systemd',
-    homedir: '/home/u',
-    tmpdir: '/tmp',
-    env: {},
-    capabilities: {
-      canWrite: {},
-      canChown: [],
-      canSymlink: true,
-      systemdScope: 'none',
-      lingerEnabled: false,
-      canBindPrivilegedPort: false,
-      sudoAllowlist: [],
-    },
-    tools: {},
-  }
-}
-
 // ------------------------------------------------------------
 // 夹具
 // ------------------------------------------------------------
@@ -193,24 +167,6 @@ function psStdout(rows: readonly Record<string, unknown>[]): string {
 const HEALTHY_PS = psStdout([{ Service: 'api', State: 'running', Health: 'healthy', Status: 'Up 2 minutes (healthy)' }])
 const UNHEALTHY_PS = psStdout([{ Service: 'api', State: 'running', Health: 'unhealthy', Status: 'Up 2 minutes (unhealthy)' }])
 
-/** 铁律 0 的机器化检查：每条 exec 都必须有 timeout，且永远不喂 stdin */
-function assertExecInvariants(runner: MemoryRunner): void {
-  for (const call of runner.execs) {
-    assert.notEqual(call.options?.timeoutMs, undefined, `exec 缺 timeoutMs：${JSON.stringify(call.argv)}`)
-    assert.equal(call.options?.stdin, undefined, `exec 喂了 stdin：${JSON.stringify(call.argv)}`)
-  }
-}
-
-async function capture(p: Promise<unknown>): Promise<{ readonly error: DpError }> {
-  try {
-    await p
-  } catch (err) {
-    assert.ok(err instanceof DpError, `期望 DpError，实际：${String(err)}`)
-    return { error: err }
-  }
-  throw new Error('期望抛错，但没有')
-}
-
 /** 失败现场。读不出来就当场失败：把读不出来的字段当成空数组，恰好是这类测试最常见的假绿 */
 function failureOf(error: DpError): DockerExecFailure {
   const cause: unknown = error.cause
@@ -221,7 +177,7 @@ function failureOf(error: DpError): DockerExecFailure {
 }
 
 function seeded(): MemoryRunner {
-  const runner = new MemoryRunner(makeFacts())
+  const runner = new MemoryRunner(defaultFacts())
   runner.seedFile(COMPOSE)
   return runner
 }
@@ -245,10 +201,10 @@ describe('installDocker', () => {
   })
 
   it('两个 compose 文件都缺 → 一次报全两个，不许只报第一个', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     runner.seedDir(RELEASE)
 
-    const { error } = await capture(installDocker(makeInput(runner, { config: config({ files: ['docker-compose.yml', 'docker-compose.prod.yml'] }) })))
+    const error = await caughtAsync(installDocker(makeInput(runner, { config: config({ files: ['docker-compose.yml', 'docker-compose.prod.yml'] }) })))
 
     assert.equal(error.code, 'DP.DOCKER.FILE_MISSING')
     // 只报第一个会让用户改一个、重跑、再撞第二个
@@ -264,11 +220,11 @@ describe('installDocker', () => {
   })
 
   it('路径是目录 → 一样算缺失，且说清是目录', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     // 目录在，但里面没有那个文件。`-f <目录>` 报的是 no such file or directory，与真缺一字不差
     runner.seedDir(`${RELEASE}/docker-compose.yml`)
 
-    const { error } = await capture(installDocker(makeInput(runner)))
+    const error = await caughtAsync(installDocker(makeInput(runner)))
 
     assert.equal(error.code, 'DP.DOCKER.FILE_MISSING')
     assert.match(error.message, /是个目录/)
@@ -279,7 +235,7 @@ describe('installDocker', () => {
   it('compose 文件齐但 envFile 缺 → 报 envFile，不误判成 compose 齐了', async () => {
     const runner = seeded()
 
-    const { error } = await capture(installDocker(makeInput(runner, { config: config({ envFile: '.env.prod' }) })))
+    const error = await caughtAsync(installDocker(makeInput(runner, { config: config({ envFile: '.env.prod' }) })))
 
     assert.equal(error.code, 'DP.DOCKER.FILE_MISSING')
     assert.match(error.message, /\.env\.prod/)
@@ -361,7 +317,7 @@ describe('activateDocker', () => {
     runner.on(PULL_ARGV, { code: 0, stdout: '', stderr: '' })
     runner.on(UP_ARGV, { code: 1, stdout: '', stderr: 'service "api" failed to start: port is already allocated' })
 
-    const { error } = await capture(activateDocker(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
+    const error = await caughtAsync(activateDocker(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
 
     assert.equal(error.code, 'DP.ACTIVATE.START_FAILED')
     // 只报「启动失败」等于让用户自己上机器重跑一遍才知道原因
@@ -399,7 +355,7 @@ describe('activateDocker', () => {
     runner.on(PULL_ARGV, { code: 0, stdout: '', stderr: '' })
     runner.on(UP_ARGV, { code: 1, stdout: '', stderr: 'boom' })
 
-    const { error } = await capture(activateDocker(makeInput(runner)))
+    const error = await caughtAsync(activateDocker(makeInput(runner)))
 
     assert.equal(error.code, 'DP.ACTIVATE.START_FAILED')
     const healing = failureOf(error).healing.join('\n')
@@ -413,7 +369,7 @@ describe('activateDocker', () => {
     const runner = seeded()
     runner.on(PULL_ARGV, { code: 1, stdout: '', stderr: 'Error response from daemon: pull access denied for api' })
 
-    const { error } = await capture(activateDocker(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
+    const error = await caughtAsync(activateDocker(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
 
     assert.equal(error.code, 'DP.DOCKER.PULL_FAILED')
     assert.match(error.message, /上一版/)
@@ -464,7 +420,7 @@ describe('verifyDocker', () => {
     const runner = seeded()
     runner.on(PS_ARGV, { code: 0, stdout: UNHEALTHY_PS, stderr: '' })
 
-    const { error } = await capture(verifyDocker(makeInput(runner)))
+    const error = await caughtAsync(verifyDocker(makeInput(runner)))
 
     assert.equal(error.code, 'DP.VERIFY.FAILED')
     assert.match(error.message, /api/)
@@ -479,7 +435,7 @@ describe('verifyDocker', () => {
     const runner = seeded()
     runner.on(PS_ARGV, { code: 0, stdout: 'Usage:  docker compose [OPTIONS] COMMAND', stderr: '' })
 
-    const { error } = await capture(verifyDocker(makeInput(runner)))
+    const error = await caughtAsync(verifyDocker(makeInput(runner)))
 
     // 包成 VERIFY.FAILED 就丢了「远端 compose 可能根本不可用」这条线索
     assert.equal(error.code, 'DP.DOCKER.PS_PARSE_FAILED')
@@ -493,7 +449,7 @@ describe('verifyDocker', () => {
     const runner = seeded()
     runner.on(PS_ARGV, { code: 1, stdout: '', stderr: 'no configuration file provided' })
 
-    const { error } = await capture(verifyDocker(makeInput(runner)))
+    const error = await caughtAsync(verifyDocker(makeInput(runner)))
 
     assert.equal(error.code, 'DP.DOCKER.PS_PARSE_FAILED')
     assert.match(error.message, /没有任何服务被验证过/)
@@ -519,7 +475,7 @@ describe('verifyDocker', () => {
     const runner = seeded()
     runner.on(PS_ARGV, { code: 0, stdout: psStdout([{ Service: 'api', State: 'exited', Health: '' }]), stderr: '' })
 
-    const { error } = await capture(verifyDocker(makeInput(runner, { config: { ...CONFIG, healthcheck: { expectStates: ['running'] } } })))
+    const error = await caughtAsync(verifyDocker(makeInput(runner, { config: { ...CONFIG, healthcheck: { expectStates: ['running'] } } })))
 
     // 把判定省掉等于把健康检查做成永远绿的灯
     assert.equal(error.code, 'DP.VERIFY.FAILED')
@@ -534,7 +490,7 @@ describe('verifyDocker', () => {
       { code: 0, stdout: psStdout([{ Service: 'api', State: 'running', Health: 'healthy' }, { Service: 'db', State: 'running', Health: 'unhealthy' }]), stderr: '' },
     )
 
-    const { error } = await capture(verifyDocker(makeInput(runner, { config: { ...CONFIG, healthcheck: { services: ['db'] } } })))
+    const error = await caughtAsync(verifyDocker(makeInput(runner, { config: { ...CONFIG, healthcheck: { services: ['db'] } } })))
 
     assert.equal(error.code, 'DP.VERIFY.FAILED')
     assert.match(error.message, /db/)
@@ -544,7 +500,7 @@ describe('verifyDocker', () => {
     const runner = seeded()
     runner.on(PS_ARGV, { code: 0, stdout: psStdout([{ Service: 'api', State: 'running', Health: 'healthy' }]), stderr: '' })
 
-    const { error } = await capture(verifyDocker(makeInput(runner, { config: { ...CONFIG, healthcheck: { services: ['api', 'nope'] } } })))
+    const error = await caughtAsync(verifyDocker(makeInput(runner, { config: { ...CONFIG, healthcheck: { services: ['api', 'nope'] } } })))
 
     assert.equal(error.code, 'DP.VERIFY.FAILED')
     assert.match(error.message, /nope/)
@@ -591,7 +547,7 @@ describe('rollbackDocker', () => {
     const runner = seeded()
     runner.on(PREV_UP_ARGV, { code: 1, stdout: '', stderr: 'manifest unknown' })
 
-    const { error } = await capture(rollbackDocker(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
+    const error = await caughtAsync(rollbackDocker(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
 
     assert.equal(error.code, 'DP.ACTIVATE.START_FAILED')
     const failure = failureOf(error)
@@ -606,7 +562,7 @@ describe('rollbackDocker', () => {
     runner.on(PREV_UP_ARGV, { code: 0, stdout: '', stderr: '' })
     runner.on(PREV_PS_ARGV, { code: 0, stdout: UNHEALTHY_PS, stderr: '' })
 
-    const { error } = await capture(rollbackDocker(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
+    const error = await caughtAsync(rollbackDocker(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
 
     assert.equal(error.code, 'DP.VERIFY.FAILED')
     assert.match(error.message, /回滚已经执行/)
@@ -622,7 +578,7 @@ describe('rollbackDocker', () => {
   it('没有上一版 → NO_PREVIOUS 原样冒泡，执行器不许吞成空计划', async () => {
     const runner = seeded()
 
-    const { error } = await capture(rollbackDocker(makeInput(runner)))
+    const error = await caughtAsync(rollbackDocker(makeInput(runner)))
 
     assert.equal(error.code, 'DP.DOCKER.NO_PREVIOUS')
     assert.deepEqual(runner.argvs(), [])

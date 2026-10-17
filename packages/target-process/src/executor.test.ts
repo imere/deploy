@@ -8,6 +8,7 @@ import {
   type Runner,
   type TargetContext,
 } from '@dp/ports'
+import { linuxFacts } from '@dp/testkit'
 import { SCRIPT_MODE } from './script.js'
 import {
   activateProcess,
@@ -118,28 +119,6 @@ class FakeRunner implements Runner {
   }
 }
 
-function makeFacts(): Facts {
-  return {
-    host: 'fake',
-    platform: 'linux',
-    arch: 'x64',
-    init: 'systemd',
-    homedir: '/home/u',
-    tmpdir: '/tmp',
-    env: {},
-    capabilities: {
-      canWrite: {},
-      canChown: [],
-      canSymlink: true,
-      systemdScope: 'system',
-      lingerEnabled: false,
-      canBindPrivilegedPort: false,
-      sudoAllowlist: [],
-    },
-    tools: {},
-  }
-}
-
 function makeConfig(over: Partial<ProcessTargetConfig> = {}): ProcessTargetConfig {
   return {
     command: '/srv/app/current/bin/api',
@@ -165,7 +144,7 @@ function startWritesPid(runner: FakeRunner, pid = '4242'): void {
 
 describe('process 执行器 · install', () => {
   it('写两份脚本到版本目录、带执行位，且**一个进程都不启**', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     const result = await installProcess({ runner, ctx: makeCtx(), config: makeConfig() })
 
     assert.equal(result.phase, 'install')
@@ -178,7 +157,7 @@ describe('process 执行器 · install', () => {
   })
 
   it('脚本内容烘进了命令、pidfile 与日志位置', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     await installProcess({ runner, ctx: makeCtx(), config: makeConfig({ env: { PORT: '8080' } }) })
     const script = runner.files.get('/srv/app/releases/r2/.dp/start.sh') ?? ''
     assert.ok(script.includes(`'/srv/app/current/bin/api'`), script)
@@ -188,7 +167,7 @@ describe('process 执行器 · install', () => {
   })
 
   it('--dry-run 结束后磁盘上没有残留，写脚本那步记 skipped 而不是「跑过了」', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     const dirsBefore = new Set(runner.dirs)
     const result = await installProcess({ runner, ctx: makeCtx(), config: makeConfig(), dryRun: true })
 
@@ -204,7 +183,7 @@ describe('process 执行器 · install', () => {
 
 describe('process 执行器 · activate', () => {
   it('先停旧的再起新的；两步的 argv 都取自计划', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set(PID_FILE, '1234')
     startWritesPid(runner)
     const result = await activateProcess({ runner, ctx: makeCtx(), config: makeConfig() })
@@ -218,7 +197,7 @@ describe('process 执行器 · activate', () => {
   })
 
   it('首次部署没有 pidfile → 停那一步记 skipped，不报错', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     startWritesPid(runner)
     const result = await activateProcess({ runner, ctx: makeCtx(), config: makeConfig() })
 
@@ -229,7 +208,7 @@ describe('process 执行器 · activate', () => {
   })
 
   it('--dry-run 绝不真停进程（停进程不可撤销，演练不能留下这个作用）', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set(PID_FILE, '1234')
     const result = await activateProcess({ runner, ctx: makeCtx(), config: makeConfig(), dryRun: true })
 
@@ -240,7 +219,7 @@ describe('process 执行器 · activate', () => {
   })
 
   it('旧进程停不下来 → DP.PROC.STOP_FAILED，且**不接着起新的**（两个实例会抢同一个端口）', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set(PID_FILE, '1234')
     runner.handler = () => ({ code: 1, stdout: '', stderr: 'dp: 进程 1234 在优雅期与强杀之后仍然存活' })
     await assert.rejects(
@@ -258,7 +237,7 @@ describe('process 执行器 · activate', () => {
   })
 
   it('新进程起不来 → DP.PROC.START_FAILED，说清服务是空窗的', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set(PID_FILE, '1234')
     runner.handler = (argv) =>
       argv[1]?.endsWith('/start.sh')
@@ -278,7 +257,7 @@ describe('process 执行器 · activate', () => {
   })
 
   it('不合法的命令在渲染期就被拒：不产出脚本，也不起进程', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     await assert.rejects(
       () => installProcess({ runner, ctx: makeCtx(), config: makeConfig({ command: 'api\nrm -rf /' }) }),
       (err: unknown) => err instanceof DpError && err.code === 'DP.PROC.COMMAND_INVALID',
@@ -290,7 +269,7 @@ describe('process 执行器 · activate', () => {
 
 describe('process 执行器 · verify', () => {
   it('pidfile 里的 pid 还活着 → 通过', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set(PID_FILE, '4242')
     const result = await verifyProcess({ runner, ctx: makeCtx(), config: makeConfig() })
     assert.equal(result.phase, 'verify')
@@ -298,7 +277,7 @@ describe('process 执行器 · verify', () => {
   })
 
   it('没有 pidfile → DP.PROC.NOT_RUNNING（进程没把自己记下来，通常是启动时就退了）', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     await assert.rejects(
       () => verifyProcess({ runner, ctx: makeCtx(), config: makeConfig() }),
       (err: unknown) => {
@@ -310,7 +289,7 @@ describe('process 执行器 · verify', () => {
   })
 
   it('pid 还在 pidfile 里但进程没了 → DP.PROC.NOT_RUNNING', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set(PID_FILE, '4242')
     runner.handler = () => ({ code: 1, stdout: '', stderr: 'sh: kill: (4242) - No such process' })
     await assert.rejects(
@@ -325,7 +304,7 @@ describe('process 执行器 · verify', () => {
   })
 
   it('pidfile 里不是 pid → 同样判不存在（不当成一个 pid 去 kill）', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set(PID_FILE, 'not-a-pid')
     await assert.rejects(
       () => verifyProcess({ runner, ctx: makeCtx(), config: makeConfig() }),
@@ -337,7 +316,7 @@ describe('process 执行器 · verify', () => {
 
 describe('process 执行器 · rollback', () => {
   it('跑的是上一版目录里那份启动脚本，不是当前版本目录', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set('/srv/app/releases/r1/.dp/start.sh', '#!/bin/sh\n')
     runner.files.set(PID_FILE, '1234')
     startWritesPid(runner)
@@ -357,7 +336,7 @@ describe('process 执行器 · rollback', () => {
   })
 
   it('上一版脚本不在（被 prune 或从未部署）→ DP.PROC.NO_PREVIOUS，**不返回假成功**', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set(PID_FILE, '1234')
     await assert.rejects(
       () => rollbackProcess({ runner, ctx: makeCtx({ previousReleaseId: 'r1' }), config: makeConfig() }),
@@ -373,7 +352,7 @@ describe('process 执行器 · rollback', () => {
   })
 
   it('上一版脚本起不来 → DP.PROC.START_FAILED（旧进程已停，服务是空窗的）', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set('/srv/app/releases/r1/.dp/start.sh', '#!/bin/sh\n')
     runner.files.set(PID_FILE, '1234')
     // 停要成功 —— 这一条要验的是「停完起不来」那个现场，不是停失败
@@ -391,7 +370,7 @@ describe('process 执行器 · rollback', () => {
   })
 
   it('回滚后进程没活下来 → DP.PROC.NOT_RUNNING（上一版的服务本来就是坏的）', async () => {
-    const runner = new FakeRunner(makeFacts())
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set('/srv/app/releases/r1/.dp/start.sh', '#!/bin/sh\n')
     runner.files.set(PID_FILE, '1234')
     runner.handler = (argv) => (argv[0] === 'sh' && argv[2] === 'kill -0 "$1"' ? { code: 1, stdout: '', stderr: 'gone' } : { code: 0, stdout: '', stderr: '' })

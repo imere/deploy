@@ -27,6 +27,7 @@
     "@dp/template": "workspace:*"
   },
   "devDependencies": {
+    "@dp/testkit": "workspace:*",
     "typescript": "^5.9.0"
   }
 }

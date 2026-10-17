@@ -15,13 +15,8 @@ import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readReleaseState, type ReleaseState } from '@dp/target-static'
-import {
-  DpError,
-  type ExecResult,
-  type Facts,
-  type FileStat,
-  type Runner,
-} from '@dp/ports'
+import { type Facts, type Runner } from '@dp/ports'
+import { linuxFacts, MemoryRunner } from '@dp/testkit'
 import { main } from './index.js'
 import { COMMANDS } from './help.js'
 import { defaultApplyDeps, type ApplyDeps } from './deps.js'
@@ -31,108 +26,17 @@ import { EXIT_OK, EXIT_USAGE, EXIT_VERIFY_FAILED } from './output.js'
 // 夹具
 // ------------------------------------------------------------
 
-class FakeRunner implements Runner {
-  readonly id = 'fake'
-  readonly facts: Facts
-  private readonly tree = new Map<string, string | null>()
-
-  constructor(facts: Facts) {
-    this.facts = facts
-    this.tree.set('/', null)
-  }
-
-  async exec(): Promise<ExecResult> {
-    throw new DpError('DP.CONFIG.INVALID', '假 Runner 不执行命令')
-  }
-
-  async stat(path: string): Promise<FileStat | null> {
-    if (!this.tree.has(path)) return null
-    return { isDirectory: this.tree.get(path) === null, isSymbolicLink: false, size: 0, mtimeMs: 0 }
-  }
-
-  async listDir(path: string): Promise<readonly string[]> {
-    const out: string[] = []
-    for (const key of this.tree.keys()) {
-      if (key.startsWith(`${path}/`) && !key.slice(path.length + 1).includes('/')) out.push(key.slice(path.length + 1))
-    }
-    return out
-  }
-
-  async mkdir(path: string): Promise<void> {
-    this.tree.set(path, null)
-  }
-
-  async writeFile(path: string, data: string | Uint8Array): Promise<void> {
-    this.tree.set(path, typeof data === 'string' ? data : new TextDecoder().decode(data))
-  }
-
-  async readFile(path: string): Promise<string> {
-    const v = this.tree.get(path)
-    if (v === undefined) throw new DpError('DP.PATH.NOT_WRITABLE', `不存在：${path}`)
-    return v ?? ''
-  }
-
-  async readBinary(path: string): Promise<Uint8Array> {
-    return new TextEncoder().encode(await this.readFile(path))
-  }
-
-  async remove(path: string): Promise<void> {
-    for (const key of [...this.tree.keys()]) {
-      if (key === path || key.startsWith(`${path}/`)) this.tree.delete(key)
-    }
-  }
-
-  async rename(from: string, to: string): Promise<void> {
-    const moved = [...this.tree.entries()].filter(([k]) => k === from || k.startsWith(`${from}/`))
-    await this.remove(to)
-    for (const [k, v] of moved) {
-      this.tree.set(to + k.slice(from.length), v)
-      this.tree.delete(k)
-    }
-  }
-
-  async symlink(target: string, linkPath: string): Promise<void> {
-    this.tree.set(linkPath, target)
-  }
-
-  async readlink(path: string): Promise<string | null> {
-    return this.tree.get(path) ?? null
-  }
-
-  async realpath(path: string): Promise<string> {
-    return path
-  }
-
-  peek(path: string): string | null {
-    const v = this.tree.get(path)
-    return v === undefined ? null : v
-  }
-}
-
 function remoteFacts(host: string): Facts {
-  return {
+  return linuxFacts({
     host,
-    platform: 'linux',
-    arch: 'x64',
-    init: 'systemd',
     homedir: '/home/deployer',
-    tmpdir: '/tmp',
-    env: {},
-    capabilities: {
-      canWrite: { '/srv/app': true, '/srv/api': true },
-      canChown: [],
-      canSymlink: true,
-      systemdScope: 'system',
-      lingerEnabled: false,
-      canBindPrivilegedPort: false,
-      sudoAllowlist: [],
-    },
+    capabilities: { canWrite: { '/srv/app': true, '/srv/api': true } },
     tools: { ssh: '/usr/bin/ssh', rsync: '/usr/bin/rsync', tar: '/bin/tar', scp: '/usr/bin/scp' },
-  }
+  })
 }
 
 /** 造一个已经部署过 N 版的远端：索引 + 每个版本目录一个文件 */
-async function seedRemote(runner: FakeRunner, root: string, ids: readonly string[], current: string): Promise<void> {
+async function seedRemote(runner: Runner, root: string, ids: readonly string[], current: string): Promise<void> {
   await runner.mkdir(`${root}/.dp`)
   await runner.mkdir(`${root}/releases`)
   for (const id of ids) {
@@ -226,7 +130,7 @@ async function withLocalWorkspace(
   }
 }
 
-function remoteDeps(runner: FakeRunner): ApplyDeps {
+function remoteDeps(runner: MemoryRunner): ApplyDeps {
   return {
     acquireFacts: async () => ({ facts: runner.facts, probeNotes: [], close: async () => {}, runner }),
     probeLocalFacts: async () => remoteFacts('local'),
@@ -243,8 +147,8 @@ function remoteDeps(runner: FakeRunner): ApplyDeps {
 }
 
 /** 两版已就绪的远端工作区 */
-async function withRemoteWorkspace(fn: (runner: FakeRunner, root: string) => Promise<void>): Promise<void> {
-  const runner = new FakeRunner(remoteFacts('prod'))
+async function withRemoteWorkspace(fn: (runner: MemoryRunner, root: string) => Promise<void>): Promise<void> {
+  const runner = new MemoryRunner(remoteFacts('prod'))
   await seedRemote(runner, '/srv/app', ['web-1', 'web-2'], 'web-2')
   await fn(runner, '/srv/app')
 }
@@ -257,7 +161,7 @@ describe('readReleaseState', () => {
   const facts = remoteFacts('prod')
 
   it('previous 是 current 在 releases 里的前一个位置', async () => {
-    const runner = new FakeRunner(facts)
+    const runner = new MemoryRunner(facts)
     await seedRemote(runner, '/srv/app', ['web-1', 'web-2'], 'web-2')
     const state: ReleaseState = await readReleaseState(runner, '/srv/app')
     assert.equal(state.current, 'web-2')
@@ -266,7 +170,7 @@ describe('readReleaseState', () => {
 
   it('releases 不以 current 结尾时，previous 仍按位置取（不是倒数第二个）', async () => {
     // 这是规格要求的精确语义：current 夹在中间时，「倒数第二个」会算回 current 自己
-    const runner = new FakeRunner(facts)
+    const runner = new MemoryRunner(facts)
     await seedRemote(runner, '/srv/app', ['web-1', 'web-2', 'web-3'], 'web-2')
     const state = await readReleaseState(runner, '/srv/app')
     assert.equal(state.current, 'web-2')
@@ -274,7 +178,7 @@ describe('readReleaseState', () => {
   })
 
   it('索引不存在 → 空状态而不抛错（尚未部署是正常初始态）', async () => {
-    const runner = new FakeRunner(facts)
+    const runner = new MemoryRunner(facts)
     const state = await readReleaseState(runner, '/srv/nothing')
     assert.equal(state.current, undefined)
     assert.equal(state.previous, undefined)
@@ -282,7 +186,7 @@ describe('readReleaseState', () => {
   })
 
   it('索引损坏 → 空状态而不抛错', async () => {
-    const runner = new FakeRunner(facts)
+    const runner = new MemoryRunner(facts)
     await runner.mkdir('/srv/broken/.dp')
     await runner.writeFile('/srv/broken/.dp/index.json', '{ this is not json')
     const state = await readReleaseState(runner, '/srv/broken')
@@ -290,7 +194,7 @@ describe('readReleaseState', () => {
   })
 
   it('只有一个版本 → previous 为 undefined', async () => {
-    const runner = new FakeRunner(facts)
+    const runner = new MemoryRunner(facts)
     await seedRemote(runner, '/srv/app', ['web-1'], 'web-1')
     const state = await readReleaseState(runner, '/srv/app')
     assert.equal(state.current, 'web-1')
@@ -497,7 +401,7 @@ describe('ops · 远端注入', () => {
   it('当前版本目录为空 → status 如实报不健康，但退出码仍为 0', async () => {
     // 空 release = 线上 404。status 必须把它报出来，但**不能**因此让命令失败：
     // 它的职责是报告事实，让报警器因为坏消息自己变红等于把报警器关掉
-    const runner = new FakeRunner(remoteFacts('prod'))
+    const runner = new MemoryRunner(remoteFacts('prod'))
     await seedRemote(runner, '/srv/app', ['web-1', 'web-2'], 'web-2')
     await runner.remove('/srv/app/releases/web-2/assets')
     const dir = await makeRemoteConfigDir()
@@ -514,7 +418,7 @@ describe('ops · 远端注入', () => {
   })
 
   it('verify 对不健康的 current 退出 2 并带可执行 hint', async () => {
-    const runner = new FakeRunner(remoteFacts('prod'))
+    const runner = new MemoryRunner(remoteFacts('prod'))
     await seedRemote(runner, '/srv/app', ['web-1', 'web-2'], 'web-2')
     // 当前版本目录被掏空 → verifyRelease 的「release 目录为空」分支命中
     await runner.remove('/srv/app/releases/web-2/assets')
@@ -535,7 +439,7 @@ describe('ops · 远端注入', () => {
     // 此时「上一版」有两种读法 —— CLI 按位置取（current 的前一个 = web-1），
     // 而 target-static 的 rollback() 取 releases 的倒数第二个（= web-2 = 当前版本）。
     // 两者不一致时如果照报成功，用户以为又退了一版，实际什么都没切。
-    const runner = new FakeRunner(remoteFacts('prod'))
+    const runner = new MemoryRunner(remoteFacts('prod'))
     await seedRemote(runner, '/srv/app', ['web-1', 'web-2', 'web-3'], 'web-2')
     const dir = await makeRemoteConfigDir()
     try {
@@ -551,7 +455,7 @@ describe('ops · 远端注入', () => {
   })
 
   it('回滚到同样不健康的版本 → needsHealing + 退出 2，而不是假装成功', async () => {
-    const runner = new FakeRunner(remoteFacts('prod'))
+    const runner = new MemoryRunner(remoteFacts('prod'))
     await seedRemote(runner, '/srv/app', ['web-1', 'web-2'], 'web-2')
     // 两版都空：切过去也验不过。这正是 needsHealing 的场景
     await runner.remove('/srv/app/releases/web-1/assets')

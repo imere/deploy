@@ -20,6 +20,7 @@ import {
   type Runner,
   type TargetContext,
 } from '@dp/ports'
+import { assertExecInvariants, caughtAsync, type ExecCall, defaultFacts } from '@dp/testkit'
 import { activateNginx, installNginx, isNginxExecFailure, rollbackNginx, verifyNginx, type NginxExecFailure, type NginxExecInput } from './executor.js'
 import { renderConf } from './render.js'
 import type { NginxTargetConfig } from './types.js'
@@ -32,11 +33,6 @@ interface Node {
   readonly kind: 'dir' | 'file' | 'link'
   readonly content?: string
   readonly target?: string
-}
-
-interface ExecCall {
-  readonly argv: readonly string[]
-  readonly options?: ExecOptions
 }
 
 /** 让第 n 次（从 0 起）exec 失败。用「第几次」而不是「匹配 argv」，
@@ -257,29 +253,6 @@ class MemoryRunner implements Runner {
   }
 }
 
-function makeFacts(over: Partial<Facts> = {}): Facts {
-  return {
-    host: 'web-01',
-    platform: 'linux',
-    arch: 'x64',
-    init: 'systemd',
-    homedir: '/home/u',
-    tmpdir: '/tmp',
-    env: {},
-    capabilities: {
-      canWrite: {},
-      canChown: [],
-      canSymlink: true,
-      systemdScope: 'none',
-      lingerEnabled: false,
-      canBindPrivilegedPort: false,
-      sudoAllowlist: [],
-    },
-    tools: {},
-    ...over,
-  }
-}
-
 const CONFD = '/etc/nginx/conf.d'
 const TARGET = `${CONFD}/web.conf`
 const BACKUP = `${TARGET}.dp-backup`
@@ -301,24 +274,6 @@ function makeInput(runner: Runner, over: Partial<NginxExecInput> = {}): NginxExe
 
 const RENDERED = renderConf(CONFIG.server, CONFIG.render, { path: 'projects.web.target.nginx.server' })
 
-/** 铁律 0 的机器化检查：每条 exec 都必须有 timeout，且永远不喂 stdin */
-function assertExecInvariants(runner: MemoryRunner): void {
-  for (const call of runner.execs) {
-    assert.notEqual(call.options?.timeoutMs, undefined, `exec 缺 timeoutMs：${call.argv.join(' ')}`)
-    assert.equal(call.options?.stdin, undefined, `exec 喂了 stdin：${call.argv.join(' ')}`)
-  }
-}
-
-async function capture(p: Promise<unknown>): Promise<{ readonly error: DpError }> {
-  try {
-    await p
-  } catch (err) {
-    assert.ok(err instanceof DpError, `期望 DpError，实际：${String(err)}`)
-    return { error: err }
-  }
-  throw new Error('期望抛错，但没有')
-}
-
 /** 失败现场。读不出来就当场失败：把读不出来的字段当成空数组，恰好是这类测试最常见的假绿 */
 function failureOf(error: DpError): NginxExecFailure {
   const cause: unknown = error.cause
@@ -334,7 +289,7 @@ function failureOf(error: DpError): NginxExecFailure {
 
 describe('installNginx', () => {
   it('首次部署：写候选 → 影子校验，argv 顺序正确且不碰目标文件', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
 
     const result = await installNginx(makeInput(runner))
@@ -350,7 +305,7 @@ describe('installNginx', () => {
   })
 
   it('影子主配置只 include 真实 confd 的其它文件 + 候选，不含目标文件自己', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     await runner.seed(`${CONFD}/api.conf`, '# managed by dp\nserver {\n  server_name api.example.com;\n}\n')
 
@@ -365,14 +320,14 @@ describe('installNginx', () => {
   })
 
   it('目标文件不带标记 → NOT_MANAGED，且 confd 逐字未变', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     const handWritten = 'server {\n  server_name hand.example.com;\n}\n'
     await runner.seed(TARGET, handWritten)
     await runner.seed(`${CONFD}/api.conf`, '# managed by dp\n')
     const before = runner.snapshot(CONFD)
 
-    const { error } = await capture(installNginx(makeInput(runner)))
+    const error = await caughtAsync(installNginx(makeInput(runner)))
 
     assert.equal(error.code, 'DP.NGX.NOT_MANAGED')
     assert.ok(error.hint !== undefined && error.hint.length > 0, '错误必须带 hint')
@@ -384,7 +339,7 @@ describe('installNginx', () => {
   })
 
   it('force: true 覆盖无标记文件 → 仍先备份（不直接抹掉）', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     const handWritten = 'server {\n  server_name hand.example.com;\n}\n'
     await runner.seed(TARGET, handWritten)
@@ -398,14 +353,14 @@ describe('installNginx', () => {
   })
 
   it('影子校验失败 → 生产目录零改动，且错误里带 nginx 的 stderr', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     const existing = '# managed by dp\nserver {\n  server_name web.example.com;\n  root /old;\n}\n'
     await runner.seed(TARGET, existing)
     const before = runner.snapshot(CONFD)
     runner.execOverride = () => ({ code: 1, stdout: '', stderr: 'nginx: [emerg] unknown directive "retr"' })
 
-    const { error } = await capture(installNginx(makeInput(runner)))
+    const error = await caughtAsync(installNginx(makeInput(runner)))
 
     assert.equal(error.code, 'DP.NGX.TEST_FAILED')
     // 只报「校验失败」等于让用户自己上机器重跑一遍才知道原因
@@ -419,7 +374,7 @@ describe('installNginx', () => {
   })
 
   it('第二次部署的 include 清单不含上一轮影子目录里的候选（否则撞 conflicting）', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     await installNginx(makeInput(runner))
     await activateNginx(makeInput(runner))
@@ -438,7 +393,7 @@ describe('installNginx', () => {
   })
 
   it('dryRun：跑完真影子校验，但不留任何东西在 confd、不发 reload', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     await runner.seed(`${CONFD}/api.conf`, '# managed by dp\nserver {\n  server_name api.example.com;\n}\n')
     const before = runner.snapshot(CONFD)
@@ -453,7 +408,7 @@ describe('installNginx', () => {
   })
 
   it('dryRun 撤销要连影子目录本身一起收掉，不留空目录在 confd', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     await runner.seed(`${CONFD}/api.conf`, '# managed by dp\nserver {\n  server_name api.example.com;\n}\n')
 
@@ -466,7 +421,7 @@ describe('installNginx', () => {
   })
 
   it('dryRun 撤销不许连上一轮其它 release 的影子目录一起删', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     // 上一轮（r-0）的影子目录留在现场 —— 本轮撤销只许收掉本轮建的那一支
     await runner.mkdir(`${CONFD}/.dp-shadow/r-0`)
@@ -481,7 +436,7 @@ describe('installNginx', () => {
   })
 
   it('confd 都是本轮刚建出来的时候，撤销也只收到 .dp-shadow —— 不删 nginx 自己的目录', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     // 故意不 mkdir(CONFD)：让整条链都由本轮建出来
     await runner.mkdir('/etc/nginx')
 
@@ -492,12 +447,12 @@ describe('installNginx', () => {
   })
 
   it('dryRun 也照样做所有权判定 —— 那正是 dry-run 最该告诉用户的事', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     await runner.seed(TARGET, 'server {\n  server_name hand.example.com;\n}\n')
     const before = runner.snapshot(CONFD)
 
-    const { error } = await capture(installNginx(makeInput(runner, { dryRun: true })))
+    const error = await caughtAsync(installNginx(makeInput(runner, { dryRun: true })))
 
     assert.equal(error.code, 'DP.NGX.NOT_MANAGED')
     assert.deepEqual(runner.snapshot(CONFD), before)
@@ -510,7 +465,7 @@ describe('installNginx', () => {
 
 describe('activateNginx', () => {
   it('完整生效：备份 → 替换 → 复验 → reload，argv 序列正确', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     const old = '# managed by dp\nserver {\n  server_name web.example.com;\n  root /old;\n}\n'
     await runner.seed(TARGET, old)
@@ -531,7 +486,7 @@ describe('activateNginx', () => {
   })
 
   it('带标记的同名文件走备份 + 替换', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     await runner.seed(TARGET, '# managed by dp\n# 我自己加的注释\nserver {\n  root /old;\n}\n')
 
@@ -544,7 +499,7 @@ describe('activateNginx', () => {
   })
 
   it('影子目录在 confd 之外（模拟另一个文件系统）时替换仍然成功', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     await runner.mkdir('/var/lib/dp-shadow')
     runner.setMountPoint('/var/lib/dp-shadow')
@@ -562,14 +517,14 @@ describe('activateNginx', () => {
   })
 
   it('复验失败 → conf 被还原成原状，reload 没有被调用', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     const old = '# managed by dp\nserver {\n  server_name web.example.com;\n  root /old;\n}\n'
     await runner.seed(TARGET, old)
 
     runner.execOverride = () => ({ code: 1, stdout: '', stderr: 'nginx: [emerg] conflicting server name "web.example.com"' })
 
-    const { error } = await capture(activateNginx(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
+    const error = await caughtAsync(activateNginx(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
 
     assert.equal(error.code, 'DP.NGX.TEST_FAILED')
     assert.equal(await runner.readFile(TARGET), old, 'conf 没有被还原')
@@ -585,14 +540,14 @@ describe('activateNginx', () => {
   })
 
   it('reload 失败不回滚：盘上的 conf 已通过 -t，回滚只会制造第二次不一致', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     await runner.seed(TARGET, '# managed by dp\nserver {\n  root /old;\n}\n')
 
     runner.execOverride = (argv) =>
       argv[1] === '-s' ? { code: 1, stdout: '', stderr: 'nginx: invalid PID number' } : undefined
 
-    const { error } = await capture(activateNginx(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
+    const error = await caughtAsync(activateNginx(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
 
     assert.equal(error.code, 'DP.NGX.RELOAD_FAILED')
     assert.equal(await runner.readFile(TARGET), RENDERED, '好文件被换回旧的了')
@@ -600,7 +555,7 @@ describe('activateNginx', () => {
   })
 
   it('reload: false → 不发任何重载命令，但仍产出「已禁用」那条步骤', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     await runner.seed(TARGET, '# managed by dp\nserver {\n  root /old;\n}\n')
 
@@ -612,7 +567,7 @@ describe('activateNginx', () => {
   })
 
   it('dryRun：不写 confd、不 rename、不 reload，判定照样给出', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     await runner.seed(TARGET, '# managed by dp\nserver {\n  root /old;\n}\n')
     const before = runner.snapshot(CONFD)
@@ -630,7 +585,7 @@ describe('activateNginx', () => {
   })
 
   it('dryRun 的备份不记成已执行 —— 报告了没发生的副作用比不做更难查', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     await runner.seed(TARGET, '# managed by dp\nserver {\n  root /old;\n}\n')
 
@@ -649,7 +604,7 @@ describe('activateNginx', () => {
 
 describe('verifyNginx', () => {
   it('内容一致 → 通过', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     await runner.seed(TARGET, RENDERED)
 
@@ -660,7 +615,7 @@ describe('verifyNginx', () => {
   })
 
   it('内容漂移 → 报警告而不是回滚（那份内容本身可能完全合法）', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     await runner.seed(TARGET, `${RENDERED}# 有人在部署之后手改过\n`)
 
@@ -671,10 +626,10 @@ describe('verifyNginx', () => {
   })
 
   it('文件缺失 → 直接失败', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
 
-    const { error } = await capture(verifyNginx(makeInput(runner)))
+    const error = await caughtAsync(verifyNginx(makeInput(runner)))
 
     assert.equal(error.code, 'DP.VERIFY.FAILED')
   })
@@ -682,7 +637,7 @@ describe('verifyNginx', () => {
 
 describe('rollbackNginx', () => {
   it('还原备份 → 复验 → reload', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     const old = '# managed by dp\nserver {\n  server_name web.example.com;\n  root /old;\n}\n'
     await runner.seed(TARGET, RENDERED)
@@ -697,12 +652,12 @@ describe('rollbackNginx', () => {
   })
 
   it('没有备份 → NO_PREVIOUS，且不报「回滚成功」这种假结果', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     await runner.seed(TARGET, RENDERED)
     const before = runner.snapshot(CONFD)
 
-    const { error } = await capture(rollbackNginx(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
+    const error = await caughtAsync(rollbackNginx(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
 
     assert.equal(error.code, 'DP.NGX.NO_PREVIOUS')
     assert.deepEqual(runner.snapshot(CONFD), before)
@@ -710,12 +665,12 @@ describe('rollbackNginx', () => {
   })
 
   it('previousReleaseId 缺失 → 动手之前就报错', async () => {
-    const runner = new MemoryRunner(makeFacts())
+    const runner = new MemoryRunner(defaultFacts())
     await runner.mkdir(CONFD)
     await runner.seed(TARGET, RENDERED)
     await runner.seed(BACKUP, '# managed by dp\n')
 
-    const { error } = await capture(rollbackNginx(makeInput(runner)))
+    const error = await caughtAsync(rollbackNginx(makeInput(runner)))
 
     assert.equal(error.code, 'DP.NGX.NO_PREVIOUS')
     assert.deepEqual(runner.argvs(), [])

@@ -115,6 +115,10 @@ importers:
       '@dp/ports':
         specifier: workspace:*
         version: link:../ports
+    devDependencies:
+      '@dp/testkit':
+        specifier: workspace:*
+        version: link:../testkit
 
   packages/ssh:
     dependencies:
@@ -141,6 +145,9 @@ importers:
         specifier: workspace:*
         version: link:../template
     devDependencies:
+      '@dp/testkit':
+        specifier: workspace:*
+        version: link:../testkit
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
@@ -154,6 +161,9 @@ importers:
         specifier: workspace:*
         version: link:../template
     devDependencies:
+      '@dp/testkit':
+        specifier: workspace:*
+        version: link:../testkit
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
@@ -167,6 +177,9 @@ importers:
         specifier: workspace:*
         version: link:../template
     devDependencies:
+      '@dp/testkit':
+        specifier: workspace:*
+        version: link:../testkit
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
@@ -196,6 +209,9 @@ importers:
         specifier: workspace:*
         version: link:../template
     devDependencies:
+      '@dp/testkit':
+        specifier: workspace:*
+        version: link:../testkit
       typescript:
         specifier: ^5.9.0
         version: 5.9.3

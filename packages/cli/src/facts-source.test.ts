@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DpError, type Facts, type Runner } from '@dp/ports'
 import type { DriverExecResult, ExecRequest, SshDriver } from '@dp/ssh'
+import { linuxFacts } from '@dp/testkit'
 import {
   acquireFacts,
   hopJumpStrings,
@@ -286,25 +287,12 @@ describe('facts-source · hops 真的传到了连接层', () => {
 describe('facts-source · 远端也要补测发布根', () => {
   /** 远端事实，capabilities.canWrite 只带默认表探到的祖先 —— 正是修复前那份残缺的事实 */
   function remoteFacts(canWrite: Record<string, boolean> = { '/srv': false, '/opt': false }): Facts {
-    return {
+    return linuxFacts({
       host: 'web',
-      platform: 'linux',
-      arch: 'x64',
-      init: 'systemd',
       homedir: '/home/dp',
-      tmpdir: '/tmp',
       env: { PATH: '/usr/bin' },
-      capabilities: {
-        canWrite,
-        canChown: [],
-        canSymlink: true,
-        systemdScope: 'system',
-        lingerEnabled: false,
-        canBindPrivilegedPort: false,
-        sudoAllowlist: [],
-      },
-      tools: {},
-    } as Facts
+      capabilities: { canWrite },
+    })
   }
 
   function connectWith(

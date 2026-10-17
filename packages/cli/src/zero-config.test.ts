@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError } from '@dp/ports'
 import { targetSchema, type Config } from '@dp/schema'
+import { caught } from '@dp/testkit'
 import { CliUsageError } from './args.js'
 import {
   deriveZeroConfig,
@@ -12,18 +12,9 @@ import {
 
 /**
  * `assert.throws` 在本仓的 @types/node 下返回 void，拿不到错误对象。
- * 统一走这个 helper：`instanceof` 收窄类型，不需要断言成具体子类
+ * 统一走 @dp/testkit 的 caught：`instanceof` 收窄类型，不需要断言成具体子类
  * （`CliUsageError` 也是 `DpError`，调用点再按 name / code 区分）。
  */
-function caught(fn: () => unknown): DpError {
-  try {
-    fn()
-  } catch (err) {
-    if (err instanceof DpError) return err
-    throw new Error(`期望 DpError，实际是 ${String(err)}`, { cause: err })
-  }
-  throw new Error('期望抛错，但没有')
-}
 
 /** 一个项目在零配置下的最小输入：源根 dist + 只有一个 index.html */
 function webInput(overrides: {

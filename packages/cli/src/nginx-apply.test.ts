@@ -15,7 +15,8 @@ import { describe, it } from 'node:test'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DpError, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
+import { DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
+import { assertExecInvariants, type ExecCall, linuxFacts } from '@dp/testkit'
 import { main } from './index.js'
 import { defaultApplyDeps, type ApplyDeps } from './deps.js'
 
@@ -34,6 +35,8 @@ class FakeRunner implements Runner {
   readonly facts: Facts
   /** 事件时间线。顺序类断言只看它 */
   readonly events: string[] = []
+  /** 每次 exec 的 argv + options。铁律 0 的检查读它 */
+  readonly execs: ExecCall[] = []
   private readonly tree = new Map<string, string | null>()
   private execCount = 0
   /** 按调用次序给出结论；undefined = 一律成功 */
@@ -46,8 +49,9 @@ class FakeRunner implements Runner {
     this.tree.set('/', null)
   }
 
-  async exec(argv: readonly string[]): Promise<ExecResult> {
+  async exec(argv: readonly string[], options?: ExecOptions): Promise<ExecResult> {
     this.events.push(`exec ${argv.join(' ')}`)
+    this.execs.push({ argv: [...argv], ...(options !== undefined ? { options } : {}) })
     const decision = this.failWhen(argv) ?? this.execDecisions[this.execCount]
     this.execCount += 1
     const d = decision ?? { code: 0 }
@@ -127,25 +131,12 @@ class FakeRunner implements Runner {
 }
 
 function remoteFacts(canWrite: Readonly<Record<string, boolean>> = {}): Facts {
-  return {
+  return linuxFacts({
     host: 'prod',
-    platform: 'linux',
-    arch: 'x64',
-    init: 'systemd',
     homedir: '/home/deployer',
-    tmpdir: '/tmp',
-    env: {},
-    capabilities: {
-      canWrite: { '/srv/app': true, ...canWrite },
-      canChown: [],
-      canSymlink: true,
-      systemdScope: 'system',
-      lingerEnabled: false,
-      canBindPrivilegedPort: false,
-      sudoAllowlist: [],
-    },
+    capabilities: { canWrite: { '/srv/app': true, ...canWrite } },
     tools: { ssh: '/usr/bin/ssh', rsync: '/usr/bin/rsync', tar: '/bin/tar', scp: '/usr/bin/scp' },
-  }
+  })
 }
 
 const NGINX_BLOCK = {
@@ -222,6 +213,8 @@ async function withWorkspace(
         writeErr: () => {},
         isTTY: false,
       })
+      // 铁律 0 的收尾检查：这一趟发出去的每条命令都带了 timeoutMs、没喂 stdin
+      assertExecInvariants(runner)
       return { code, stdout: out.join('') }
     }
     await fn({ dir, runner, run })

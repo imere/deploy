@@ -8,22 +8,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DpError } from '@dp/ports'
+import { caught } from '@dp/testkit'
 import { DEFAULT_KEEP, defineBecome, defineDocker, defineHost, defineNginx, defineProcess, defineSystemd, defineTarget, becomeSchema, dockerSchema, nginxSchema, releaseSchema, targetSchema, type DockerInput, type NginxInput, type ProcessInput, type SystemdInput } from './config.js'
-
-function codeOf(fn: () => unknown): { code: string; message: string; path?: string; hint?: string } {
-  try {
-    fn()
-  } catch (err) {
-    if (err instanceof DpError) {
-      // message 一并带出来：联合形态的报错把「实际是 X」放在 message 里，
-      // hint 只说「两种写法都可以」—— 只返回 code/hint 时那半句谁也没断言过，
-      // 于是把类型名的判据翻掉，整条 message 换掉也照样绿
-      return { code: err.code, message: err.message, ...(err.path !== undefined ? { path: err.path } : {}), ...(err.hint !== undefined ? { hint: err.hint } : {}) }
-    }
-    throw err
-  }
-  assert.fail('应当抛错')
-}
 
 /**
  * 故意写错的输入走这里，而不是 `defineNginx({...} as unknown as ...)`。
@@ -93,7 +79,7 @@ describe('nginx · server 的联合形态', () => {
   })
 
   it('数字（既不是对象也不是数组）→ 说清两种期望形态', () => {
-    const r = codeOf(() => parseRaw({ ...BASE, server: 8080 }))
+    const r = caught(() => parseRaw({ ...BASE, server: 8080 }))
     assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.match(String(r.hint), /单个 server 块对象/)
     assert.match(String(r.hint), /server 块数组/)
@@ -108,7 +94,7 @@ describe('nginx · server 的联合形态', () => {
     // 必须单独钉 null：typeof null === 'object'，只有 object / string / array 这几条
     // 断言时，把「input === null」翻成「!==」会让非 null 输入全报 null，
     // 那条翻转恰好被上一条抓住 —— 但 null 自己被报成 object 这半边仍无人看守
-    const r = codeOf(() => parseRaw({ ...BASE, server: null }))
+    const r = caught(() => parseRaw({ ...BASE, server: null }))
     assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'nginx.server')
     assert.match(String(r.hint), /两种写法都可以/)
@@ -118,7 +104,7 @@ describe('nginx · server 的联合形态', () => {
   it('listen 的联合：元素既不是数字也不是字符串 → 报 array，而不是摊开后的 object', () => {
     // 数组摊开是 {}，只看 typeof 分不出「用户写了个数组」与「用户写了个对象」：
     // 前者改一个字符就能修好，后者往往是一整层结构搞错了
-    const r = codeOf(() => parseRaw({ ...BASE, server: { listen: [['80']] } }))
+    const r = caught(() => parseRaw({ ...BASE, server: { listen: [['80']] } }))
     assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'nginx.server.listen[0]')
     assert.match(r.message, /期望 数字端口 或 带修饰符的字符串/)
@@ -133,18 +119,18 @@ describe('nginx · reload', () => {
   })
 
   it('argv 里的空串被拒 —— 类型层看不出来，但空参数会让远端 execve 直接失败', () => {
-    const r = codeOf(() => defineNginx({ ...BASE, reload: ['nginx', '', 'reload'] }))
+    const r = caught(() => defineNginx({ ...BASE, reload: ['nginx', '', 'reload'] }))
     assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'nginx.reload[1]')
     assert.match(String(r.hint), /execve/)
   })
 
   it('首元素空串同样被拒', () => {
-    assert.equal(codeOf(() => defineNginx({ ...BASE, reload: [''] })).code, 'DP.CONFIG.INVALID')
+    assert.equal(caught(() => defineNginx({ ...BASE, reload: [''] })).code, 'DP.CONFIG.INVALID')
   })
 
   it('既不是数组也不是 false → 说清两种写法', () => {
-    const r = codeOf(() => parseRaw({ ...BASE, reload: 'nginx -s reload' }))
+    const r = caught(() => parseRaw({ ...BASE, reload: 'nginx -s reload' }))
     assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.match(String(r.hint), /argv 数组/)
     assert.match(String(r.hint), /false/)
@@ -153,7 +139,7 @@ describe('nginx · reload', () => {
   })
 
   it('给一个普通对象 → 报 object，不猜它是不是某种可迭代形状', () => {
-    const r = codeOf(() => parseRaw({ ...BASE, reload: { argv: ['nginx', '-s', 'reload'] } }))
+    const r = caught(() => parseRaw({ ...BASE, reload: { argv: ['nginx', '-s', 'reload'] } }))
     assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'nginx.reload')
     assert.match(r.message, /实际是 object/)
@@ -162,20 +148,20 @@ describe('nginx · reload', () => {
 
 describe('nginx · 未知字段被拒', () => {
   it('server 里的未知键报出可用字段', () => {
-    const r = codeOf(() => parseRaw({ server: { root: '/srv', upstream: 'http://x' } }))
+    const r = caught(() => parseRaw({ server: { root: '/srv', upstream: 'http://x' } }))
     assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'nginx.server.upstream')
     assert.match(String(r.hint), /serverName/)
   })
 
   it('顶层未知键同样被拒（confd 不在这里，写了就是错配置）', () => {
-    const r = codeOf(() => parseRaw({ ...BASE, confd: '/etc/nginx/conf.d' }))
+    const r = caught(() => parseRaw({ ...BASE, confd: '/etc/nginx/conf.d' }))
     assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'nginx.confd')
   })
 
   it('嵌套层的未知键定位到具体路径', () => {
-    const r = codeOf(() =>
+    const r = caught(() =>
       parseRaw({ server: { locations: [{ path: '/', root: '/srv', rewrites: [] }] } }),
     )
     assert.equal(r.path, 'nginx.server.locations[0].rewrites')
@@ -240,25 +226,25 @@ describe('docker · 默认值', () => {
 
 describe('docker · compose.files', () => {
   it('必填：缺了报「缺少必填字段」并指到具体那一层', () => {
-    const r = codeOf(() => dockerSchema.parse({ compose: { projectName: 'api' } }, 'docker'))
+    const r = caught(() => dockerSchema.parse({ compose: { projectName: 'api' } }, 'docker'))
     assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'docker.compose.files')
   })
 
   it('projectName 必填', () => {
-    const r = codeOf(() => dockerSchema.parse({ compose: { files: ['c.yml'] } }, 'docker'))
+    const r = caught(() => dockerSchema.parse({ compose: { files: ['c.yml'] } }, 'docker'))
     assert.equal(r.path, 'docker.compose.projectName')
   })
 
   it('空串被拒，path 指到具体下标 —— 空路径拼进 -f 后面，报错与部署毫无关系', () => {
-    const r = codeOf(() => defineDocker({ compose: { files: ['ok.yml', ''], projectName: 'api' } }))
+    const r = caught(() => defineDocker({ compose: { files: ['ok.yml', ''], projectName: 'api' } }))
     assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'docker.compose.files[1]')
     assert.match(String(r.hint), /no such file or directory/)
   })
 
   it('首元素空串同样被拒', () => {
-    assert.equal(codeOf(() => defineDocker({ compose: { files: [''], projectName: 'api' } })).code, 'DP.CONFIG.INVALID')
+    assert.equal(caught(() => defineDocker({ compose: { files: [''], projectName: 'api' } })).code, 'DP.CONFIG.INVALID')
   })
 
   it('**空数组不在这里拒** —— 那是 DP.DOCKER.COMPOSE_FILES_EMPTY，hint 里有「不带 -f 会去找当前工作目录」的解释', () => {
@@ -280,7 +266,7 @@ describe('docker · 语义判定不在这层', () => {
   })
 
   it('files 里出现非字符串元素在加载期就报（类型对不上不许留到部署时）', () => {
-    const r = codeOf(() => dockerSchema.parse({ compose: { files: ['ok.yml', 42], projectName: 'api' } }, 'docker'))
+    const r = caught(() => dockerSchema.parse({ compose: { files: ['ok.yml', 42], projectName: 'api' } }, 'docker'))
     assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'docker.compose.files[1]')
   })
@@ -288,7 +274,7 @@ describe('docker · 语义判定不在这层', () => {
 
 describe('docker · 未知字段被拒', () => {
   it('顶层未知键报出可用字段（发布根不是这里的字段）', () => {
-    const r = codeOf(() => dockerSchema.parse({ ...DOCKER_BASE, root: '/srv/api' }, 'docker'))
+    const r = caught(() => dockerSchema.parse({ ...DOCKER_BASE, root: '/srv/api' }, 'docker'))
     assert.equal(r.code, 'DP.CONFIG.INVALID')
     assert.equal(r.path, 'docker.root')
     // 报的是**顶层**可用字段。projectName 嵌在 compose 里，不出现在这一层
@@ -296,7 +282,7 @@ describe('docker · 未知字段被拒', () => {
   })
 
   it('compose 里的未知键定位到具体路径', () => {
-    const r = codeOf(() => dockerSchema.parse({ compose: { ...DOCKER_BASE.compose, network: 'x' } }, 'docker'))
+    const r = caught(() => dockerSchema.parse({ compose: { ...DOCKER_BASE.compose, network: 'x' } }, 'docker'))
     assert.equal(r.path, 'docker.compose.network')
   })
 })
@@ -548,24 +534,24 @@ describe('become · custom 的命令模板', () => {
   })
 
   it('custom 不给 template 报错并指向 template', () => {
-    const e = codeOf(() => defineBecome({ type: 'custom' }))
+    const e = caught(() => defineBecome({ type: 'custom' }))
     assert.equal(e.code, 'DP.CONFIG.INVALID')
     assert.equal(e.path, 'become.template')
     assert.match(e.message, /必须写 template/)
   })
 
   it('模板缺 ${cmd} 占位报错：没有占位会把被提权的命令整条丢掉', () => {
-    const e = codeOf(() => defineBecome({ type: 'custom', template: 'dzdo -u root' }))
+    const e = caught(() => defineBecome({ type: 'custom', template: 'dzdo -u root' }))
     assert.equal(e.path, 'become.template')
     assert.match(e.message, /\$\{cmd\}/)
   })
 
   it('模板在 ${cmd} 之外出现 ${ 报错：执行期只做字面替换，其它 ${ 会原样进远端 shell', () => {
-    const e = codeOf(() => defineBecome({ type: 'custom', template: 'dzdo -u root ${cmd} < ${release.log}' }))
+    const e = caught(() => defineBecome({ type: 'custom', template: 'dzdo -u root ${cmd} < ${release.log}' }))
     assert.equal(e.code, 'DP.CONFIG.INVALID')
     assert.equal(e.path, 'become.template')
     // ${cmdless} 以 cmd 开头却不是占位 —— 按原文比对 ${cmd} 全串，不能按前缀放行
-    const e2 = codeOf(() => defineBecome({ type: 'custom', template: 'dzdo ${cmd} ${cmdless}' }))
+    const e2 = caught(() => defineBecome({ type: 'custom', template: 'dzdo ${cmd} ${cmdless}' }))
     assert.equal(e2.path, 'become.template')
     // 提示要说清后果与去处：模板不渲染，字面 $ 写不进去
     assert.match(e.hint ?? '', /原样进远端 shell/)
@@ -578,12 +564,12 @@ describe('become · custom 的命令模板', () => {
   })
 
   it('空白模板按没给处理', () => {
-    const e = codeOf(() => defineBecome({ type: 'custom', template: '   ' }))
+    const e = caught(() => defineBecome({ type: 'custom', template: '   ' }))
     assert.equal(e.path, 'become.template')
   })
 
   it('非 custom 写了 template 报错，不静默忽略', () => {
-    const e = codeOf(() => defineBecome({ type: 'sudo', template: 'dzdo ${cmd}' }))
+    const e = caught(() => defineBecome({ type: 'sudo', template: 'dzdo ${cmd}' }))
     assert.equal(e.path, 'become.template')
     assert.match(e.message, /不生效/)
   })

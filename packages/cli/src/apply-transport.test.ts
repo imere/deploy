@@ -10,13 +10,8 @@ import { describe, it } from 'node:test'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  DpError,
-  type ExecResult,
-  type Facts,
-  type FileStat,
-  type Runner,
-} from '@dp/ports'
+import { DpError, type Facts } from '@dp/ports'
+import { linuxFacts, MemoryRunner } from '@dp/testkit'
 import { main } from './index.js'
 import type { ApplyDeps } from './deps.js'
 import { EXIT_MISSING_DEPENDENCY } from './output.js'
@@ -25,117 +20,14 @@ import { EXIT_MISSING_DEPENDENCY } from './output.js'
 // 远端 Runner：只实现 deploy() 会用到的那几个方法
 // ------------------------------------------------------------
 
-class RemoteRunner implements Runner {
-  readonly id = 'fake-remote'
-  readonly facts: Facts
-  private readonly tree = new Map<string, string | null>()
-
-  constructor(facts: Facts) {
-    this.facts = facts
-    this.tree.set('/', null)
-  }
-
-  async exec(): Promise<ExecResult> {
-    throw new DpError('DP.CONFIG.INVALID', '假 Runner 不执行命令')
-  }
-
-  async stat(path: string): Promise<FileStat | null> {
-    if (!this.tree.has(path)) return null
-    return { isDirectory: this.tree.get(path) === null, isSymbolicLink: false, size: 0, mtimeMs: 0 }
-  }
-
-  async listDir(path: string): Promise<readonly string[]> {
-    const out: string[] = []
-    for (const key of this.tree.keys()) {
-      if (key.startsWith(`${path}/`) && !key.slice(path.length + 1).includes('/')) out.push(key.slice(path.length + 1))
-    }
-    return out
-  }
-
-  async mkdir(path: string): Promise<void> {
-    this.tree.set(path, null)
-  }
-
-  async writeFile(path: string, data: string | Uint8Array): Promise<void> {
-    this.tree.set(path, typeof data === 'string' ? data : new TextDecoder().decode(data))
-  }
-
-  async readFile(path: string): Promise<string> {
-    const v = this.tree.get(path)
-    if (v === undefined) throw new DpError('DP.PATH.NOT_WRITABLE', `不存在：${path}`)
-    return v ?? ''
-  }
-
-  async readBinary(path: string): Promise<Uint8Array> {
-    return new TextEncoder().encode(await this.readFile(path))
-  }
-
-  async remove(path: string): Promise<void> {
-    for (const key of [...this.tree.keys()]) {
-      if (key === path || key.startsWith(`${path}/`)) this.tree.delete(key)
-    }
-  }
-
-  async rename(from: string, to: string): Promise<void> {
-    const moved = [...this.tree.entries()].filter(([k]) => k === from || k.startsWith(`${from}/`))
-    await this.remove(to)
-    for (const [k, v] of moved) {
-      this.tree.set(to + k.slice(from.length), v)
-      this.tree.delete(k)
-    }
-  }
-
-  async symlink(target: string, linkPath: string): Promise<void> {
-    this.tree.set(linkPath, target)
-  }
-
-  async readlink(path: string): Promise<string | null> {
-    return this.tree.get(path) ?? null
-  }
-
-  async realpath(path: string): Promise<string> {
-    return path
-  }
-
-  /** 测试辅助：直接看树里某个路径的内容 */
-  peek(path: string): string | null {
-    const v = this.tree.get(path)
-    return v === undefined ? null : v
-  }
-
-  /**
-   * 补齐父目录。真实的 rsync / tar 解包都会建父目录，假传输不建的话
-   * `listDir(release)` 会返回空 —— 那是夹具不还原真实行为，不是被测代码的缺陷。
-   */
-  mkdirp(path: string): void {
-    const parts = path.split('/')
-    for (let i = 1; i < parts.length; i += 1) {
-      this.tree.set(parts.slice(0, i).join('/'), null)
-    }
-  }
-}
-
 function remoteFacts(host: string): Facts {
-  return {
+  return linuxFacts({
     host,
-    platform: 'linux',
-    arch: 'x64',
-    init: 'systemd',
     homedir: '/home/deployer',
-    tmpdir: '/tmp',
-    env: {},
-    capabilities: {
-      canWrite: { '/srv/app': true },
-      canChown: [],
-      canSymlink: true,
-      systemdScope: 'system',
-      lingerEnabled: false,
-      canBindPrivilegedPort: false,
-      sudoAllowlist: [],
-    },
+    capabilities: { canWrite: { '/srv/app': true } },
     // 两端都有 rsync：协商结论应当稳定落在 rsync-ssh 上，测试才不用跟环境较劲
     tools: { ssh: '/usr/bin/ssh', rsync: '/usr/bin/rsync', tar: '/bin/tar', scp: '/usr/bin/scp' },
-  }
+  })
 }
 
 function localFacts(): Facts {
@@ -144,7 +36,7 @@ function localFacts(): Facts {
 
 interface Harness {
   readonly deps: ApplyDeps
-  readonly runner: RemoteRunner
+  readonly runner: MemoryRunner
   readonly calls: { count: number; remoteRoots: string[]; entryCounts: number[]; deleteExtraneous: (boolean | undefined)[] }
   /** 每次调用传输时拿到的 `deps.preferred` —— 用户写的 strategy 有没有真的传下去 */
   readonly prefs: (readonly string[] | undefined)[]
@@ -160,7 +52,7 @@ interface HarnessOptions {
 }
 
 function makeHarness(options: HarnessOptions = {}): Harness {
-  const runner = new RemoteRunner(remoteFacts('prod'))
+  const runner = new MemoryRunner(remoteFacts('prod'))
   const calls = { count: 0, remoteRoots: [] as string[], entryCounts: [] as number[], deleteExtraneous: [] as (boolean | undefined)[] }
   const prefs: (readonly string[] | undefined)[] = []
   const requests: Readonly<{ sshTarget?: string; port?: number; hops?: readonly string[] }>[] = []
@@ -183,13 +75,13 @@ function makeHarness(options: HarnessOptions = {}): Harness {
       if (options.failWith !== undefined) {
         // 传一半再失败：先落一个文件，模拟 rsync 中途挂掉
         await runner.mkdir(req.remoteRoot)
-        runner.mkdirp(`${req.remoteRoot}/partial.txt`)
+        await runner.mkdir(`${req.remoteRoot}/partial.txt`)
         await runner.writeFile(`${req.remoteRoot}/partial.txt`, 'half')
         throw options.failWith
       }
       await runner.mkdir(req.remoteRoot)
       for (const e of req.entries) {
-        runner.mkdirp(`${req.remoteRoot}/${e}`)
+        await runner.mkdir(`${req.remoteRoot}/${e}`)
         await runner.writeFile(`${req.remoteRoot}/${e}`, 'payload')
       }
       return {

@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { DpError } from '@dp/ports'
+import { caught, caughtAsync } from '@dp/testkit'
 import {
   CONFIG_FILENAMES,
   findConfigUpwards,
@@ -54,9 +54,9 @@ describe('config-file · 优先级判定（纯函数，不碰文件系统）', (
   })
 
   it('-c 与自动发现指向不同文件 → 明确报错（不静默选一个）', () => {
-    const err = caughtThrows(
+    const err = caught(
       () => resolveConfigPath({ cwd, explicit: 'a.json', discovered: '/other/b.json' }),
-    ) as DpError
+    )
     assert.equal(err.code, 'DP.CONFIG.INVALID')
     assert.equal(err.path, '--config')
     assert.match(err.hint ?? '', /两者都处理掉/)
@@ -116,7 +116,7 @@ describe('config-file · 加载', () => {
     await withTempDir(async (dir) => {
       const p = join(dir, 'bad.json')
       await fs.writeFile(p, '{ "a": 1, }', 'utf8')
-      const err = (await caughtRejects(loadConfigFile(p))) as DpError
+      const err = await caughtAsync(loadConfigFile(p))
       assert.equal(err.code, 'DP.CONFIG.INVALID')
       assert.match(err.hint ?? '', /deploy\.config\.ts/)
     })
@@ -134,7 +134,7 @@ describe('config-file · 加载', () => {
     await withTempDir(async (dir) => {
       const p = join(dir, 'broken.mjs')
       await fs.writeFile(p, 'throw new Error("故意炸")', 'utf8')
-      const err = (await caughtRejects(loadConfigFile(p))) as DpError
+      const err = await caughtAsync(loadConfigFile(p))
       assert.match(err.hint ?? '', /故意炸/)
     })
   })
@@ -146,27 +146,27 @@ describe('config-file · 校验', () => {
   })
 
   it('必填字段缺失 → 带 path 的 DpError', () => {
-    const err = caughtThrows(() => validateConfig({ hosts: {} }, 'x.json')) as DpError
+    const err = caught(() => validateConfig({ hosts: {} }, 'x.json'))
     assert.equal(err.code, 'DP.CONFIG.INVALID')
     assert.equal(err.path, 'config.projects')
   })
 
   it('字段类型错 → path 指到具体字段', () => {
-    const err = caughtThrows(() => validateConfig({ projects: { web: { source: { root: 1 } } } }, 'x.json')) as DpError
+    const err = caught(() => validateConfig({ projects: { web: { source: { root: 1 } } } }, 'x.json'))
     assert.equal(err.path, 'config.projects.web.source.root')
   })
 
   it('未知字段被拒（拼错要立刻发现）', () => {
-    caughtThrows(() => validateConfig({ projects: { web: { source: { root: './d' } } }, typo: 1 }, 'x.json'))
+    caught(() => validateConfig({ projects: { web: { source: { root: './d' } } }, typo: 1 }, 'x.json'))
   })
 
   it('尾斜杠这种歧义写法在 schema 层就被拒', () => {
-    const err = caughtThrows(() => validateConfig({ projects: { web: { source: { root: './dist/' } } } }, 'x.json')) as DpError
+    const err = caught(() => validateConfig({ projects: { web: { source: { root: './dist/' } } } }, 'x.json'))
     assert.match(err.hint ?? '', /歧义|\*\*/)
   })
 
   it('校验失败时 hint 指向 dp schema', () => {
-    const err = caughtThrows(() => validateConfig({}, 'x.json')) as DpError
+    const err = caught(() => validateConfig({}, 'x.json'))
     assert.match(err.hint ?? '', /dp schema/)
   })
 })
@@ -219,7 +219,7 @@ describe('config-file · 端到端发现（真实 IO）', () => {
 
   it('-c 指到不存在的文件 → 明确报错，hint 说清路径怎么来的', async () => {
     await withTempDir(async (dir) => {
-      const err = (await caughtRejects(loadConfig({ cwd: dir, explicit: 'nope.json', env: {} }))) as DpError
+      const err = await caughtAsync(loadConfig({ cwd: dir, explicit: 'nope.json', env: {} }))
       assert.equal(err.path, '--config')
       assert.match(err.hint ?? '', /nope\.json/)
       assert.match(err.hint ?? '', /cwd=/)
@@ -228,14 +228,14 @@ describe('config-file · 端到端发现（真实 IO）', () => {
 
   it('DP_CONFIG 指向不存在的文件 → 明确报错，hint 指向环境变量', async () => {
     await withTempDir(async (dir) => {
-      const err = (await caughtRejects(loadConfig({ cwd: dir, env: { DP_CONFIG: 'gone.json' } }))) as DpError
+      const err = await caughtAsync(loadConfig({ cwd: dir, env: { DP_CONFIG: 'gone.json' } }))
       assert.equal(err.path, 'DP_CONFIG')
     })
   })
 
   it('一个配置都找不到 → 三种来源都写进 hint', async () => {
     await withTempDir(async (dir) => {
-      const err = (await caughtRejects(loadConfig({ cwd: dir, env: {} }))) as DpError
+      const err = await caughtAsync(loadConfig({ cwd: dir, env: {} }))
       assert.match(err.hint ?? '', /--config/)
       assert.match(err.hint ?? '', /DP_CONFIG/)
       assert.match(err.hint ?? '', /deploy\.config\.ts/)
@@ -250,7 +250,7 @@ describe('config-file · 端到端发现（真实 IO）', () => {
       await fs.writeFile(join(dir, 'deploy.config.json'), JSON.stringify(VALID), 'utf8')
       const other = join(dir, 'other.json')
       await fs.writeFile(other, JSON.stringify(VALID), 'utf8')
-      const err = (await caughtRejects(loadConfig({ cwd: join(dir, 'sub'), explicit: other, env: {} }))) as DpError
+      const err = await caughtAsync(loadConfig({ cwd: join(dir, 'sub'), explicit: other, env: {} }))
       assert.match(err.hint ?? '', /两者都处理掉/)
     })
   })
@@ -266,29 +266,3 @@ describe('config-file · 端到端发现（真实 IO）', () => {
     })
   })
 })
-
-// assert.throws/rejects 在本仓的 @types/node 下返回 void，拿不到错误对象。
-// 统一走这两个 helper：类型上直接是 DpError。
-function caughtThrows(fn: () => unknown, ctor?: Function): DpError {
-  try {
-    fn()
-  } catch (err) {
-    // 第二个参数必须真的校验：忽略它就等于「只要抛了任何东西就算过」。
-    if (ctor !== undefined) {
-      assert.ok(err instanceof ctor, `期望抛 ${ctor.name}，实际是 ${(err as Error)?.name}: ${String(err)}`)
-    }
-    return err as DpError
-  }
-  throw new Error('期望抛错，但没有')
-}
-async function caughtRejects(p: Promise<unknown>, ctor?: Function): Promise<DpError> {
-  try {
-    await p
-  } catch (err) {
-    if (ctor !== undefined) {
-      assert.ok(err instanceof ctor, `期望 reject ${ctor.name}，实际是 ${(err as Error)?.name}: ${String(err)}`)
-    }
-    return err as DpError
-  }
-  throw new Error('期望 reject，但没有')
-}

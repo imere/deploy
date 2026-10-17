@@ -18,8 +18,9 @@ import { describe, it } from 'node:test'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DpError, type ExecResult, type Facts, type FileStat, type Runner, type TargetContext } from '@dp/ports'
+import { DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner, type TargetContext } from '@dp/ports'
 import { defineProject, type ProcessConfig } from '@dp/schema'
+import { assertExecInvariants, type ExecCall, linuxFacts } from '@dp/testkit'
 import { main } from './index.js'
 import { processConfigFor } from './process-config.js'
 import type { ApplyDeps } from './deps.js'
@@ -43,8 +44,8 @@ class FakeRunner implements Runner {
   readonly facts: Facts
   /** 事件时间线。顺序类断言只看它 */
   readonly events: string[] = []
-  /** 每次 exec 的 argv。元素级断言用它，不用事件串 */
-  readonly execs: (readonly string[])[] = []
+  /** 每次 exec 的 argv + options。元素级断言用它，不用事件串；铁律 0 的检查也读它 */
+  readonly execs: ExecCall[] = []
   private readonly tree = new Map<string, string | null>()
   /** 命中 argv 时强制给一个结论（优先于默认） */
   failWhen: (argv: readonly string[]) => ExecDecision | undefined = () => undefined
@@ -58,9 +59,9 @@ class FakeRunner implements Runner {
     this.tree.set('/', null)
   }
 
-  async exec(argv: readonly string[]): Promise<ExecResult> {
+  async exec(argv: readonly string[], options?: ExecOptions): Promise<ExecResult> {
     this.events.push(`exec ${argv.join(' ')}`)
-    this.execs.push([...argv])
+    this.execs.push({ argv: [...argv], ...(options !== undefined ? { options } : {}) })
     const forced = this.failWhen(argv)
     if (forced !== undefined) return { code: forced.code, stdout: forced.stdout ?? '', stderr: forced.stderr ?? '' }
     // 存活断言走 `kill -0 <pid>`，argv[0] 是 sh、argv[2] 是那条命令
@@ -144,7 +145,9 @@ class FakeRunner implements Runner {
 
   /** `sh <...>/<name>.sh` 的 argv。脚本类断言只看它 */
   scriptExecs(name: 'start.sh' | 'stop.sh'): (readonly string[])[] {
-    return this.execs.filter((argv) => argv[0] === 'sh' && argv.length === 2 && argv[1]?.endsWith(`/${name}`))
+    return this.execs
+      .filter((e) => e.argv[0] === 'sh' && e.argv.length === 2 && e.argv[1]?.endsWith(`/${name}`))
+      .map((e) => e.argv)
   }
 
   /** 盘上现存的脚本文件。dryRun 的「零残留」断言看它 */
@@ -179,25 +182,12 @@ class FakeRunner implements Runner {
 }
 
 function remoteFacts(): Facts {
-  return {
+  return linuxFacts({
     host: 'prod',
-    platform: 'linux',
-    arch: 'x64',
-    init: 'systemd',
     homedir: '/home/deployer',
-    tmpdir: '/tmp',
-    env: {},
-    capabilities: {
-      canWrite: { '/srv/app': true },
-      canChown: [],
-      canSymlink: true,
-      systemdScope: 'system',
-      lingerEnabled: false,
-      canBindPrivilegedPort: false,
-      sudoAllowlist: [],
-    },
+    capabilities: { canWrite: { '/srv/app': true } },
     tools: { ssh: '/usr/bin/ssh', rsync: '/usr/bin/rsync', tar: '/bin/tar', scp: '/usr/bin/scp' },
-  }
+  })
 }
 
 const CTX: TargetContext = { host: 'prod', root: RELEASE_ROOT, releaseId: 'r9', keep: 5 }
@@ -285,6 +275,8 @@ async function withWorkspace(fn: (ws: Workspace) => Promise<void>, options: Proc
         writeErr: (t) => err.push(t),
         isTTY: false,
       })
+      // 铁律 0 的收尾检查：这一趟发出去的每条命令都带了 timeoutMs、没喂 stdin
+      assertExecInvariants(runner)
       return { code, stdout: out.join(''), stderr: err.join('') }
     }
     await fn({ runner, run })
@@ -420,7 +412,7 @@ describe('apply 里 process 的顺序', () => {
         // deploy 之后的 releaseId 与 r1 不同，所以 current 这次会指向新版本
         const { code } = await run('apply', [])
         assert.equal(code, 0)
-        const execs = runner.execs.map((a) => a.join(' '))
+        const execs = runner.execs.map((e) => e.argv.join(' '))
         const stop = execs.findIndex((a) => a.includes('/stop.sh'))
         const start = execs.findIndex((a) => a.includes('/start.sh'))
         assert.ok(stop >= 0 && start >= 0, JSON.stringify(execs))
@@ -649,7 +641,7 @@ describe('dp verify', () => {
         assert.equal(error['code'], 'DP.PROC.NOT_RUNNING')
         assert.match(String(error['hint']), /端口|工作目录|权限|stdoutLog/)
         // 读的是 pidfile 里的 pid，不是 ps 的命令行 —— 同名进程会被误判成我们的
-        assert.ok(runner.execs.some((argv) => argv.includes('kill -0 "$1"')))
+        assert.ok(runner.execs.some((e) => e.argv.includes('kill -0 "$1"')))
       },
       { process: true },
     )

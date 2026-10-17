@@ -11,7 +11,8 @@ import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DpError } from '@dp/ports'
-import type { Capabilities, Facts, TargetContext } from '@dp/ports'
+import type { Facts, TargetContext } from '@dp/ports'
+import { defaultFacts } from '@dp/testkit'
 import { createLocalRunner, listSourceEntries, normalizeSourceSpec } from '@dp/local'
 import { deploy, rollback } from './index.js'
 
@@ -34,27 +35,15 @@ after(async () => {
 })
 
 function makeFacts(over: Partial<Facts> = {}): Facts {
-  const capabilities: Capabilities = {
-    canWrite: { '/srv': true },
-    canChown: [],
-    canSymlink: process.platform !== 'win32',
-    systemdScope: 'none',
-    lingerEnabled: false,
-    canBindPrivilegedPort: false,
-    sudoAllowlist: [],
-  }
-  return {
+  return defaultFacts({
     host: 'local',
     platform: process.platform === 'win32' ? 'win32' : 'linux',
-    arch: 'x64',
     init: 'none',
     homedir: tmpdir(),
     tmpdir: tmpdir(),
-    env: {},
-    capabilities,
-    tools: {},
+    capabilities: { canWrite: { '/srv': true }, canSymlink: process.platform !== 'win32' },
     ...over,
-  }
+  })
 }
 
 function ctx(releaseId: string, previous?: string): TargetContext {
