@@ -27,6 +27,12 @@ const NET = 'dp-it-net'
 const CLIENT = 'dp-it-client'
 const TARGET = 'dp-it-target'
 const TARGET_SYSD = 'dp-it-target-sysd'
+// 地址写死而不是问网络要：问出来的地址依赖后端给不给（CI 上就不给），
+// 写死之后「连不上」才是真的连不上，而不是「没拿到地址」
+const SUBNET = '10.93.0.0/24'
+const IP_CLIENT = '10.93.0.2'
+const IP_TARGET = '10.93.0.10'
+const IP_SYSD = '10.93.0.11'
 
 const args = new Set(process.argv.slice(2))
 const only = args.has('--only') ? process.argv[process.argv.indexOf('--only') + 1] : undefined
@@ -73,10 +79,22 @@ const log = (line) => process.stdout.write(`${line}\n`)
 const hosts = {}
 
 async function resolveHost(name) {
-  const r = await pod(['inspect', '--format', 'json', name], { timeoutMs: 30_000 })
-  const nets = JSON.parse(r.stdout)[0]?.NetworkSettings?.Networks ?? {}
-  const ip = nets[NET]?.IPAddress ?? ''
-  if (ip === '') throw new Error(`拿不到 ${name} 在 ${NET} 上的地址（网络后端不支持？）`)
+  const r = await pod(['inspect', name], { timeoutMs: 30_000 })
+  let nets = {}
+  try {
+    nets = JSON.parse(r.stdout)[0]?.NetworkSettings?.Networks ?? {}
+  } catch {
+    throw new Error(`${name} 的 inspect 输出不是 JSON：${r.stdout.slice(0, 300)}`)
+  }
+  // 先按网络名取，取不到就退回「它连着的那个网络」—— 网络名的键由后端决定，
+  // 认死一个键等于把「连到了别的网络上」当成了「没连上」
+  const ip = nets[NET]?.IPAddress ?? Object.values(nets).map((n) => n?.IPAddress ?? '').find((v) => v !== '') ?? ''
+  if (ip === '') {
+    throw new Error(
+      `拿不到 ${name} 的地址：它连着的网络是 ${Object.keys(nets).join(',') || '（没有）'}，` +
+        `inspect 原文 ${r.stdout.slice(0, 400)}`,
+    )
+  }
   hosts[name] = ip
   return ip
 }
@@ -432,20 +450,23 @@ async function ensureImages() {
 }
 
 async function startContainers() {
-  await pod(['network', 'create', NET])
   const rm = await pod(['rm', '-f', CLIENT, TARGET, TARGET_SYSD])
   void rm
+  // 先删再建：留着上一轮的网络，它的子网未必还是这一个，写死的地址就会落到网段外
+  await pod(['network', 'rm', '-f', NET])
+  const net = await pod(['network', 'create', '--subnet', SUBNET, NET])
+  if (net.code !== 0) throw new Error(`建网络失败：${net.stderr}`)
 
-  const client = await pod(['run', '-d', '--name', CLIENT, '--network', NET, IMAGE_CLIENT])
+  const client = await pod(['run', '-d', '--name', CLIENT, '--network', `${NET}:ip=${IP_CLIENT}`, IMAGE_CLIENT])
   if (client.code !== 0) throw new Error(`起客户端失败：${client.stderr}`)
 
-  const target = await pod(['run', '-d', '--name', TARGET, '--network', NET, IMAGE_TARGET])
+  const target = await pod(['run', '-d', '--name', TARGET, '--network', `${NET}:ip=${IP_TARGET}`, IMAGE_TARGET])
   if (target.code !== 0) throw new Error(`起靶机失败：${target.stderr}`)
 
   // systemd 那台要真的由 systemd 拉起来：systemctl 需要 1 号进程是自己，
   // 用 sshd 当 1 号进程的容器里 systemctl 只能报 "System has not been booted with systemd"
   const sysd = await pod([
-    'run', '-d', '--name', TARGET_SYSD, '--network', NET, '--systemd=always',
+    'run', '-d', '--name', TARGET_SYSD, '--network', `${NET}:ip=${IP_SYSD}`, '--systemd=always',
     '--tmpfs', '/run', '--tmpfs', '/tmp', IMAGE_TARGET, '/sbin/init',
   ])
   if (sysd.code !== 0) throw new Error(`起 systemd 靶机失败：${sysd.stderr}`)
