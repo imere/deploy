@@ -101,7 +101,7 @@ export async function resolveTarget(input: ResolvedTargetInput): Promise<Resolve
   }
 }
 
-/** 装配期失败也要走调用方的结果文档（见 apply.ts 同名注释）——统一在这里转结构化错误 */
+/** 装配期失败也要走调用方的结果文档，而不是抛到 main 的通用错误处理 —— 统一在这里转结构化错误 */
 export function targetErrorFields(err: unknown): {
   code: string
   message: string

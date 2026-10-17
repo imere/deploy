@@ -1,7 +1,7 @@
 import type { TargetContext } from '@dp/ports'
 import type { ProcessConfig } from '@dp/schema'
 import type { ProcessTargetConfig } from '@dp/target-process'
-import { releaseVars } from '@dp/template'
+import { renderContextFor } from './render-context.js'
 
 export interface ProcessTranslateInput {
   readonly project: string
@@ -24,17 +24,10 @@ export interface ProcessTranslateInput {
  * @returns 执行器可直接消费的配置
  */
 export function processConfigFor(input: ProcessTranslateInput): ProcessTargetConfig {
-  const { process, targetCtx } = input
-  const vars = releaseVars(targetCtx)
+  const { process } = input
   return {
     command: process.command,
-    render: {
-      project: input.project,
-      env: input.env,
-      envVars: input.envVars,
-      release: { id: vars['release.id'], current: vars['release.current'] },
-      now: input.now,
-    },
+    render: renderContextFor(input),
     ...(process.args !== undefined ? { args: process.args } : {}),
     ...(process.workingDirectory !== undefined ? { workingDirectory: process.workingDirectory } : {}),
     ...(process.env !== undefined ? { env: process.env } : {}),

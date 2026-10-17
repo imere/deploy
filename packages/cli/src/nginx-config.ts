@@ -2,6 +2,7 @@ import { DpError, type Facts, type TargetContext } from '@dp/ports'
 import type { NginxConfig, TargetConfig } from '@dp/schema'
 import type { NginxTargetConfig } from '@dp/target-nginx'
 import { releaseVars } from '@dp/template'
+import { renderContextFor } from './render-context.js'
 
 /**
  * 各平台的 confd 候选。**只列有依据的**：发行版默认或 Homebrew 前缀。
@@ -67,18 +68,11 @@ export function releaseCurrentPath(targetCtx: TargetContext): string {
 }
 
 export function nginxConfigFor(input: NginxTranslateInput): NginxTargetConfig {
-  const { nginx, targetCtx } = input
-  const vars = releaseVars(targetCtx)
+  const { nginx } = input
   return {
     server: nginx.server,
     confd: input.confd,
-    render: {
-      project: input.project,
-      env: input.env,
-      envVars: input.envVars,
-      release: { id: vars['release.id'], current: vars['release.current'] },
-      now: input.now,
-    },
+    render: renderContextFor(input),
     ...(nginx.filename !== undefined ? { filename: nginx.filename } : {}),
     ...(nginx.force !== undefined ? { force: nginx.force } : {}),
     ...(nginx.reload !== undefined ? { reload: nginx.reload } : {}),

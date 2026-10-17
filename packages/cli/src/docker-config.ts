@@ -1,7 +1,7 @@
 import type { TargetContext } from '@dp/ports'
 import type { DockerConfig } from '@dp/schema'
 import type { DockerTargetConfig } from '@dp/target-docker'
-import { releaseVars } from '@dp/template'
+import { renderContextFor } from './render-context.js'
 
 export interface DockerTranslateInput {
   readonly project: string
@@ -17,8 +17,7 @@ export interface DockerTranslateInput {
  * schema 的 `target.docker` → @dp/target-docker 的 `DockerTargetConfig`。
  */
 export function dockerConfigFor(input: DockerTranslateInput): DockerTargetConfig {
-  const { docker, targetCtx } = input
-  const vars = releaseVars(targetCtx)
+  const { docker } = input
   const compose = docker.compose
   return {
     mode: docker.mode,
@@ -29,13 +28,7 @@ export function dockerConfigFor(input: DockerTranslateInput): DockerTargetConfig
       wait: compose.wait,
       ...(compose.envFile !== undefined ? { envFile: compose.envFile } : {}),
     },
-    render: {
-      project: input.project,
-      env: input.env,
-      envVars: input.envVars,
-      release: { id: vars['release.id'], current: vars['release.current'] },
-      now: input.now,
-    },
+    render: renderContextFor(input),
     ...(docker.healthcheck !== undefined
       ? {
           healthcheck: {

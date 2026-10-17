@@ -6,13 +6,14 @@
  * 唯一安全的时刻就是现在。
  */
 import { makePlan, type Plan } from '@dp/core'
-import type { Logger } from '@dp/log'
 import { listSourceEntries, normalizeSourceSpec } from '@dp/local'
 import type { LoadedConfig } from '../config-file.js'
-import { acquireFacts, readFactsFile } from '../facts-source.js'
+import { defaultApplyDeps } from '../deps.js'
+import { readFactsFile } from '../facts-source.js'
 import { renderPlanJson, renderPlanPretty } from '../output.js'
 import { previewReleaseId } from '../release-id.js'
 import { selectTargets } from '../targets.js'
+import { resolveTarget } from '../target-resolve.js'
 import type { PlanOptions, ResolvedFlags, RunContext } from '../run.js'
 
 export async function runPlan(context: RunContext, flags: ResolvedFlags): Promise<number> {
@@ -29,7 +30,7 @@ export async function runPlan(context: RunContext, flags: ResolvedFlags): Promis
   const rendered: string[] = []
 
   for (const target of targets) {
-    const logger: Logger | undefined = context.logger.child({ host: target.host })
+    const logger = context.logger.child({ host: target.host })
     const releaseId = previewReleaseId(target.project, started)
 
     // 源清单先枚举：它只读本地文件系统，出问题时用户还没付任何代价
@@ -43,18 +44,23 @@ export async function runPlan(context: RunContext, flags: ResolvedFlags): Promis
       return 1
     }
 
-    const facts = flags.factsFile !== undefined ? await readFactsFile(flags.factsFile) : undefined
+    // facts 只有两个来源：--facts 夹具（完全离线，无连接、无 runner），或者在
+    // status / verify / rollback / apply 共用的 resolveTarget 上现场探测。
+    // --facts 不进 resolveTarget：resolveTarget 会拒绝「夹具 + 远端主机」，而 plan
+    // 对这个组合有义务离线给出结论 —— 离线复核问题正是它存在的目的
     const result =
-      facts !== undefined
-        ? { facts, probeNotes: [] as readonly string[], close: undefined }
-        : await acquireFacts({
-            hostId: target.host,
-            host: target.hostConfig,
-            projectName: target.project,
-            ...(target.projectConfig.release?.root !== undefined
-              ? { releaseRoot: target.projectConfig.release.root }
-              : {}),
-            ...(logger !== undefined ? { logger } : {}),
+      flags.factsFile !== undefined
+        ? { facts: await readFactsFile(flags.factsFile), probeNotes: [] as readonly string[], close: undefined }
+        : await resolveTarget({
+            context,
+            deps: context.deps ?? defaultApplyDeps(),
+            logger,
+            target: {
+              project: target.project,
+              host: target.host,
+              projectConfig: target.projectConfig,
+              hostConfig: target.hostConfig,
+            },
           })
 
     let plan: Plan
@@ -72,7 +78,7 @@ export async function runPlan(context: RunContext, flags: ResolvedFlags): Promis
       await result.close?.()
     }
 
-    context.logger.child({ host: target.host }).info('plan.done', {
+    logger.info('plan.done', {
       project: target.project,
       host: target.host,
       steps: plan.steps.length,

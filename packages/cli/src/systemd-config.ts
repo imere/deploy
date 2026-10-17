@@ -1,7 +1,7 @@
 import { DpError, type Facts, type TargetContext } from '@dp/ports'
 import type { SystemdConfig } from '@dp/schema'
 import type { SystemdScope, SystemdTargetConfig } from '@dp/target-systemd'
-import { releaseVars } from '@dp/template'
+import { renderContextFor } from './render-context.js'
 
 /**
  * 各 scope 的 unit 目录候选。**只列有依据的**：systemd 官方的两处默认落点。
@@ -117,18 +117,11 @@ export interface SystemdTranslateInput {
  * @returns 执行器可直接消费的配置
  */
 export function systemdConfigFor(input: SystemdTranslateInput): SystemdTargetConfig {
-  const { systemd, targetCtx } = input
-  const vars = releaseVars(targetCtx)
+  const { systemd } = input
   return {
     unitDir: input.unitDir,
     execStart: systemd.execStart,
-    render: {
-      project: input.project,
-      env: input.env,
-      envVars: input.envVars,
-      release: { id: vars['release.id'], current: vars['release.current'] },
-      now: input.now,
-    },
+    render: renderContextFor(input),
     ...(systemd.unit !== undefined ? { unit: systemd.unit } : {}),
     ...(systemd.scope !== undefined ? { scope: systemd.scope } : {}),
     ...(systemd.description !== undefined ? { description: systemd.description } : {}),
