@@ -1,5 +1,7 @@
 import {
   DpError,
+  describeExecFailure,
+  excerptOutput,
   type DpErrorCode,
   type ExecResult,
   type Runner,
@@ -20,9 +22,6 @@ const DEFAULT_TIMEOUT_MS = 30_000
 
 /** 停止脚本的优雅期之外，再给多少毫秒余量让它收尾（脚本里的 sleep 也要算进去） */
 const STOP_SLACK_MS = 5_000
-
-/** 错误信息里保留多少子进程输出。整段塞进去会刷屏，并把真正有用的首行挤走 */
-const OUTPUT_LIMIT = 2000
 
 /** 脚本目录的权限位。它只放脚本，不给组写 */
 const SCRIPT_DIR_MODE = 0o755
@@ -109,25 +108,13 @@ export interface UnwindReport {
   readonly errors: readonly string[]
 }
 
-function excerpt(text: string): string {
-  const trimmed = text.trim()
-  if (trimmed.length === 0) return ''
-  return trimmed.length <= OUTPUT_LIMIT ? trimmed : `${trimmed.slice(0, OUTPUT_LIMIT)}…（已截断，原文 ${trimmed.length} 字节）`
-}
-
 /** 子进程原话必须进错误信息。只报「失败了」等于让用户自己上机器重跑一遍 */
 function outputOf(result: ExecResult): string {
-  const err = excerpt(result.stderr)
+  const err = excerptOutput(result.stderr)
   if (err !== '') return `stderr：\n${err}`
-  const out = excerpt(result.stdout)
+  const out = excerptOutput(result.stdout)
   if (out !== '') return `stdout（stderr 为空）：\n${out}`
   return '子进程没有留下任何输出'
-}
-
-function describeError(err: unknown): string {
-  if (err instanceof DpError) return `${err.code}: ${err.message}`
-  if (err instanceof Error) return err.message
-  return String(err)
 }
 
 class Session {
@@ -209,7 +196,7 @@ class Session {
         await entry.run()
         done.push(entry.label)
       } catch (err) {
-        errors.push(`${entry.label} → ${describeError(err)}`)
+        errors.push(`${entry.label} → ${describeExecFailure(err)}`)
       }
     }
     return { done, errors }
@@ -304,7 +291,13 @@ function argvOf(step: Step): readonly string[] {
   })
 }
 
-/** 建目录并把**最外层那级原本不存在的目录**登记成撤销目标 */
+/**
+ * 建目录并把**最外层那级原本不存在的目录**登记成撤销目标。
+ *
+ * 与 nginx / systemd 执行器里的 mkdirTracked 同构（同一套「建目录 + 登记撤销」台账），
+ * 与 systemd 那份只差权限位（这里 0o755：脚本要被直接执行，目录不能只留属主位）；
+ * nginx 那份还差撤销边界。统一成一份要以 exec-session 基件为前提，本包暂不收
+ */
 async function mkdirTracked(session: Session, dir: string, root: string): Promise<void> {
   const chain: string[] = []
   let cur = ''

@@ -1,4 +1,6 @@
-import { DpError } from '@dp/ports'
+import { DpError, MANAGED_MARKER } from '@dp/ports'
+
+export { MANAGED_MARKER }
 
 /** 启动脚本的文件名。落在 `<release 目录>/.dp/` 之下 */
 export const START_SCRIPT_NAME = 'start.sh'
@@ -14,12 +16,6 @@ export const SCRIPT_MODE = 0o755
 
 /** 优雅期的最小整秒数。0 会让 kill -0 的轮询一次都不跑 */
 const MIN_GRACE_SECONDS = 1
-
-/**
- * 所有脚本共用的标记行。与 nginx / systemd 用的是同一个 ——
- * 「这个文件是不是 dp 写的」只能靠一种标记回答，多一种就多一处会漂移。
- */
-export const MANAGED_MARKER = '# managed by dp'
 
 /** 环境变量名的合法形状。它不是 POSIX 的强制要求，但 shell 里写不出别的形状 */
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/

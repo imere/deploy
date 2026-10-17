@@ -1,4 +1,4 @@
-import { DpError, RELEASES_DIR_NAME, type Step, type Target, type TargetContext } from '@dp/ports'
+import { DpError, RELEASES_DIR_NAME, joinRemotePath, type Step, type Target, type TargetContext } from '@dp/ports'
 import { renderString, type RenderContext } from '@dp/template'
 import { START_SCRIPT_NAME, STOP_SCRIPT_NAME, graceSecondsOf } from './script.js'
 import type { ProcessTargetConfig } from './types.js'
@@ -12,11 +12,6 @@ export const DEFAULT_STOP_SIGNAL = 'SIGTERM'
 /** 默认优雅期，毫秒。它是**上限**而不是「等它结束」 */
 export const DEFAULT_STOP_TIMEOUT_MS = 10_000
 
-/** 统一用 `/`：这些路径会被拼进远端的命令行，反斜杠在 Linux 上是转义而不是分隔符 */
-function joinPath(...parts: readonly string[]): string {
-  return parts.filter((p) => p !== '').join('/')
-}
-
 /**
  * 版本目录。**回滚要按 id 回到某个历史版本**，所以它接受任意 id，而不是只认 ctx 上的那一个。
  *
@@ -25,7 +20,7 @@ function joinPath(...parts: readonly string[]): string {
  * @returns 该版本的目录绝对路径
  */
 export function releaseDirOf(ctx: TargetContext, releaseId: string): string {
-  return joinPath(ctx.root.replace(/\/+$/, ''), RELEASES_DIR_NAME, releaseId)
+  return joinRemotePath(ctx.root.replace(/\/+$/, ''), RELEASES_DIR_NAME, releaseId)
 }
 
 /**
@@ -80,11 +75,11 @@ export function processPaths(
   const releaseDir = releaseDirOf(ctx, releaseId)
   return {
     releaseDir,
-    scriptDir: joinPath(releaseDir, '.dp'),
-    startScript: joinPath(releaseDir, '.dp', START_SCRIPT_NAME),
-    stopScript: joinPath(releaseDir, '.dp', STOP_SCRIPT_NAME),
-    pidFile: joinPath(ctx.root.replace(/\/+$/, ''), normalizeRelative(config.pidFile ?? DEFAULT_PID_FILE, 'pidFile')),
-    stdoutLog: joinPath(ctx.root.replace(/\/+$/, ''), normalizeRelative(config.stdoutLog ?? DEFAULT_STDOUT_LOG, 'stdoutLog')),
+    scriptDir: joinRemotePath(releaseDir, '.dp'),
+    startScript: joinRemotePath(releaseDir, '.dp', START_SCRIPT_NAME),
+    stopScript: joinRemotePath(releaseDir, '.dp', STOP_SCRIPT_NAME),
+    pidFile: joinRemotePath(ctx.root.replace(/\/+$/, ''), normalizeRelative(config.pidFile ?? DEFAULT_PID_FILE, 'pidFile')),
+    stdoutLog: joinRemotePath(ctx.root.replace(/\/+$/, ''), normalizeRelative(config.stdoutLog ?? DEFAULT_STDOUT_LOG, 'stdoutLog')),
     // usage 用 'shell'：这两个值最终的落点是 exec(argv[]) 的元素。
     // 'path' 会把 `|` `<` `>` 一律拒掉，而它们是命令参数里的合法字符；
     // 真正的注入在这里由 `script.ts` 的单引号 + 控制字符闸门锁住
@@ -179,7 +174,7 @@ export function stopArgv(paths: ProcessPaths): readonly string[] {
  * @returns 可直接交给 `Runner.exec` 的 argv
  */
 export function previousStartArgv(ctx: TargetContext, releaseId: string): readonly string[] {
-  return ['sh', joinPath(releaseDirOf(ctx, releaseId), '.dp', START_SCRIPT_NAME)]
+  return ['sh', joinRemotePath(releaseDirOf(ctx, releaseId), '.dp', START_SCRIPT_NAME)]
 }
 
 /**
