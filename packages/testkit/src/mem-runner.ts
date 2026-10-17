@@ -181,15 +181,28 @@ export class MemoryRunner implements Runner {
   async realpath(path: string): Promise<string> {
     return path
   }
+
+  /**
+   * 同步窥视树上的一个路径：文件给内容、软链给 target，目录与不存在的路径给 null。
+   * Runner 接口全是异步的，而断言里要的只是一眼读数 —— `runner.peek(p) ?? ''`
+   * 比一路 await 短得多。各家测试桩里的同名方法语义与此一致，迁移即删本地版。
+   */
+  peek(path: string): string | null {
+    const n = this.tree.get(path)
+    if (n === undefined) return null
+    if (n.kind === 'file') return n.content ?? ''
+    return n.target ?? null
+  }
 }
 
 /**
  * 铁律 0 的机器化检查：每条 exec 都必须带 timeoutMs，且永远不喂 stdin。
  * 不变量跟着测试走 —— 调用方在每个用例收尾处调它，漏了 timeout 或喂了 stdin 的命令当场红。
  *
- * @param runner 一次用例里真正跑过的那个 {@link MemoryRunner}
+ * @param runner 一次用例里真正跑过的那个 Runner。只认按 {@link ExecCall} 形状记的台账：
+ *                本地测试桩用自己的 exec 录制（不必是 {@link MemoryRunner}）同样能过这道检查
  */
-export function assertExecInvariants(runner: MemoryRunner): void {
+export function assertExecInvariants(runner: { readonly execs: readonly ExecCall[] }): void {
   for (const call of runner.execs) {
     assert.notEqual(call.options?.timeoutMs, undefined, `exec 缺 timeoutMs：${JSON.stringify(call.argv)}`)
     assert.equal(call.options?.stdin, undefined, `exec 喂了 stdin：${JSON.stringify(call.argv)}`)

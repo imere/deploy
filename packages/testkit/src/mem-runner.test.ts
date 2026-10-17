@@ -61,6 +61,18 @@ describe('MemoryRunner · 文件树', () => {
     assert.equal((await on.stat('/srv/current'))?.isSymbolicLink, true)
   })
 
+  it('peek 同步读树：文件给内容、软链给 target，目录与不存在的路径给 null', async () => {
+    const runner = new MemoryRunner(defaultFacts())
+    await runner.writeFile('/srv/f.txt', 'v1')
+    await runner.symlink('/srv/f.txt', '/srv/current')
+    await runner.mkdir('/srv/dir')
+
+    assert.equal(runner.peek('/srv/f.txt'), 'v1')
+    assert.equal(runner.peek('/srv/current'), '/srv/f.txt')
+    assert.equal(runner.peek('/srv/dir'), null)
+    assert.equal(runner.peek('/srv/missing'), null)
+  })
+
   it('writeFile 缺省不查父目录；requireParentDir 打开后漏 mkdir 当场失败', async () => {
     const lax = new MemoryRunner(defaultFacts())
     await lax.writeFile('/srv/orphan.txt', 'x')
@@ -133,6 +145,14 @@ describe('MemoryRunner · exec', () => {
     runner.execs.push({ argv: ['ssh'], options: {} })
     assert.throws(
       () => assertExecInvariants(runner),
+      (err: unknown) => err instanceof Error && err.message.includes('timeoutMs'),
+    )
+  })
+
+  it('assertExecInvariants 收结构化的 exec 台账：本地测试桩不必换成 MemoryRunner', () => {
+    assertExecInvariants({ execs: [{ argv: ['nginx', '-t'], options: { timeoutMs: 100 } }] })
+    assert.throws(
+      () => assertExecInvariants({ execs: [{ argv: ['ssh'], options: {} }] }),
       (err: unknown) => err instanceof Error && err.message.includes('timeoutMs'),
     )
   })
