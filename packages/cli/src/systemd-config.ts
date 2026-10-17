@@ -23,8 +23,8 @@ const UNIT_DIR_PATH = 'projects.*.target.systemd.unitDir'
 /**
  * `resolveUnitDir` 真正要读的那两个字段。
  *
- * 收窄成局部形状而不是直接吃 `TargetConfig`，是因为 `unitDir` 在 schema 里是**必填**：
- * 收窄之后「调用方没给 unitDir，由 facts 推导」这条路在类型上才成立，
+ * 收窄成局部形状而不是直接吃 `TargetConfig`，是因为 `unitDir` 在 schema 里是**可选**
+ * （不给才轮到推导）：收窄之后「调用方没给 unitDir，由 facts 推导」这条路在类型上才成立，
  * 否则那两级推导只能靠 `as` 硬凑出来 —— 而凑出来的夹具证明不了函数真的处理了这种情况。
  * `TargetConfig` 结构上满足它，调用点不必改。
  */

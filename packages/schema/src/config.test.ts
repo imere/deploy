@@ -403,16 +403,28 @@ describe('targetSchema 里的 docker', () => {
 })
 
 describe('targetSchema 里的 systemd', () => {
-  it('unitDir 必填：它是推导结果，不是用户随手填的相对路径', () => {
-    assert.throws(
-      () => defineSystemd({ execStart: '/srv/app/current/start.sh' } as SystemdInput),
-      (err: unknown) => {
-        assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.CONFIG.INVALID')
-        assert.equal(err.path, 'systemd.unitDir')
-        return true
-      },
-    )
+  it('unitDir 可省：省下来才轮得到「实测可写性推导」那一级', () => {
+    const unit = defineSystemd({ execStart: '/srv/app/current/start.sh' })
+    assert.equal(unit.unitDir, undefined)
+  })
+
+  it('unitDir 写了就必须是以 / 开头的绝对路径', () => {
+    for (const bad of ['etc/systemd/system', '../systemd']) {
+      assert.throws(
+        () =>
+          defineSystemd({
+            execStart: '/srv/app/current/start.sh',
+            unitDir: bad,
+          }),
+        (err: unknown) => {
+          assert.ok(err instanceof DpError)
+          assert.equal(err.code, 'DP.CONFIG.INVALID')
+          assert.equal(err.path, 'systemd.unitDir')
+          return true
+        },
+        `应拒绝 ${bad}`,
+      )
+    }
   })
 
   it('restart 缺省 on-failure，scope 缺省 system', () => {

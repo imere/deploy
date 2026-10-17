@@ -374,6 +374,24 @@ function nonBlank(label: string): Schema<string, string, false> {
 }
 
 /**
+ * 目标机上的绝对路径。**只允许显式写**：相对路径与 `..` 一律拒。
+ *
+ * 这类值最终都会进一条被提权执行的 argv，cwd 是目标机给的、不是配置给的 ——
+ * 相对路径能侥幸跑通，只说明这一次 cwd 恰好对了。
+ */
+function machinePath(label: string): Schema<string, string, false> {
+  return constrained(nonBlank(label), (value, path) => {
+    if (value.startsWith('/')) return
+    throw new DpError('DP.CONFIG.INVALID', `${label} 必须是目标机绝对路径：${value}`, {
+      path,
+      hint:
+        '写以 / 开头的完整路径。相对路径的落点取决于目标机上 ssh 会话的 cwd，' +
+        '而那不是配置能决定的东西 —— 换了台机器它就会写到别处',
+    })
+  })
+}
+
+/**
  * systemd 目标。**只管形状与类型**，语义判定（unit 行是否安全、ExecStart 是否为空）
  * 全部留给 `@dp/target-systemd`。
  */
@@ -381,8 +399,12 @@ export const systemdSchema = obj(
   {
     /** 不含目录。默认 `<项目名>.service` */
     unit: opt(str('unit 文件名')),
-    /** 由上层从 layout 推导后注入，不是用户随手填的相对路径 */
-    unitDir: str('unit 目录，目标机绝对路径'),
+    /**
+     * 可选：**不写才轮得到「实测能力推导」那一级**（显式 > 候选里实测可写的 > 报错）。
+     * 写成必填就等于把推导那一整条路变成死代码：用户必须先给一个值，
+     * 而给得出值的人本来就是要覆盖推导的那个人
+     */
+    unitDir: opt(machinePath('unit 目录，目标机绝对路径。不写则由实测可写性推导')),
     scope: withDefault(oneOf(['system', 'user'] as const), 'system'),
     description: opt(str('Description 的值')),
     execStart: nonBlank('execStart'),
