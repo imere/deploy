@@ -3,7 +3,7 @@ import { homedir as osHomedir, tmpdir as osTmpdir, platform as osPlatform, arch 
 import { promises as fs } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
-import { POSIX_WRITE_CANDIDATES, type Arch, type Capabilities, type Facts, type InitSystem, type Platform } from '@dp/ports'
+import { POSIX_WRITE_CANDIDATES, PROBE_TOOLS_SHARED, type Arch, type Capabilities, type Facts, type InitSystem, type Platform } from '@dp/ports'
 import { resolveTool, run } from './exec.js'
 
 function mapPlatform(p: NodeJS.Platform): Platform {
@@ -223,21 +223,39 @@ export interface ProbeOptions {
   readonly removeProbeFile?: ProbeRemove
 }
 
-const TOOLS_TO_PROBE = [
-  'node',
-  'rsync',
-  'ssh',
-  'tar',
-  'gzip',
-  'nginx',
-  'docker',
-  'systemctl',
-  'loginctl',
+/**
+ * 交集成员出自 `@dp/ports` 的 `PROBE_TOOLS_SHARED`（与 `@dp/ssh` 共点同一张表），名字
+ * 在这里只写成引用；本文件保住的只有 local 侧的独家成员与顺序。共享表按 ssh 侧的
+ * 历史顺序排，本侧顺序不同 —— 顺序是 facts 的可观察面，必须原样保住。
+ */
+function sharedTool(name: string): string {
+  if (PROBE_TOOLS_SHARED.includes(name)) return name
+  throw new Error(`共享探测成员 ${name} 已不在 @dp/ports 的 PROBE_TOOLS_SHARED 里：删除它，或把它重新上收两端`)
+}
+
+const TOOLS_TO_PROBE: readonly string[] = [
+  sharedTool('node'),
+  sharedTool('rsync'),
+  sharedTool('ssh'),
+  sharedTool('tar'),
+  sharedTool('gzip'),
+  sharedTool('nginx'),
+  sharedTool('docker'),
+  sharedTool('systemctl'),
+  sharedTool('loginctl'),
+  // 独家：Windows 服务控制器，init 判「winsvc 是否可达」只认它
   'sc',
-  'java',
-  'python3',
-  'git',
-] as const
+  sharedTool('java'),
+  sharedTool('python3'),
+  sharedTool('git'),
+]
+
+// 反向也要钉住：共享表新增成员而本侧没排进探测清单，同样是分叉 —— 装载时立即失败，
+// 比两台机器各探各的、facts 对不上要早得多
+const UNSORTED_SHARED = PROBE_TOOLS_SHARED.filter((t) => !TOOLS_TO_PROBE.includes(t))
+if (UNSORTED_SHARED.length > 0) {
+  throw new Error(`@dp/ports 的 PROBE_TOOLS_SHARED 有本侧没排入清单的成员：${UNSORTED_SHARED.join('、')}`)
+}
 
 /**
  * 本地事实探测的入口。产出的 `Facts` 是纯数据，**不缓存** ——部署途中权限可能变（提权后、写满磁盘后），拿一份十分钟前的结论去决定当前能不能写，恰好是这类工具最要避免的那种自信。
@@ -278,14 +296,23 @@ export async function probeLocalFacts(options: ProbeOptions = {}): Promise<Facts
   ])
   const canWrite = write.canWrite
 
+  // 互相独立的四项能力探测并行发出（前三段已经并行；这里照同一形状收敛）。
+  // 结论按对象字面量的固定键序落位，可观察顺序不因谁先返回而变
+  const [systemdScope, lingerEnabled, canBindPrivilegedPort, sudoAllowlist] = await Promise.all([
+    detectSystemdScope(tools, canWrite),
+    detectLinger(tools),
+    probePrivilegedPort(),
+    probeSudoAllowlist(),
+  ])
+
   const capabilities: Capabilities = {
     canWrite,
     canChown: [],
     canSymlink,
-    systemdScope: await detectSystemdScope(tools, canWrite),
-    lingerEnabled: await detectLinger(tools),
-    canBindPrivilegedPort: await probePrivilegedPort(),
-    sudoAllowlist: await probeSudoAllowlist(),
+    systemdScope,
+    lingerEnabled,
+    canBindPrivilegedPort,
+    sudoAllowlist,
     // 没残留时**不放这个键**：调用方用「键不存在」区分「全回收干净」与「压根没探过」
     ...(write.leftovers.length > 0 ? { probeLeftovers: [...write.leftovers] } : {}),
   }

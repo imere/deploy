@@ -1,5 +1,5 @@
 import type { Arch, Capabilities, Facts, InitSystem, Platform } from '@dp/ports'
-import { DpError, POSIX_WRITE_CANDIDATES } from '@dp/ports'
+import { DpError, POSIX_WRITE_CANDIDATES, PROBE_TOOLS_SHARED } from '@dp/ports'
 import type { SshDriver } from './driver.js'
 import { resolveTimeoutMs } from './driver.js'
 import {
@@ -13,27 +13,52 @@ import {
 import { wrapCommand, ELEVATE_FAILED_HINT } from './become.js'
 import type { BecomeConfig } from '@dp/ports'
 
-const TOOLS_TO_PROBE = [
-  'ssh',
+/**
+ * 交集成员出自 `@dp/ports` 的 `PROBE_TOOLS_SHARED`（两台 facts 来源都从那张表点名），
+ * 名字在这里只写成引用；本文件保住的只有本侧的独家成员与顺序 ——
+ * 双份手抄交集正是「同一份配置远端推得出来、本地推不出来」的分叉温床。
+ */
+function sharedTool(name: string): string {
+  if (PROBE_TOOLS_SHARED.includes(name)) return name
+  throw new Error(`共享探测成员 ${name} 已不在 @dp/ports 的 PROBE_TOOLS_SHARED 里：删除它，或把它重新上收两端`)
+}
+
+const TOOLS_TO_PROBE: readonly string[] = [
+  sharedTool('ssh'),
+  // 独家：scp 传输档判的是**两端**都要有 —— 目标机这份必须实测，local 目标不跨机、不用探
   'scp',
+  // 独家：sftp 的客户端由驱动在本地现解析（服务端是 sshd 子系统，不是独立命令），
+  // 目标机探它只为 facts 能摆出这台机器的全貌
   'sftp',
-  'rsync',
-  'tar',
-  'gzip',
+  sharedTool('rsync'),
+  sharedTool('tar'),
+  sharedTool('gzip'),
+  // 独家：按字节读写走 sh -c 通道时要在目标机端过 base64 管道；本地传输直接 node fs，没有这一段
   'base64',
+  // 独家：become.type=sudo 的包装 argv 只发生在被连接这一端 ——本机的提权探测不记这张工具表
   'sudo',
+  // 独家：become.type=su 同理；busybox su 缺 suid 位这类实证也只有连着的那台机器给得出
   'su',
+  // 独家：become.type=doas 的包装，同样只在被连接的一端
   'doas',
-  'systemctl',
-  'loginctl',
-  'nginx',
-  'docker',
-  'git',
-  'python3',
-  'node',
-  'java',
+  sharedTool('systemctl'),
+  sharedTool('loginctl'),
+  sharedTool('nginx'),
+  sharedTool('docker'),
+  sharedTool('git'),
+  sharedTool('python3'),
+  sharedTool('node'),
+  sharedTool('java'),
+  // 独家：暂无消费者，探到即留在这端的表里（不进共享表的处置见 @dp/ports 那份说明）
   'openssl',
-] as const
+]
+
+// 反向也要钉住：共享表新增成员而本侧没排进探测清单，同样是分叉 —— 装载时立即失败，
+// 比两台机器各探各的、facts 对不上要早得多
+const UNSORTED_SHARED = PROBE_TOOLS_SHARED.filter((t) => !TOOLS_TO_PROBE.includes(t))
+if (UNSORTED_SHARED.length > 0) {
+  throw new Error(`@dp/ports 的 PROBE_TOOLS_SHARED 有本侧没排入清单的成员：${UNSORTED_SHARED.join('、')}`)
+}
 
 /**
  * 与 `@dp/local` 共用同一份候选（`@dp/ports` 的那张表），只多一个 `/tmp`：本地探测有 `os.tmpdir()` 可用，远端没有，只能把它列进候选里实测。
@@ -161,14 +186,30 @@ export async function probeFacts(driver: SshDriver, options: ProbeOptions): Prom
   const tmpdir = tmpRaw === undefined || tmpRaw === '' ? '/tmp' : tmpRaw
   if (tmpRaw === undefined || tmpRaw === '') notes.push('$TMPDIR/$TMP/$TEMP 都为空，tmpdir 记为 /tmp')
 
+  // 互相独立的四项探测并行发出；每项把自己的 notes 手稿带回来，最后**按串行期的固定
+  // 次序**并入总表 —— 并行只消等待，notes 是可观察输出，最早说完哪项取决于谁先返回，
+  // 不锚定次序的话同一次失败两次跑出两种报告
+  const [canChown, systemdScope, privilegedPort, sudoAllowlist] = await Promise.all([
+    probeCanChown(driver, timeoutMs),
+    probeSystemdScope(driver, tools, timeoutMs),
+    probePrivilegedPort(driver, tools, timeoutMs),
+    probeSudoAllowlist(driver, user, timeoutMs),
+  ])
+  notes.push(
+    ...canChown.notes,
+    ...systemdScope.notes,
+    ...privilegedPort.notes,
+    ...sudoAllowlist.notes,
+  )
+
   const capabilities: Capabilities = {
     canWrite,
-    canChown: await probeCanChown(driver, notes, timeoutMs),
+    canChown: canChown.value,
     canSymlink,
-    systemdScope: await probeSystemdScope(driver, tools, notes, timeoutMs),
+    systemdScope: systemdScope.value,
     lingerEnabled: parseLinger(tagField(stdout, 'DPLINGER') ?? ''),
-    canBindPrivilegedPort: await probePrivilegedPort(driver, tools, notes, timeoutMs),
-    sudoAllowlist: await probeSudoAllowlist(driver, user, notes, timeoutMs),
+    canBindPrivilegedPort: privilegedPort.value,
+    sudoAllowlist: sudoAllowlist.value,
   }
 
   const facts: Facts = {
@@ -272,6 +313,15 @@ function compositeProbe(toolNames: readonly string[], writePaths: readonly strin
   return lines.join('\n')
 }
 
+/**
+ * 各探测单元把 notes 跟结论**一起**交还：并行下谁先返回谁先写共享表，notes 的次序
+ * 就交给运气了 —— 顺序由调用方按固定次序并回总表来保证。
+ */
+interface ProbeOutcome<T> {
+  readonly value: T
+  readonly notes: readonly string[]
+}
+
 function detectInitFromProbe(pid1: string, tools: Readonly<Record<string, string | null>>): InitSystem {
   return parseInit(pid1, {
     systemctl: tools.systemctl ?? null,
@@ -285,10 +335,10 @@ function detectInitFromProbe(pid1: string, tools: Readonly<Record<string, string
  */
 async function probeCanChown(
   driver: SshDriver,
-  notes: string[],
   timeoutMs: number,
-): Promise<readonly string[]> {
+): Promise<ProbeOutcome<readonly string[]>> {
   const out: string[] = []
+  const notes: string[] = []
   for (const target of ['daemon', 'nobody', 'root']) {
     const script = [
       'f="${TMPDIR:-/tmp}/.dp-c-$$"',
@@ -305,18 +355,16 @@ async function probeCanChown(
     }
   }
   if (out.length === 0) notes.push('canChown 为空：当前身份无法把文件 chown 给其他用户（无 root 时的正常结果）')
-  return out
+  return { value: out, notes }
 }
 
 async function probeSystemdScope(
   driver: SshDriver,
   tools: Readonly<Record<string, string | null>>,
-  notes: string[],
   timeoutMs: number,
-): Promise<Capabilities['systemdScope']> {
+): Promise<ProbeOutcome<Capabilities['systemdScope']>> {
   if (tools.systemctl == null) {
-    notes.push('没有 systemctl，systemdScope 记为 none')
-    return 'none'
+    return { value: 'none', notes: ['没有 systemctl，systemdScope 记为 none'] }
   }
   // --user 成功 → user；系统级 status 成功 → system。**都真跑一次**，不看 uid
   for (const [argv, scope] of [
@@ -325,13 +373,14 @@ async function probeSystemdScope(
   ] as const) {
     try {
       const res = await driver.exec({ argv: ['systemctl', ...argv], timeoutMs })
-      if (res.code === 0 || !/Failed to connect|not been booted/i.test(res.stderr)) return scope
+      if (res.code === 0 || !/Failed to connect|not been booted/i.test(res.stderr)) {
+        return { value: scope, notes: [] }
+      }
     } catch {
       /* 视为不可用，试下一个 */
     }
   }
-  notes.push('systemctl 的 --user 与 system 两种查询都失败，systemdScope 记为 none')
-  return 'none'
+  return { value: 'none', notes: ['systemctl 的 --user 与 system 两种查询都失败，systemdScope 记为 none'] }
 }
 
 /**
@@ -340,15 +389,15 @@ async function probeSystemdScope(
 async function probePrivilegedPort(
   driver: SshDriver,
   tools: Readonly<Record<string, string | null>>,
-  notes: string[],
   timeoutMs: number,
-): Promise<boolean> {
+): Promise<ProbeOutcome<boolean>> {
+  const notes: string[] = []
   const interp: string[] = []
   if (tools.python3 != null) interp.push('python3')
   if (tools.node != null) interp.push('node')
   if (interp.length === 0) {
     notes.push('canBindPrivilegedPort 记为 false：远端既没有 python3 也没有 node，无法做实测 bind')
-    return false
+    return { value: false, notes }
   }
 
   const lines = ['for port in 80 443; do', '  ok=0']
@@ -365,13 +414,13 @@ async function probePrivilegedPort(
     const res = await driver.exec({ argv: ['sh', '-c', lines.join('\n')], timeoutMs })
     for (const raw of tagFields(res.stdout, 'DPBIND')) {
       const [, flag] = raw.split('\t')
-      if (flag === '1') return true
+      if (flag === '1') return { value: true, notes }
     }
     if (res.code !== 0) notes.push(`bind 探测退出码 ${res.code}，记为不可绑特权端口`)
   } catch (err) {
     notes.push(`canBindPrivilegedPort 探测抛错：${(err as Error).message}`)
   }
-  return false
+  return { value: false, notes }
 }
 
 /**
@@ -380,19 +429,19 @@ async function probePrivilegedPort(
 async function probeSudoAllowlist(
   driver: SshDriver,
   user: string | undefined,
-  notes: string[],
   timeoutMs: number,
-): Promise<readonly string[]> {
+): Promise<ProbeOutcome<readonly string[]>> {
+  const notes: string[] = []
   try {
     const res = await driver.exec({ argv: ['sudo', '-n', '-l'], timeoutMs })
     const list = parseSudoList(res.stdout, res.stderr)
     if (res.code !== 0 && list.length === 0) {
       notes.push(`sudo -n -l 退出码 ${res.code} 且无可用条目：当前身份没有免密 sudo 白名单`)
     }
-    return list
+    return { value: list, notes }
   } catch (err) {
     notes.push(`sudoAllowlist 探测失败：${(err as Error).message}，记为 []`)
-    return []
+    return { value: [], notes }
   }
 }
 
