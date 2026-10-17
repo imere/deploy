@@ -144,7 +144,7 @@ export function scan(input: string): ScanResult {
 }
 
 /**
- * 只要变量列表的薄封装。plan 期预览「将要替换什么」用 ——它不做语义判定，所以**不认识 ctx 的配置也能调**。
+ * 只要变量列表的薄封装：不做语义判定，所以不认识 ctx 的配置也能调。
  *
  * @param input 待扫描的原文
  * @returns 按出现顺序排列的变量引用，含转义的那些
@@ -274,7 +274,7 @@ export function resolveVar(name: string, ctx: RenderContext, options?: { path?: 
 }
 
 /**
- * 只校验不渲染：把「会出什么问题」提前到不碰目标机的时候说清。
+ * 只校验不渲染：逐个变量找出「会出什么错」，渲染前就能拿到同一份清单。
  *
  * @param input 待校验的原文
  * @param ctx 变量来源，只读
