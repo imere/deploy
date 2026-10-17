@@ -65,7 +65,7 @@ const isFalse = (input: unknown): boolean => input === false
 // 源
 
 /**
- * 第 15 条：`./dist` 与 `./dist/**` 必须无歧义。
+ * `./dist` 与 `./dist/**` 语义不同，不能凭默认值猜一个。串里有尾随斜杠一律报错。
  */
 const sourceRoot = constrained(
   str('源路径。"./dist" = 目录本身；"./dist/**" = 目录内容'),

@@ -28,7 +28,8 @@ export interface ResolvedTargetInput {
   readonly deps: Pick<ApplyDeps, 'acquireFacts'>
   readonly logger: Logger
   /**
-   * `--facts` 夹具。给了就完全离线（跳过 acquireFacts），此时没有连接、也就没有 runner —— 于是下面的第 3 条规则会拒掉远端主机。
+   * `--facts` 夹具。给了就完全离线（跳过 acquireFacts），只剩类型推导可跑：
+   * 离线时没有连接、也就没有 runner，所以 `--facts` 加远端主机的组合在这里被拒。
    */
   readonly factsOverride?: Facts
 }

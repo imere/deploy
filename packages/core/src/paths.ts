@@ -176,7 +176,9 @@ export function pickReleaseRoot(input: PickReleaseRootInput): ReleaseRootChoice 
 const SYSTEM_PROBE_PATHS = ['/var/lib', '/usr/local', 'C:/ProgramData'] as const
 
 /**
- * 由**实证能力**推导布局，不靠 uid 推断uid 0 不等于有权限：`canWrite` 是建了文件再删掉测出来的，容器里 root 照样可能只读挂载。凭 uid 判成 system 布局，后果是 plan 通过而 install 阶段在第一行就失败。
+ * 由**实证能力**推导布局，不靠 uid 推断。
+ * uid 0 不等于有权限：`canWrite` 是建了文件再删掉测出来的，容器里 root 照样可能只读挂载。
+ * 凭 uid 判成 system 布局，后果是 plan 通过而 install 阶段在第一行就失败。
  *
  * @param facts 目标机事实，布局只看 capabilities 里的可写性
  * @returns 'system'（系统目录可写）/ 'hybrid'（需提权）/ 'user'（两者都不行）

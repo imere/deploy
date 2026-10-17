@@ -303,7 +303,7 @@ export class DpError extends Error {
     if (options.hint !== undefined) this.hint = options.hint
   }
 
-  /** 结构化输出，供日志与 JSON 报告使用（见第 7 条：日志必须结构化） */
+  /** 经 sink 统一做的结构化输出，给日志与 JSON 报告共用 */
   toJSON(): { code: DpErrorCode; message: string; path?: string; hint?: string } {
     return { code: this.code, message: this.message, path: this.path, hint: this.hint }
   }

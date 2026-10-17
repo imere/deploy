@@ -375,7 +375,7 @@ export function constrained<TOut, TIn, IsOpt extends boolean>(
 export type PrefInput<T extends string> = T | readonly T[] | 'auto'
 
 /**
- * 偏好链（第 5 条）：配置可以写单值或数组，归一化后**一律是数组**。
+ * 偏好链：配置可以写单值或数组，归一化后**一律是数组**（下游对「是链」还是「单值」只认一种形态）。
  *
  * @param allowed 允许的取值全集；链里有不在其中的项即报 CONFIG_INVALID 并指明下标
  * @param defaultChain 写 'auto' 或省略时展开成的链。**不校验**它是否 ⊆ allowed ——

@@ -2,32 +2,18 @@ import type { RedactOptions } from './options.js'
 
 /**
  * 替换文本。定长、且不含原值的任何线索。
- *
- * @param s 无此形参：门禁把本常量误读成箭头函数（它从这里的 `=` 向下搜到
- * keySegments 里的 `(s) =>`，中间没有语句结束符）。这两行只为让门禁对该包归零，
- * 改判据属于门禁脚本本身，不在本包范围内
- * @returns 无返回值，同上
  */
 export const DEFAULT_REPLACEMENT = '***'
 /**
  * 单条字符串的截断阈值。
- *
- * @param s 无此形参，原因见 DEFAULT_REPLACEMENT 处的说明
- * @returns 无返回值，同上
  */
 export const DEFAULT_MAX_STRING_LENGTH = 2000
 /**
  * 递归深度上限。超深不再展开，整值换成 replacement。
- *
- * @param s 无此形参，原因见 DEFAULT_REPLACEMENT 处的说明
- * @returns 无返回值，同上
  */
 export const DEFAULT_MAX_DEPTH = 6
 /**
  * 数组与 Set 的保留条数。超出只留头部，并补一条 `…(N more)` 说明丢了多少。
- *
- * @param s 无此形参，原因见 DEFAULT_REPLACEMENT 处的说明
- * @returns 无返回值，同上
  */
 export const MAX_ARRAY_ITEMS = 100
 
@@ -40,9 +26,6 @@ const FUNCTION = '[Function]'
 
 /**
  * 按 key 名做**包含**匹配的词表（比较前双方都小写化），命中即整值替换。
- *
- * @param s 无此形参，原因见 DEFAULT_REPLACEMENT 处的说明
- * @returns 无返回值，同上
  */
 export const DEFAULT_KEY_SUBSTRINGS: readonly string[] = [
   'password',
@@ -63,9 +46,6 @@ export const DEFAULT_KEY_SUBSTRINGS: readonly string[] = [
 
 /**
  * 按**词段**整段匹配：先把 key 切成词段（camelCase 边界 + 非字母数字），再整段比对。
- *
- * @param s 无此形参，原因见 DEFAULT_REPLACEMENT 处的说明
- * @returns 无返回值，同上
  */
 export const DEFAULT_KEY_WORDS: readonly string[] = ['key', 'auth']
 

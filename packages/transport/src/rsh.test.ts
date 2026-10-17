@@ -15,7 +15,7 @@ const base = {
   knownHostsMode: 'strict' as const,
 }
 
-/** rsync 追加的部分（S5 实测样本形态）——用来断言我们没有提前生产它 */
+/** rsync 自己会在 argv 后面追加的部分（`-l user <host> rsync --server …` 这一段由 rsync 拼进去）——这里存一份样本，断言我们生成的 argv 里没有它 */
 const RSYNC_APPENDED = ['-l', 'user', 'dp-target', 'rsync', '--server']
 
 describe('buildRshArgv · 基本形状', () => {

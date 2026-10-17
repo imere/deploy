@@ -207,7 +207,7 @@ export function validateConfig(raw: unknown, sourcePath: string): Config {
         path: err.path ?? sourcePath,
         hint:
           err.hint ??
-          `配置必须符合 configSchema。跑 \`dp schema > deploy.schema.json\`，把 $schema 写进 ${sourcePath}，编辑器就会指出第几行错了`,
+          `配置必须符合 configSchema。跑 \`dp schema --out deploy.schema.json\` 导出 schema 给编辑器关联校验；配置文件本身不收 $schema 之类的额外字段（未知字段一律拒）`,
         cause: err,
       })
     }

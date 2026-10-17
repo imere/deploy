@@ -145,7 +145,7 @@ async function runRemote(
   }
   const remoteTarget = target.includes('@') ? target : target
 
-  // 认证方式：给了 identityFile 才是明确的 key；否则用 agent（agent 转发是关的，
+  // 认证方式：给了 identityFile 才是明确的 key；否则用 agent 认证。
   const rsh: RshOptions = {
     sshPath,
     authKind: (deps.identityFileKind ?? (req.identityFile !== undefined ? 'key' : 'agent')) as SshAuthKind,

@@ -611,7 +611,7 @@ export async function verifyNginx(input: NginxExecInput): Promise<NginxExecResul
     })
   }
   if (actual !== expected) {
-    // 内容不一致只报警告、不回滚：那份内容本身可能完全合法（有人手改过，
+    // 内容不一致只报警告、不回滚：那份内容本身可能完全合法（有人手改过）
     session.warnings.push(
       `DP.VERIFY.FAILED: ${L.file} 与本次渲染结果不一致（线上 ${actual.length} 字节 / 本次 ${expected.length} 字节）。` +
         '文件存在且可能被 dp 之外的东西改过，或是这台机器上的配置来自另一次部署。确认要接管就重新 apply 一次覆盖它',
