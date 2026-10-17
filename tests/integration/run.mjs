@@ -178,7 +178,23 @@ async function dp(argv) {
   } catch {
     json = undefined
   }
-  return { code: r.code, json, stdout: r.stdout, stderr: r.stderr }
+  return {
+    code: r.code,
+    json,
+    stdout: r.stdout,
+    stderr: r.stderr,
+    // 失败时两个流都要看：结构化报告在 stdout，日志行在 stderr，
+    // 只看一个会出现「知道失败了，但不知道为什么」
+    get why() {
+      const pretty = r.stdout.trim()
+      const logs = r.stderr
+        .split('\n')
+        .filter((l) => l.includes('"level":"error"') || l.includes('error'))
+        .slice(-3)
+        .join('\n')
+      return [pretty, logs].filter((s) => s !== '').join('\n') || `退出 ${r.code}，两个流都是空的`
+    },
+  }
 }
 
 async function waitForSsh(name, host) {
@@ -204,7 +220,10 @@ async function waitForSsh(name, host) {
 
 /** 允许某场景所需的目录先存在，避免「第一次部署就要提权建根」这种额外变量 */
 async function seedDir(name, dir, owner = 'dp') {
-  await execIn(name, `mkdir -p ${dir} && chown ${owner}:${owner} ${dir}`)
+  // mkdir 是以 root 跑的，chown 之后还要**以 dp 的身份再验一次**可写：
+  // 目录存在且属主对，跟「dp 真的写得进去」是两回事（父目录逐层校验就是这么来的）
+  const r = await execIn(name, `mkdir -p ${dir} && chown ${owner}:${owner} ${dir} && su ${owner} -c 'test -w ${dir}'`)
+  if (r.code !== 0) throw new Error(`${name} 上 ${dir} 对 ${owner} 不可写：${(r.stdout + r.stderr).trim()}`)
 }
 
 async function swapSource(src, text) {
@@ -220,7 +239,7 @@ async function scenarioStatic() {
   await putScenarioConfig('static', hosts[TARGET])
 
   const first = await dp(['apply', '--json', '--config', '/work/static.json'])
-  assert.equal(first.code, 0, `apply 退出 ${first.code}：${first.stderr}`)
+  assert.equal(first.code, 0, `apply 退出 ${first.code}：${first.why}`)
   assert.equal(
     (await execIn(TARGET, 'cat /srv/static/current/index.html')).stdout.trim(),
     '<h1>static-v1</h1>',
@@ -229,7 +248,7 @@ async function scenarioStatic() {
 
   await swapSource('static', '<h1>static-v2</h1>')
   const second = await dp(['apply', '--json', '--config', '/work/static.json'])
-  assert.equal(second.code, 0, `第二次 apply：${second.stderr}`)
+  assert.equal(second.code, 0, `第二次 apply：${second.why}`)
   assert.equal(
     (await execIn(TARGET, 'cat /srv/static/current/index.html')).stdout.trim(),
     '<h1>static-v2</h1>',
@@ -241,7 +260,7 @@ async function scenarioStatic() {
   assert.ok(releases.length >= 2, `版本目录应有 2 个，实际 ${releases.join(',')}`)
 
   const back = await dp(['rollback', '--json', '--config', '/work/static.json'])
-  assert.equal(back.code, 0, `rollback：${back.stderr}`)
+  assert.equal(back.code, 0, `rollback：${back.why}`)
   assert.equal(
     (await execIn(TARGET, 'cat /srv/static/current/index.html')).stdout.trim(),
     '<h1>static-v1</h1>',
@@ -259,7 +278,7 @@ async function scenarioNginx() {
   await putScenarioConfig('nginx', hosts[TARGET])
 
   const first = await dp(['apply', '--json', '--config', '/work/nginx.json'])
-  assert.equal(first.code, 0, `nginx apply：${first.stderr}`)
+  assert.equal(first.code, 0, `nginx apply：${first.why}`)
   const conf = await execIn(TARGET, 'cat /etc/nginx/conf.d/web.conf')
   assert.match(conf.stdout, /# managed by dp/, 'conf 缺管理标记')
   assert.equal(
@@ -270,7 +289,7 @@ async function scenarioNginx() {
 
   await swapSource('nginx', '<h1>nginx-v2</h1>')
   const second = await dp(['apply', '--json', '--config', '/work/nginx.json'])
-  assert.equal(second.code, 0, `nginx 第二次 apply：${second.stderr}`)
+  assert.equal(second.code, 0, `nginx 第二次 apply：${second.why}`)
   assert.equal(
     (await execIn(CLIENT, `curl -sS -m 10 http://${hosts[TARGET]}:8080/index.html`)).stdout.trim(),
     '<h1>nginx-v2</h1>',
@@ -279,7 +298,7 @@ async function scenarioNginx() {
   assert.equal(reloadOk.code, 0, `reload 之后 nginx -t 不过：${reloadOk.stderr}`)
 
   const back = await dp(['rollback', '--json', '--config', '/work/nginx.json'])
-  assert.equal(back.code, 0, `nginx rollback：${back.stderr}`)
+  assert.equal(back.code, 0, `nginx rollback：${back.why}`)
   assert.equal(
     (await execIn(CLIENT, `curl -sS -m 10 http://${hosts[TARGET]}:8080/index.html`)).stdout.trim(),
     '<h1>nginx-v1</h1>',
@@ -292,7 +311,7 @@ async function scenarioProcess() {
   await putScenarioConfig('process', hosts[TARGET])
 
   const first = await dp(['apply', '--json', '--config', '/work/process.json'])
-  assert.equal(first.code, 0, `process apply：${first.stderr}`)
+  assert.equal(first.code, 0, `process apply：${first.why}`)
   const pid1 = (await execIn(TARGET, 'cat /srv/proc/.dp/app.pid')).stdout.trim()
   assert.match(pid1, /^\d+$/, 'pidfile 里不是 pid')
   assert.equal(
@@ -307,7 +326,7 @@ async function scenarioProcess() {
 
   await swapSource('app', '<h1>app-v2</h1>')
   const second = await dp(['apply', '--json', '--config', '/work/process.json'])
-  assert.equal(second.code, 0, `process 第二次 apply：${second.stderr}`)
+  assert.equal(second.code, 0, `process 第二次 apply：${second.why}`)
   const pid2 = (await execIn(TARGET, 'cat /srv/proc/.dp/app.pid')).stdout.trim()
   assert.notEqual(pid2, pid1, '第二版还是旧 pid —— 旧进程根本没停')
   assert.equal(
@@ -321,7 +340,7 @@ async function scenarioProcess() {
   )
 
   const back = await dp(['rollback', '--json', '--config', '/work/process.json'])
-  assert.equal(back.code, 0, `process rollback：${back.stderr}`)
+  assert.equal(back.code, 0, `process rollback：${back.why}`)
   const pid3 = (await execIn(TARGET, 'cat /srv/proc/.dp/app.pid')).stdout.trim()
   assert.notEqual(pid3, pid2, '回滚没起新进程')
   assert.equal(
@@ -337,7 +356,7 @@ async function scenarioSystemd() {
   await putScenarioConfig('systemd', hosts[TARGET_SYSD])
 
   const first = await dp(['apply', '--json', '--config', '/work/systemd.json'])
-  assert.equal(first.code, 0, `systemd apply：${first.stderr}`)
+  assert.equal(first.code, 0, `systemd apply：${first.why}`)
   assert.equal(
     (await execIn(TARGET_SYSD, 'systemctl is-active dp-it-app.service')).stdout.trim(),
     'active',
@@ -350,7 +369,7 @@ async function scenarioSystemd() {
 
   await swapSource('app', '<h1>app-v2</h1>')
   const second = await dp(['apply', '--json', '--config', '/work/systemd.json'])
-  assert.equal(second.code, 0, `systemd 第二次 apply：${second.stderr}`)
+  assert.equal(second.code, 0, `systemd 第二次 apply：${second.why}`)
   assert.equal(
     (await execIn(CLIENT, `curl -sS -m 10 http://${hosts[TARGET_SYSD]}:8083/`)).stdout.trim(),
     '<h1>app-v2</h1>',
@@ -359,7 +378,7 @@ async function scenarioSystemd() {
   assert.match(enabled.stdout, /enabled|static/, `unit 没被 enable：${enabled.stdout}`)
 
   const back = await dp(['rollback', '--json', '--config', '/work/systemd.json'])
-  assert.equal(back.code, 0, `systemd rollback：${back.stderr}`)
+  assert.equal(back.code, 0, `systemd rollback：${back.why}`)
   assert.equal(
     (await execIn(CLIENT, `curl -sS -m 10 http://${hosts[TARGET_SYSD]}:8083/`)).stdout.trim(),
     '<h1>app-v1</h1>',
