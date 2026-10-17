@@ -82,6 +82,14 @@ async function rollbackOne(
   let resolved: Awaited<ReturnType<typeof resolveTarget>> | undefined
   let from: string | null = null
   /**
+   * 指针**已经切过去**的版本号；没切过就是 null。
+   *
+   * 指针先切、服务后起（见下面的顺序说明），所以「服务没起来」这类失败发生时
+   * 指针已经是上一版了 —— 那是本次在机器上留下的改动，`needsHealing` 必须算上它，
+   * 否则会报「机器上没有本次留下的东西」，而 current 明明动过了。
+   */
+  let switchedTo: string | null = null
+  /**
    * 失败之前，目标侧有没有真的在机器上留下过改动。
    *
    * 两条路都得算：① 某个目标的回滚**成功返回**了（appliedTargets）—— 它干完才轮到下一个；
@@ -138,16 +146,63 @@ async function rollbackOne(
     // 那正是 static 的语义（从 current 退到 previous）。而下面三个执行器都把
     // previousReleaseId 读成「要退回的那一版」，直接传下去会让它们拿**当前版本**的
     // compose / 上一份 unit / 上一版脚本重跑一遍 —— 那不是回滚，而且报告会显示成功。
-    //
-    // 目标侧全部**先于**切 current：反过来（先切 current 再让目标侧退）会在它们失败时
-    // 留下一份指向新版本、而服务还停在新版本的状态 —— 指针与实际服务对不上，
-    // 而 current 已经是旧的了，排查者会以为服务已经退回去了
     const targetCtx: TargetContext = {
       host,
       root: resolved.releaseRoot,
       releaseId: state.current,
       previousReleaseId: state.previous,
       keep: resolved.keep,
+    }
+
+    // ① **先切指针，② 再让目标侧重启服务**。
+    //
+    // 顺序只能这个方向，真机给的答案：三个「起服务」的目标跑的是**上一版目录里烘好的
+    // 那份脚本**，而脚本里的路径是 `${release.current}` 那根软链 —— 软链在服务进程
+    // 启动那一刻才被解析。先起服务、后切软链，起出来的是**新版本**的代码：命令报成功，
+    // 线上跑的还是新版本。CI 的 process 场景就是这么红的（`回滚后还在提供新版本`）。
+    //
+    // 反过来担心的「指针退回去了但服务没起来」是另一种失败，而它**响**：服务起不来
+    // 会抛错、needsHealing 为真；起来了但不对，末尾的 verify 也会红。上面那种错
+    // 没有任何一层能发现。两种错只能选一个时，选会响的那个。
+    const to = await rollback(resolved.runner, ctx, switchStrategyFor(input.projectConfig))
+    switchedTo = to
+
+    // 实测结果与预期对不上，必须报出来。
+    //
+    // `rollback()` 在索引里有 ≥2 个版本时取的是 **releases 的倒数第二个**，
+    // 而本命令的「上一版」是 **current 在 releases 里的前一个位置**。current 是
+    // 最后一个时两者一致；current 落在中间时（部署 r1/r2/r3 → 回滚一次 → current=r2）
+    // 就不一致 —— 第二次回滚会取到 current 自己，于是「报成功但一个指针都没动」，
+    // 而用户以为又退了一版。这是正常操作就能走到的状态，不是理论边界。
+    if (to !== state.previous) {
+      warnings.push(
+        `回滚目标与预期不一致：预期 ${state.previous}，实际切到 ${to}` +
+          (to === state.current ? '（等于当前版本，等于没切）' : '') +
+          '。索引里 current 不在 releases 末尾时会出现这种情况',
+      )
+      logger.error('rollback.inconsistent', { expected: state.previous, actual: to })
+      return {
+        result: {
+          host,
+          project,
+          releaseRoot: resolved.releaseRoot,
+          from: state.current,
+          to,
+          needsHealing: to !== state.current,
+          warnings,
+          error: {
+            code: 'DP.STATE.INCONSISTENT',
+            message:
+              `回滚目标与预期不一致：预期回退到 ${state.previous}，实际切到 ${to}` +
+              (to === state.current ? '（与当前版本相同，没有发生切换）' : ''),
+            hint:
+              `索引 releases = [${state.releases.join(' | ')}]，current = ${state.current}。` +
+              'current 不在末尾时「上一版」有两种读法，本命令按位置取（current 的前一个）。' +
+              `要回到某个具体版本就手动把 current 指过去：${resolved.releaseRoot}/releases/<id>`,
+          },
+        },
+        exitCode: EXIT_FAILURE,
+      }
     }
 
     const dockerSpec = input.projectConfig.target?.docker
@@ -219,46 +274,6 @@ async function rollbackOne(
       appliedTargets.push('process')
     }
 
-    const to = await rollback(resolved.runner, ctx, switchStrategyFor(input.projectConfig))
-
-    // 实测结果与预期对不上，必须报出来。
-    //
-    // `rollback()` 在索引里有 ≥2 个版本时取的是 **releases 的倒数第二个**，
-    // 而本命令的「上一版」是 **current 在 releases 里的前一个位置**。current 是
-    // 最后一个时两者一致；current 落在中间时（部署 r1/r2/r3 → 回滚一次 → current=r2）
-    // 就不一致 —— 第二次回滚会取到 current 自己，于是「报成功但一个指针都没动」，
-    // 而用户以为又退了一版。这是正常操作就能走到的状态，不是理论边界。
-    if (to !== state.previous) {
-      warnings.push(
-        `回滚目标与预期不一致：预期 ${state.previous}，实际切到 ${to}` +
-          (to === state.current ? '（等于当前版本，等于没切）' : '') +
-          `。索引里 current 不在 releases 末尾时会出现这种情况`,
-      )
-      logger.error('rollback.inconsistent', { expected: state.previous, actual: to })
-      return {
-        result: {
-          host,
-          project,
-          releaseRoot: resolved.releaseRoot,
-          from: state.current,
-          to,
-          needsHealing: to !== state.current,
-          warnings,
-          error: {
-            code: 'DP.STATE.INCONSISTENT',
-            message:
-              `回滚目标与预期不一致：预期回退到 ${state.previous}，实际切到 ${to}` +
-              (to === state.current ? '（与当前版本相同，没有发生切换）' : ''),
-            hint:
-              `索引 releases = [${state.releases.join(' | ')}]，current = ${state.current}。` +
-              'current 不在末尾时「上一版」有两种读法，本命令按位置取（current 的前一个）。' +
-              `要回到某个具体版本就手动把 current 指过去：${resolved.releaseRoot}/releases/<id>`,
-          },
-        },
-        exitCode: EXIT_FAILURE,
-      }
-    }
-
     // 回滚后**再验一次**：切过去不等于能用。只切不验的话，一个同样坏掉的
     // 上一版会被无声地切上去，而命令报成功 —— 这正是 verify 存在的理由
     const check = await verifyRelease(
@@ -300,15 +315,21 @@ async function rollbackOne(
     }
   } catch (err) {
     logger.error('rollback.failed', { code: targetErrorFields(err).code, from, appliedTargets })
-    const touched = targetTouched(err)
-    // 目标侧一旦留下过改动，current 指向哪已经无法从这里判定，所以 `to` 保持 null，
-    // 由 needsHealing 承担「要有人上机器看一眼」这件事 —— 写 false 等于用整条命令的失败
-    // 掩盖了一次已经发生的、只有一半的回滚
+    // 指针先切、服务后起，所以「切过指针」本身就是本次留在机器上的改动 ——
+    // 即使目标侧一步都没走成也得算进去，否则会报「机器上没有本次留下的东西」，
+    // 而 current 明明已经指到上一版了
+    const touched = targetTouched(err) || switchedTo !== null
     if (touched) {
       warnings.push(
-        '目标侧的回滚已经改动了机器（' +
-          (appliedTargets.length > 0 ? `${appliedTargets.join(' / ')} 已跑完` : '执行器在半途失败，已完成的那几步留在盘上') +
-          '），随后失败 —— current 是否被切换过无法从这里判定，需要人工核对后再决定是否继续回退',
+        '回滚已经在机器上留下改动（' +
+          [
+            switchedTo !== null ? `current 已切到 ${switchedTo}` : '',
+            appliedTargets.length > 0 ? `${appliedTargets.join(' / ')} 已跑完` : '',
+            appliedTargets.length === 0 ? '执行器在半途失败，已完成的那几步留在盘上' : '',
+          ]
+            .filter((s) => s !== '')
+            .join('；') +
+          '），随后失败 —— 需要人工核对后再决定是否继续回退',
       )
     }
     return {
@@ -317,7 +338,7 @@ async function rollbackOne(
         project,
         releaseRoot: resolved?.releaseRoot ?? '',
         from,
-        to: null,
+        to: switchedTo,
         needsHealing: touched,
         warnings,
         error: targetErrorFields(err),

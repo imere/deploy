@@ -109,6 +109,9 @@ class FakeRunner implements Runner {
   }
 
   async rename(from: string, to: string): Promise<void> {
+    // 换向也记一条事件：current 的切换在不同策略下走 rename 或 symlink，
+    // 只记其中一条的话，「指针与服务谁先动」这类顺序断言会漏掉一半的情况
+    this.events.push(`rename ${from} -> ${to}`)
     const moved = [...this.tree.entries()].filter(([k]) => k === from || k.startsWith(`${from}/`))
     await this.remove(to)
     for (const [k, v] of moved) {
@@ -118,6 +121,7 @@ class FakeRunner implements Runner {
   }
 
   async symlink(target: string, linkPath: string): Promise<void> {
+    this.events.push(`symlink ${linkPath} -> ${target}`)
     this.tree.set(linkPath, target)
   }
 
@@ -817,7 +821,26 @@ describe('dp rollback', () => {
     )
   })
 
-  it('没有备份 unit → DP.SYSD.NO_PREVIOUS，不谎报成功，current 一个指针都不动', async () => {
+  it('**先切 current 再动服务**：unit 里烘的是 ${release.current} 软链，先 restart 会起在新版本上', async () => {
+    await withWorkspace(
+      async ({ runner, run }) => {
+        await runner.seedRelease('/srv/app', ['r1', 'r2'], 'r2')
+        await runner.writeFile(UNIT_FILE, '# managed by dp\n[Service]\nExecStart=/usr/bin/node /srv/app/current/new.js\n')
+        await runner.writeFile(`${UNIT_FILE}.dp-backup`, '# managed by dp\n[Service]\nExecStart=/usr/bin/node /srv/app/current/old.js\n')
+        const { code, stdout } = await run('rollback', ['--json'])
+        assert.equal(code, 0, stdout)
+        const at = (needle: string): number => runner.events.findIndex((e) => e.includes(needle))
+        const switchAt = Math.max(at('/srv/app/current -> '), at('-> /srv/app/current'))
+        const restartAt = at('systemctl restart web.service')
+        assert.ok(switchAt >= 0, `没看到切 current 的动作：${JSON.stringify(runner.events)}`)
+        assert.ok(restartAt >= 0, `没看到 restart：${JSON.stringify(runner.events)}`)
+        assert.ok(switchAt < restartAt, `必须先切 current 再 restart：${JSON.stringify(runner.events)}`)
+      },
+      { systemd: true },
+    )
+  })
+
+  it('没有备份 unit → DP.SYSD.NO_PREVIOUS，不谎报成功', async () => {
     await withWorkspace(
       async ({ runner, run }) => {
         await runner.seedRelease('/srv/app', ['r1', 'r2'], 'r2')
@@ -826,16 +849,17 @@ describe('dp rollback', () => {
         const error = resultOf(stdout)['error'] as Record<string, unknown>
         assert.equal(error['code'], 'DP.SYSD.NO_PREVIOUS')
         assert.match(String(error['hint']), /daemon-reload/, '提示要给出「手动撤掉」的具体做法')
-        assert.equal(runner.peek('/srv/app/current'), '/srv/app/releases/r2')
         assert.ok(!runner.events.some((e) => e.includes('systemctl restart')), '没还原成之前不许 restart')
-        // 一步都没走到成功，机器上什么都没动 —— needsHealing 就没有要医治的东西
-        assert.equal(resultOf(stdout)['needsHealing'], false, '没动过就别报「需要人工收拾」')
+        // 指针先切、服务后动，所以这次 current 已经指到上一版了 —— 那就是留在机器上的改动
+        assert.equal(runner.peek('/srv/app/current'), '/srv/app/releases/r1')
+        assert.equal(resultOf(stdout)['to'], 'r1')
+        assert.equal(resultOf(stdout)['needsHealing'], true, 'current 已经切过去了，必须让人上机器看一眼')
       },
       { systemd: true },
     )
   })
 
-  it('复验不过 → current 一个指针都不动（目标侧回滚先做，失败就不许切），并说清「上一版本身就是坏的」', async () => {
+  it('复验不过 → 说清「上一版本身就是坏的」，并把已切过去的 current 报成待收拾', async () => {
     await withWorkspace(
       async ({ runner, run }) => {
         await runner.seedRelease('/srv/app', ['r1', 'r2'], 'r2')
@@ -845,14 +869,15 @@ describe('dp rollback', () => {
         assert.notEqual(code, 0)
         const result = resultOf(stdout)
         assert.equal((result['error'] as Record<string, unknown>)['code'], 'DP.SYSD.NOT_ACTIVE')
-        // 顺序就是为此：目标侧先退，失败时 current 还指着 r2 —— 指针与实际服务仍一致
-        assert.equal(runner.peek('/srv/app/current'), '/srv/app/releases/r2')
-        assert.equal(result['to'], null, '没切过就不能说切到了')
         assert.match(String((result['error'] as Record<string, unknown>)['hint']), /上一版/)
-        // unit 已经从备份还原到盘上了（只是没 reload / restart 成功），机器确实动过 ——
+        // 顺序是「先切指针、后动服务」，所以到这里 current 已经是上一版了：
+        // 指针动过、服务没起来，两件事都得报出来，不能只报一半
+        assert.equal(runner.peek('/srv/app/current'), '/srv/app/releases/r1')
+        assert.equal(result['to'], 'r1')
+        // unit 已经从备份还原到盘上（只是没 reload / restart 成功），机器确实动过 ——
         // 报 needsHealing: false 会让调用方以为「这次失败没留下要收拾的东西」
         assert.equal(result['needsHealing'], true, '目标侧已经把 unit 换回去，必须有人上机器确认')
-        assert.match((result['warnings'] as string[]).join('\n'), /执行器在半途失败/)
+        assert.match((result['warnings'] as string[]).join('\n'), /current 已切到/)
       },
       { systemd: true },
     )

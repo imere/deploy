@@ -123,6 +123,9 @@ class FakeRunner implements Runner {
   }
 
   async rename(from: string, to: string): Promise<void> {
+    // 换向也记一条事件：current 的切换在不同策略下走 rename 或 symlink，
+    // 只记其中一条的话，「指针与服务谁先动」这类顺序断言会漏掉一半的情况
+    this.events.push(`rename ${from} -> ${to}`)
     const moved = [...this.tree.entries()].filter(([k]) => k === from || k.startsWith(`${from}/`))
     await this.remove(to)
     for (const [k, v] of moved) {
@@ -132,6 +135,7 @@ class FakeRunner implements Runner {
   }
 
   async symlink(target: string, linkPath: string): Promise<void> {
+    this.events.push(`symlink ${linkPath} -> ${target}`)
     this.tree.set(linkPath, target)
   }
 
@@ -695,6 +699,26 @@ describe('dp rollback', () => {
     )
   })
 
+  it('**先切 current 再起服务**：脚本里烘的是 ${release.current} 软链，先起会起到新版本上', async () => {
+    await withWorkspace(
+      async ({ runner, run }) => {
+        await runner.seedRelease(RELEASE_ROOT, ['r1', 'r2'], 'r2')
+        const { code, stdout } = await run('rollback', ['--json'])
+        assert.equal(code, 0, stdout)
+        const at = (needle: string): number => runner.events.findIndex((e) => e.includes(needle))
+        const switchAt = Math.max(at(`${RELEASE_ROOT}/current -> `), at(`-> ${RELEASE_ROOT}/current`))
+        const startAt = at(`exec sh ${RELEASE_ROOT}/releases/r1/.dp/start.sh`)
+        assert.ok(switchAt >= 0, `没看到切 current 的动作：${JSON.stringify(runner.events)}`)
+        assert.ok(startAt >= 0, `没看到起上一版脚本：${JSON.stringify(runner.events)}`)
+        assert.ok(
+          switchAt < startAt,
+          `必须先把 current 指到上一版再起服务，实际顺序：${JSON.stringify(runner.events)}`,
+        )
+      },
+      { process: true },
+    )
+  })
+
   it('上一版脚本被 prune 掉 → DP.PROC.NO_PREVIOUS，不谎报成功', async () => {
     await withWorkspace(
       async ({ runner, run }) => {
@@ -704,8 +728,13 @@ describe('dp rollback', () => {
         assert.notEqual(code, 0, '没有可退的目标却报成功 = 用户以为线上还是上一版')
         const error = resultOf(stdout)['error'] as Record<string, unknown>
         assert.equal(error['code'], 'DP.PROC.NO_PREVIOUS')
-        assert.equal(runner.peek(`${RELEASE_ROOT}/current`), `${RELEASE_ROOT}/releases/r2`)
         assert.equal(runner.scriptExecs('start.sh').length, 0, '起一个不存在的脚本等于凭空报告一个服务')
+        // 指针先切、服务后起，所以这次 current 已经指到上一版了 —— 那是留在机器上的
+        // 改动，必须报出来；写成「一个指针都没动」是在替调用方隐瞒
+        assert.equal(runner.peek(`${RELEASE_ROOT}/current`), `${RELEASE_ROOT}/releases/r1`)
+        assert.equal(resultOf(stdout)['to'], 'r1')
+        assert.equal(resultOf(stdout)['needsHealing'], true, 'current 已经切过去了，必须让人上机器看一眼')
+        assert.match((resultOf(stdout)['warnings'] as string[]).join('\n'), /current 已切到/)
       },
       { process: true },
     )
