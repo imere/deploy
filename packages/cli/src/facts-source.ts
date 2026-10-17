@@ -271,11 +271,15 @@ export async function acquireFacts(request: FactsRequest): Promise<FactsResult> 
 
   const targetAuth = resolveAuth(env)
   const endpoint = resolveSshEndpoint(host, `hosts.${request.hostId}`, targetAuth)
+  // become 先算出来：它既决定探测用的身份，也决定 Runner 做事的身份 ——
+  // 两处必须同一份，否则 canWrite 说可写、真写的时候却没提权
+  const become = becomeFor(request.host, `hosts.${request.hostId}`)
   const options: SshConnectionOptions = {
     host: endpoint.host,
     auth: targetAuth,
     knownHosts: 'strict',
     timeoutMs,
+    ...(become !== undefined ? { become } : {}),
     // 端口与用户不写就交给驱动默认值（22 / 本地用户名），不猜
     ...(endpoint.user !== undefined ? { user: endpoint.user } : {}),
     ...(endpoint.port !== undefined ? { port: endpoint.port } : {}),
@@ -306,7 +310,6 @@ export async function acquireFacts(request: FactsRequest): Promise<FactsResult> 
   // 而真写的时候 dp 明明是提权的 —— 探测与写入是同一个身份才有意义。
   // 所以：默认表里判成不可写的那些，按提权后的身份再探一遍；只可能 false → true
   // （提权探失败就维持 false），不会反过来把已实测的结论盖掉。
-  const become = becomeFor(request.host, `hosts.${request.hostId}`)
   const retry = become === undefined || become.type === 'none' ? [] : notWritable(base.capabilities.canWrite)
   const targets = [...new Set([...roots, ...retry])]
 

@@ -336,8 +336,13 @@ export class NativeSshDriver implements SshDriver {
         const stderr = truncateOutput(Buffer.concat(err).toString('utf8'), ctx.maxBytes)
         const exitCode = code ?? -1
 
-        // 主机密钥类失败**永远**归成结构化错误，不当普通非零退出码返回 ——
-        if (exitCode !== 0) {
+        // 主机密钥 / 认证类失败**永远**归成结构化错误，不当普通非零退出码返回 ——
+        //
+        // 只认 255：那是 ssh 客户端自己的失败码。其余非 0 是**远端命令**的退出码，
+        // 它的 stderr 里出现 "Permission denied"（比如 mkdir 没权限）与认证失败
+        // 长得一样 —— 按文字判就会把一次文件系统错误报成「ssh 认证失败」，
+        // 而 hint 还指向 known_hosts，排障方向整个错了。
+        if (exitCode === 255) {
           const failure = classifySshError(stderr, exitCode)
           if (
             failure.code === 'DP.SSH.HOST_KEY_MISMATCH' ||

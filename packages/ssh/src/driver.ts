@@ -1,4 +1,4 @@
-import { DpError, assertPortInRange, parseSshTarget, type KnownHostsMode as PortsKnownHostsMode } from '@dp/ports'
+import { DpError, assertPortInRange, parseSshTarget, type BecomeConfig, type KnownHostsMode as PortsKnownHostsMode } from '@dp/ports'
 
 /**
  * 驱动的两种身份。**native-ssh 排第一**是硬排序而不是偏好（`DEFAULT_PREFERENCE`）：只有它能协商抗量子 KEX，而 ssh2 遇到 PQ 算法直接抛错 —— 顺序反过来的后果是"配了 pq-required 却连不上"，且错误指向认证而不是 KEX 策略。
@@ -134,6 +134,11 @@ export interface SshConnectionOptions {
   readonly proxyJump?: string
   /** 原样追加的 ssh 选项。**是注入面**，只接受调用方自己拼好的，不接受用户输入的片段 */
   readonly extraOptions?: readonly string[]
+  /**
+   * 连上之后在这台机器上做事的身份。它会一路传到 Runner ——
+   * 提权只有一处可加，加在别处就会出现「传输提权了、写 conf 没有」的分叉
+   */
+  readonly become?: BecomeConfig
   /** 毫秒。不给则回落 `DP_SSH_TIMEOUT_MS` 环境变量，再不给才是默认值 */
   readonly timeoutMs?: number
   /** 单次执行保留的输出字节上限。不给则回落 `DP_SSH_OUTPUT_MAX_BYTES`，再不给是 1 MiB */

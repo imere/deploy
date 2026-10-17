@@ -1,8 +1,9 @@
-import { DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
+import { DpError, type BecomeConfig, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
 import { checkSourcePaths } from '@dp/core'
 import type { SshDriver } from './driver.js'
 import { DEFAULT_MAX_OUTPUT_BYTES, resolveTimeoutMs } from './driver.js'
 import { quoteArg, quoteArgv } from './argv.js'
+import { wrapCommand } from './become.js'
 import { ioError, parseStatLine } from './parse.js'
 import {
   listDirScript,
@@ -161,6 +162,12 @@ export interface SshRunnerOptions {
   readonly allowedRoots?: readonly string[]
   /** 请求的环境变量（不含凭据） */
   readonly env?: Readonly<Record<string, string>>
+  /**
+   * 在这台机器上做事的身份。给了就**每一条**远端命令都按它提权 ——
+   * 只给传输提权、写 conf 却用登录用户，是「conf.d 明明配了免密 sudo 却
+   * Permission denied」那一类错的源头
+   */
+  readonly become?: BecomeConfig
 }
 
 const toB64 = (data: string | Uint8Array): string =>
@@ -181,6 +188,16 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
   const guard = (p: string): string =>
     normalizeRemotePath(p, { platform: facts.platform, allowedRoots: options.allowedRoots })
 
+  /**
+   * 按**配置出来的身份**包一层。
+   *
+   * 不包这一层的后果是真机实测出来的：配了免密 sudo，`/etc/nginx/conf.d` 的影子目录
+   * 却仍以登录用户去建 —— Permission denied，而报告里的错误码还是错的那个。
+   * Runner 是「在这台机器上做事」的唯一通道，所以提权只有这一处要加。
+   */
+  const elevate = (argv: readonly string[]): readonly string[] =>
+    options.become === undefined || options.become.type === 'none' ? argv : wrapCommand(argv, options.become)
+
   /** 跑一条 POSIX 脚本，返回 `{ code, stdout, stderr }`；非 0 由调用方判定 */
   const sh = async (
     scriptText: string,
@@ -189,7 +206,7 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
     execOptions?: ExecOptions,
   ): Promise<ExecResult> => {
     const res = await driver.exec({
-      argv: ['sh', '-c', scriptText],
+      argv: elevate(['sh', '-c', scriptText]),
       timeoutMs: execOptions?.timeoutMs ?? resolveTimeoutMs(options.timeoutMs),
       env: options.env,
     })
@@ -213,7 +230,7 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
         )
       }
       return driver.exec({
-        argv,
+        argv: elevate(argv),
         timeoutMs: execOptions.timeoutMs ?? resolveTimeoutMs(options.timeoutMs),
         env: options.env,
       })
@@ -223,7 +240,7 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
 
     async stat(path: string): Promise<FileStat | null> {
       const p = guard(path)
-      const res = await driver.exec({ argv: ['sh', '-c', statScript(p)], timeoutMs: resolveTimeoutMs(options.timeoutMs) })
+      const res = await driver.exec({ argv: elevate(['sh', '-c', statScript(p)]), timeoutMs: resolveTimeoutMs(options.timeoutMs) })
       if (res.code === EXIT_NOT_FOUND) return null
       if (res.code !== 0) raiseForExit('stat', p, res.code, res.stderr)
       const parsed = parseStatLine(res.stdout)
@@ -241,7 +258,7 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
     async listDir(path: string): Promise<readonly string[]> {
       const p = guard(path)
       const res = await driver.exec({
-        argv: ['sh', '-c', listDirScript(p)],
+        argv: elevate(['sh', '-c', listDirScript(p)]),
         timeoutMs: resolveTimeoutMs(options.timeoutMs),
       })
       // 与 packages/local/src/runner.ts 对齐：不存在返回空数组而不是抛错
@@ -288,7 +305,7 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
       // 目标可以是相对路径（软链本来就常用相对形式），所以不做绝对校验；
       const l = guard(linkPath)
       const res = await driver.exec({
-        argv: ['sh', '-c', symlinkScript(target, l)],
+        argv: elevate(['sh', '-c', symlinkScript(target, l)]),
         timeoutMs: resolveTimeoutMs(options.timeoutMs),
       })
       if (res.code !== 0) {
@@ -301,7 +318,7 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
     async readlink(path: string): Promise<string | null> {
       const p = guard(path)
       const res = await driver.exec({
-        argv: ['sh', '-c', readlinkScript(p)],
+        argv: elevate(['sh', '-c', readlinkScript(p)]),
         timeoutMs: resolveTimeoutMs(options.timeoutMs),
       })
       if (res.code === EXIT_NOT_FOUND) return null

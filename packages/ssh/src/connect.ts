@@ -101,6 +101,7 @@ export async function connectSsh(
   const runner = createSshRunner({
     driver,
     facts,
+    ...(options.become !== undefined ? { become: options.become } : {}),
     timeoutMs: connectOptions.timeoutMs ?? options.timeoutMs,
     maxOutputBytes: connectOptions.maxOutputBytes ?? options.maxOutputBytes,
     allowedRoots: connectOptions.allowedRoots,
