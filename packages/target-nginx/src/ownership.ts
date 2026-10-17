@@ -1,32 +1,6 @@
-import { DpError } from '@dp/ports'
+import { DpError, isManaged } from '@dp/ports'
 
-/** 标记本体。渲染时写进 conf 头部，判定时在文件里找它 */
-export const MANAGED_MARKER = '# managed by dp'
-
-/** 去掉 `#` 的正文，与 MANIFEST 标记逐字对应；避免两处各写一份字面量后漂移 */
-const MARKER_TEXT = MANAGED_MARKER.slice(1).trim()
-
-/**
- * 只看前几行。
- */
-const SCAN_LINES = 5
-
-/** 标记必须落在**注释行**里，否则它就是 nginx 的有效语法内容，不能作为归属凭证 */
-function isMarkerComment(line: string): boolean {
-  return line.trimStart().startsWith('#') && line.includes(MARKER_TEXT)
-}
-
-/**
- * 内容里是否带标记。空文件返回 false —— 它不可能是 dp 写的。
- *
- * @param content 目标机上那份 conf 的完整内容。读不到就让它抛错，**不要**拿空串顶替
- * ——「读不了」被当成「不存在」，后面就直接是一次覆盖
- * @returns true 只说明「头部注释自称由 dp 管理」，不说明内容真是 dp 写的；
- * 所以即便为 true，覆盖前仍要备份
- */
-export function isManaged(content: string): boolean {
-  return content.split(/\r?\n/).slice(0, SCAN_LINES).some(isMarkerComment)
-}
+export { isManaged, MANAGED_MARKER } from '@dp/ports'
 
 /**
  * 覆盖判定的结论。三种取值都是**正常结果**、不是异常。

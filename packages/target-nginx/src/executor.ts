@@ -1,5 +1,7 @@
 import {
   DpError,
+  describeExecFailure,
+  excerptOutput,
   type DpErrorCode,
   type ExecResult,
   type Runner,
@@ -15,9 +17,6 @@ import type { NginxTargetConfig } from './types.js'
  * 默认命令超时。
  */
 const DEFAULT_TIMEOUT_MS = 30_000
-
-/** 错误信息里保留多少 nginx 输出。整段塞进去会刷屏，并把真正有用的首行挤走 */
-const OUTPUT_LIMIT = 2000
 
 const SHADOW_DIR_MODE = 0o700
 const CONF_MODE = 0o644
@@ -124,30 +123,15 @@ export interface UnwindReport {
 
 // 失败信息组装
 
-/** 截断长输出：8MB 的 stderr 塞进异常既刷屏又会把真正有用的首行挤走 */
-function excerpt(text: string): string {
-  const trimmed = text.trim()
-  if (trimmed.length === 0) return ''
-  return trimmed.length <= OUTPUT_LIMIT
-    ? trimmed
-    : `${trimmed.slice(0, OUTPUT_LIMIT)}…（已截断，原文 ${trimmed.length} 字节）`
-}
-
 /**
  * nginx 的原话必须进错误信息。只报「校验失败」等于让用户自己上机器重跑一遍才能知道原因，而他多半还得靠猜（改哪个文件、加什么 include）。stderr 优先，没有才看 stdout。
  */
 function nginxOutput(result: ExecResult): string {
-  const err = excerpt(result.stderr)
+  const err = excerptOutput(result.stderr)
   if (err !== '') return `nginx stderr：\n${err}`
-  const out = excerpt(result.stdout)
+  const out = excerptOutput(result.stdout)
   if (out !== '') return `nginx stdout（stderr 为空）：\n${out}`
   return 'nginx 没有留下任何输出 —— 多半是它根本没跑起来（不在 PATH、被 cgroup 限制、或被这条命令的权限挡住）'
-}
-
-function describeError(err: unknown): string {
-  if (err instanceof DpError) return `${err.code}: ${err.message}`
-  if (err instanceof Error) return err.message
-  return String(err)
 }
 
 // 路径与计划
@@ -272,7 +256,7 @@ class Session {
         await entry.run()
         done.push(entry.label)
       } catch (err) {
-        errors.push(`${entry.label} → ${describeError(err)}`)
+        errors.push(`${entry.label} → ${describeExecFailure(err)}`)
       }
     }
     return { done, errors }
@@ -336,10 +320,11 @@ class Session {
 // IO 小工具
 
 /**
- * 读现有 conf，不存在返回 null。
- */
-/**
  * 建目录，并把**最外层那级原本不存在的目录**登记成撤销目标。
+ *
+ * 与 systemd / process 执行器里的 mkdirTracked 同构（同一套「建目录 + 登记撤销」台账），
+ * 差异在撤销边界（这里从 confd 推导，那边是显式 root）与 dryRun 额外清理；统一成一份
+ * 要以 exec-session 基件为前提，本包暂不收
  */
 async function mkdirTracked(session: Session, dir: string): Promise<void> {
   const confd = session.config.confd.replace(/\/+$/, '')
@@ -363,6 +348,7 @@ async function mkdirTracked(session: Session, dir: string): Promise<void> {
   session.pushUndo(`删除 ${top}`, () => session.runner.remove(top))
 }
 
+/** 读现有 conf，不存在返回 null。 */
 async function readConfIfExists(session: Session): Promise<string | null> {
   if ((await session.runner.stat(session.L.file)) === null) return null
   return session.runner.readFile(session.L.file)
@@ -406,7 +392,7 @@ async function restoreConf(session: Session, liveArgv: readonly string[]): Promi
   }
   const check = await session.exec(liveArgv)
   if (check.code !== 0) {
-    const err = excerpt(check.stderr) || excerpt(check.stdout) || '(无输出)'
+    const err = excerptOutput(check.stderr) || excerptOutput(check.stdout) || '(无输出)'
     throw new Error(`还原后 nginx -t 仍然失败（退出码 ${check.code}）：${err}`)
   }
 }

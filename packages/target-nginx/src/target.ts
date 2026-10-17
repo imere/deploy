@@ -1,4 +1,4 @@
-import { DpError, type Step, type Target, type TargetContext } from '@dp/ports'
+import { DpError, joinRemotePath, type Step, type Target, type TargetContext } from '@dp/ports'
 import { renderString } from '@dp/template'
 import { renderConf } from './render.js'
 import type { NginxTargetConfig } from './types.js'
@@ -6,11 +6,6 @@ import type { NginxTargetConfig } from './types.js'
 const DEFAULT_RELOAD: readonly string[] = ['nginx', '-s', 'reload']
 const BACKUP_SUFFIX = '.dp-backup'
 const NEW_SUFFIX = '.dp-new'
-
-/** 统一用 `/`：这些路径会被写进远端的 conf 与命令行，反斜杠在 Linux 上是转义而不是分隔符 */
-function joinPath(...parts: readonly string[]): string {
-  return parts.filter((p) => p !== '').join('/')
-}
 
 export interface Layout {
   /** confd 里的目标文件名 */
@@ -31,14 +26,14 @@ export interface Layout {
 export function layout(ctx: TargetContext, config: NginxTargetConfig): Layout {
   const name = resolveFilename(ctx, config)
   const confd = config.confd.replace(/\/+$/, '')
-  const shadowRoot = (config.shadowDir ?? joinPath(confd, '.dp-shadow')).replace(/\/+$/, '')
-  const file = joinPath(confd, name)
+  const shadowRoot = (config.shadowDir ?? joinRemotePath(confd, '.dp-shadow')).replace(/\/+$/, '')
+  const file = joinRemotePath(confd, name)
   return {
     file,
     shadowRoot,
-    shadowDir: joinPath(shadowRoot, ctx.releaseId),
-    candidate: joinPath(shadowRoot, ctx.releaseId, name),
-    mainConfig: joinPath(shadowRoot, ctx.releaseId, 'nginx.shadow.conf'),
+    shadowDir: joinRemotePath(shadowRoot, ctx.releaseId),
+    candidate: joinRemotePath(shadowRoot, ctx.releaseId, name),
+    mainConfig: joinRemotePath(shadowRoot, ctx.releaseId, 'nginx.shadow.conf'),
     backup: `${file}${BACKUP_SUFFIX}`,
     newFile: `${file}${NEW_SUFFIX}`,
     reload: config.reload === undefined ? DEFAULT_RELOAD : config.reload,
