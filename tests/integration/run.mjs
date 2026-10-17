@@ -158,15 +158,26 @@ async function dumpRsync() {
     'ssh -p 22 -i /root/.ssh/id_ed25519 -o BatchMode=yes ' +
     '-o UserKnownHostsFile=/root/.ssh/known_hosts -o StrictHostKeyChecking=accept-new'
   const base = `rsync -a --stats -e '${rsh}' /work/src/static/index.html dp@${ip}`
-  for (const [label, extra] of [
-    ['不带 --rsync-path', ''],
-    ['--rsync-path=sudo', " --rsync-path='sudo -n -u root rsync'"],
-  ]) {
-    const r = await execIn(CLIENT, `${base}${extra}:/srv/static/releases/probe-${label === '不带 --rsync-path' ? 'plain' : 'sudo'}/ 2>&1`, {
-      timeoutMs: 60_000,
-    })
-    const out = (r.stdout + r.stderr).trim().split('\n').slice(-8).map((l) => `      ${l}`).join('\n')
-    log(`    裸 rsync（${label}）：退出 ${r.code}\n${out}`)
+  // 三组：越靠后越接近 dp 真正发出的那条（dp 会带 --itemize-changes / --out-format / --rsync-path）
+  const variants = [
+    ['裸 rsync', '', 'plain'],
+    ['带 --rsync-path=sudo', " --rsync-path='sudo -n -u root rsync'", 'sudo'],
+    [
+      'dp 同款（itemize + out-format + no-h + rsync-path）',
+      " --itemize-changes --no-human-readable --out-format='%i %n' --rsync-path='sudo -n -u root rsync'",
+      'exact',
+    ],
+  ]
+  for (const [label, extra, tag] of variants) {
+    const dest = `/srv/static/releases/probe-${tag}`
+    const r = await execIn(CLIENT, `${base}${extra}:${dest}/ 2>&1`, { timeoutMs: 60_000 })
+    const out = (r.stdout + r.stderr)
+      .trim()
+      .split('\n')
+      .map((l) => `      ${l}`)
+      .join('\n')
+    const landed = await execIn(TARGET, `ls -l ${dest} 2>&1 | tail -3`)
+    log(`    裸 rsync（${label}）：退出 ${r.code}\n${out}\n      落盘：${landed.stdout.trim()}`)
   }
 }
 
