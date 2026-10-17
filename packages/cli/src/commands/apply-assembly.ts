@@ -5,6 +5,7 @@
  */
 import type { SourceSpec } from '@dp/local'
 import { DpError, type BecomeConfig, type SourceEntry, type TargetContext } from '@dp/ports'
+import { dirname, sep } from 'node:path'
 import type { HostConfig, ProjectConfig } from '@dp/schema'
 import type { DockerTargetConfig } from '@dp/target-docker'
 import type { NginxTargetConfig } from '@dp/target-nginx'
@@ -53,6 +54,23 @@ export function withParentDirs(entries: readonly SourceEntry[]): readonly Source
     .sort((a, b) => a.split('/').length - b.split('/').length)
     .map((relativePath): SourceEntry => ({ kind: 'dir', relativePath }))
   return [...dirs, ...entries]
+}
+
+/**
+ * 清单条目相对的那个本地基目录 —— 传输层拼源路径的那个底。
+ *
+ * `self` 模式下 `listSourceEntries` 把源目录自己的名字也写进了 relativePath
+ * （root 是 `/work/dist` 时条目是 `dist/index.html`），所以条目相对的是 root 的
+ * **父目录**；拿 `spec.root` 去拼会得到 `/work/dist/dist/index.html`。真机上的
+ * 后果是 rsync 报 23（部分文件不存在）→ 0 个文件 → 上层只能说「source 里没有
+ * 任何文件」，而真因是这一个目录名被算了两次。
+ *
+ * 分隔符统一成正斜杠：拼出来的串要进 rsync / scp 的 argv，Windows 侧的 `\`
+ * 到了 POSIX 远端就是路径里的一段字面量。
+ */
+export function sourceBaseFor(spec: SourceSpec): string {
+  const base = spec.mode === 'self' ? dirname(spec.root) : spec.root
+  return base.split(sep).join('/')
 }
 
 /**
@@ -244,7 +262,7 @@ export async function makeTransferHook(
 
     const request: TransferRequest = {
       kind: 'remote',
-      localRoot: spec.root,
+      localRoot: sourceBaseFor(spec),
       entries: fileEntries,
       remoteRoot: stagingDir,
       host,
