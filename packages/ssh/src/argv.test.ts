@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { DpError } from '@dp/ports'
 import type { HopSpec, KnownHostsMode } from './driver.js'
 import {
+  buildExecArgv,
   buildRemoteCommand,
   buildRshArgv,
   buildSftpBatch,
@@ -188,20 +189,48 @@ describe('buildSshArgv —— 选项组合', () => {
     assert.ok(argv.includes('-T'))
   })
 
-  it('extraOptions 原样插在远端命令之前', () => {
-    const argv = buildSshArgv({
-      ...BASE,
-      extraOptions: ['-o', 'KexAlgorithms=mlkem768x25519-sha256'],
-      remoteArgv: ['echo', 'hi'],
-    })
-    const tail = argv.slice(argv.indexOf('echo'))
-    assert.deepEqual(tail, ['echo', 'hi'])
+  it('extraOptions 原样进 argv，且在主机之前', () => {
+    const argv = buildExecArgv('ssh', { ...BASE, extraOptions: ['-o', 'KexAlgorithms=mlkem768x25519-sha256'] }, 'dp@h', undefined)
     assert.ok(argv.some((a) => a.includes('mlkem768x25519-sha256')))
+    assert.ok(argv.indexOf('-o') < argv.indexOf('dp@h'), '选项必须在主机之前')
   })
 
-  it('远端命令作为独立 argv 追加，路径含空格也不被拆', () => {
-    const argv = buildSshArgv({ ...BASE, remoteArgv: ['sh', '-c', 'echo a b'] })
-    assert.deepEqual(argv.slice(argv.length - 3), ['sh', '-c', 'echo a b'])
+  it('buildSshArgv 只产出选项：首元素以 - 开头，程序名由调用方前置', () => {
+    const argv = buildSshArgv(BASE)
+    assert.match(argv[0] ?? '', /^-/, `首元素必须是选项，实际是 ${argv[0]}——漏前置程序名会把选项当程序启动`)
+    assert.equal(argv.includes('dp@h'), false, '主机名不在选项里')
+  })
+
+  /**
+   * ssh 的语序是「选项 → 主机 → 命令」：第一个非选项参数是主机，其后全是命令。
+   * 命令放到主机前面的话，ssh 会拿它当主机名去解析，报的是
+   * `Could not resolve hostname sh -c ...`，而真因只是两个元素的前后位置。
+   */
+  it('buildExecArgv：主机在命令之前', () => {
+    const argv = buildExecArgv('ssh', BASE, 'dp@host', ['id', '-un'])
+    assert.equal(argv[0], 'ssh')
+    assert.equal(argv[argv.length - 1], 'id -un')
+    assert.equal(argv[argv.length - 2], 'dp@host')
+  })
+
+  /**
+   * 一个元素还是一串独立元素，区别不在本地而在远端：OpenSSH 把命令参数用空格拼成一条
+   * 字符串且**不会**重新加引号，逐元素追加的 `sh -c 'echo a b'` 到了远端变成 `sh -c echo a b`，
+   * sh 只拿到 `echo` 当命令、`a` `b` 当 $0 $1 —— 命令结构在远端被拆散，本地看不出异常。
+   */
+  it('远端命令合成为**一个**已转义的元素，路径含空格也不被拆', () => {
+    const argv = buildExecArgv('ssh', BASE, 'dp@host', ['sh', '-c', 'echo a b'])
+    assert.equal(argv[argv.length - 1], "sh -c 'echo a b'")
+  })
+
+  it('多行脚本作为一个元素发出：换行留在引号里，不会变成远端的第二条命令', () => {
+    const argv = buildExecArgv('ssh', BASE, 'dp@host', ['sh', '-c', 'echo one\necho two'])
+    assert.equal(argv[argv.length - 1], "sh -c 'echo one\necho two'")
+  })
+
+  it('不给远端命令就只有「程序 + 选项 + 主机」—— sftp 与 rsync 那条路的形状', () => {
+    const argv = buildExecArgv('sftp', BASE, 'dp@host', undefined)
+    assert.equal(argv[argv.length - 1], 'dp@host')
   })
 })
 
@@ -334,14 +363,25 @@ describe('buildRemoteCommand', () => {
     assert.equal(unquoteArg(q.slice('echo '.length)), "it's")
   })
 
-  it('**换行被拒绝**而不是转义（换行是远端 shell 的命令分隔符）', () => {
-    for (const bad of [['echo', 'a\nb'], ['echo', 'a\rb'], ['echo', 'a\0b']]) {
-      assert.throws(
-        () => buildRemoteCommand(bad),
-        (e: unknown) => e instanceof Error && /换行或 NUL/.test((e as Error).message),
-        JSON.stringify(bad),
-      )
-    }
+  /**
+   * 换行**允许**。「它是命令分隔符」只在引号之外成立，而含换行的参数必然走上引号分支
+   * （SHELL_SAFE 不含换行）。反过来拒绝它，代价是本包自己造的每条脚本在真机上全部发不出去：
+   * posix.ts 的 #dp-op 头、probe.ts 的复合探测都是多行的，而那条规则只会让它们变成
+   * 一条没有任何输出、也没有任何报错的探测失败。
+   */
+  it('换行留在单引号里，不会在远端变成第二条命令', () => {
+    assert.equal(buildRemoteCommand(['sh', '-c', 'echo one\necho two']), "sh -c 'echo one\necho two'")
+  })
+
+  it('CR 与 NUL 仍然拒绝：前者污染带标签的输出行，后者在 shell 与 C 两层都截断', () => {
+    assert.throws(
+      () => buildRemoteCommand(['echo', 'a\rb']),
+      (e: unknown) => e instanceof Error && /CR/.test((e as Error).message),
+    )
+    assert.throws(
+      () => buildRemoteCommand(['echo', 'a\0b']),
+      (e: unknown) => e instanceof Error && /NUL/.test((e as Error).message),
+    )
   })
 
   it('空 argv 拒绝', () => {
@@ -363,13 +403,13 @@ describe('setEnvOptions', () => {
     assert.deepEqual(setEnvOptions({ A: '1', B: '2' }), ['-o', 'SetEnv=A=1', '-o', 'SetEnv=B=2'])
   })
 
-  it('buildSshArgv 把它放在远端命令**之前**（native 路径的真实形状）', () => {
-    const argv = buildSshArgv({ ...BASE, setEnv: { LANG: 'C' }, remoteArgv: ['id', '-un'] })
+  it('SetEnv 落在主机与远端命令**之前**（native 路径的真实形状）', () => {
+    const argv = buildExecArgv('ssh', { ...BASE, setEnv: { LANG: 'C' } }, 'dp@host', ['id', '-un'])
     const i = argv.indexOf('SetEnv=LANG=C')
     assert.ok(i > 0, 'SetEnv 必须出现在 argv 里')
     assert.equal(argv[i - 1], '-o')
-    assert.ok(i < argv.indexOf('id'), '必须在远端命令之前')
-    assert.deepEqual(argv.slice(-2), ['id', '-un'])
+    assert.ok(i < argv.indexOf('dp@host'), '必须在主机之前')
+    assert.equal(argv[argv.length - 1], 'id -un')
   })
 
   it('**不再有 DP_ENV_*** —— 那是一条没有任何远端脚本会读的静默失效路径', () => {

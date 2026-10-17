@@ -23,6 +23,7 @@ export {
 } from './driver.js'
 
 export {
+  buildExecArgv,
   buildRemoteCommand,
   buildRshArgv,
   buildSftpBatch,

@@ -47,12 +47,24 @@ export function buildRemoteCommand(argv: readonly string[]): string {
     })
   }
   for (const arg of argv) {
-    if (arg.includes('\n') || arg.includes('\r') || arg.includes('\0')) {
-      throw new DpError('DP.CONFIG.INVALID', '远端命令参数含换行或 NUL，已拒绝', {
-        hint: '换行与 NUL 在远端 shell 里都是注入面（换行是命令分隔符，NUL 会截断 C 层字符串）。把它们换成一个参数内部的空格或显式的 sh -c 脚本',
+    // NUL 在任何一层都能截断字符串（shell 与 C 都如此），没有引号能救它
+    if (arg.includes('\0')) {
+      throw new DpError('DP.CONFIG.INVALID', '远端命令参数含 NUL，已拒绝', {
+        hint: 'NUL 会在 shell 与 C 两层同时截断命令，无法用引号中和',
+      })
+    }
+    // CR 会让带标签的输出行（DPW\t<path>\t<1>）被读成两行，而没有任何脚本需要它
+    if (arg.includes('\r')) {
+      throw new DpError('DP.CONFIG.INVALID', '远端命令参数含 CR，已拒绝', {
+        hint: 'CR 只在命令真正换行时才出现；脚本里的换行用 \\n',
       })
     }
   }
+  // 换行**允许**，与「换行是命令分隔符」不冲突：分隔符只存在于引号之外，
+  // 而下面每个不在 SHELL_SAFE 里的参数都会被单引号包住（SHELL_SAFE 不含换行，
+  // 所以含换行的参数必然被引号包住），远端 shell 只会把它当成一个参数交给 sh -c。
+  // 反过来，拒绝换行会让本包自己造的每一条脚本都发不出去 —— posix.ts 的
+  // #dp-op 头与多行脚本体、probe.ts 的复合探测，全都是多行的。
   return argv.map(quoteArg).join(' ')
 }
 
@@ -113,8 +125,6 @@ export interface SshArgvOptions {
   readonly extraOptions?: readonly string[]
   /** 远端环境变量。走 OpenSSH 的 SetEnv；服务端 AcceptEnv 没放行时 ssh 会静默忽略 */
   readonly setEnv?: Readonly<Record<string, string>>
-  /** 远端命令原样追加（不过 shell）。要管道或 `&&` 由调用方显式传 `['sh','-c',script]` */
-  readonly remoteArgv?: readonly string[]
 }
 
 /**
@@ -218,8 +228,34 @@ export function buildSshArgv(options: SshArgvOptions): string[] {
 
   if (options.extraOptions !== undefined) argv.push(...options.extraOptions)
   if (options.setEnv !== undefined) argv.push(...setEnvOptions(options.setEnv))
-  if (options.remoteArgv !== undefined) argv.push(...options.remoteArgv)
 
+  return argv
+}
+
+/**
+ * 一条可直接交给 `ssh` 的 argv：**选项 → 主机 → 远端命令**。
+ *
+ * 顺序不是风格问题。ssh 的语序是 `ssh [选项] 主机 [命令]`：第一个非选项参数是主机，
+ * 之后的全是命令。把命令塞在主机**前面**，ssh 会把那条命令当成主机名 —— 报错是
+ * 「Could not resolve hostname sh -c ...」，而真因只是两个元素的前后位置。
+ * 同理，远端命令必须合成**一个**已转义的元素（见 {@link buildRemoteCommand}），
+ * 因为 OpenSSH 把命令参数用单个空格拼成一条字符串且不会重新加引号。
+ *
+ * @param sshPath ssh 可执行文件。**调用方给**：`buildSshArgv` 只产出选项，
+ * 于是同一份选项既能给 `ssh` 用，也能给 `sftp` / rsync 的 `-e` 用
+ * @param options 连接选项
+ * @param host 主机目标串，见 {@link hostTarget}
+ * @param remoteArgv 远端命令 argv；不给就是「不执行命令」（sftp 与 rsync 那条路）
+ * @returns `[sshPath, ...选项, host, 命令?]`
+ */
+export function buildExecArgv(
+  sshPath: string,
+  options: SshArgvOptions,
+  host: string,
+  remoteArgv: readonly string[] | undefined,
+): string[] {
+  const argv = [sshPath, ...buildSshArgv(options), host]
+  if (remoteArgv !== undefined && remoteArgv.length > 0) argv.push(buildRemoteCommand(remoteArgv))
   return argv
 }
 
@@ -296,13 +332,12 @@ export function hopsProxyJump(
  * 给 rsync 的 `--rsh` 前缀。
  *
  * @param options 与 buildSshArgv 同一份选项，外加一个可执行文件名。
- * `remoteArgv` 即使传了也被丢掉：rsync 自己会在这个前缀后面追加远端命令，
- * 我们再塞一条就等于让 ssh 先跑我们的命令、再被 rsync 追加一条。
- * @returns 交给 rsync `--rsh` 的前缀 argv 数组。首元素是 ssh 可执行文件，
- * 末元素之后留给 rsync 追加 `[-l user] host rsync --server ...`。
+ * 这里**不**带远端命令：rsync 自己会在这个前缀后面追加 `[-l user] host rsync --server ...`，
+ * 我们再塞一条命令就等于让 ssh 先跑我们的、再被 rsync 追加一条。
+ * @returns 交给 rsync `--rsh` 的前缀 argv 数组。首元素是 ssh 可执行文件。
  */
 export function buildRshArgv(options: SshArgvOptions & { readonly sshPath: string }): string[] {
-  return [options.sshPath, ...buildSshArgv({ ...options, remoteArgv: undefined })]
+  return [options.sshPath, ...buildSshArgv(options)]
 }
 
 /**

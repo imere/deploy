@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { DpError, type DpErrorCode } from '@dp/ports'
-import { buildSshArgv } from './argv.js'
+import { buildExecArgv } from './argv.js'
 import { statScript } from './posix.js'
 import { FakeSshDriver } from './fake-driver.js'
 import {
@@ -219,14 +219,13 @@ describe('resolveTimeoutMs —— 每个子进程都必须有 timeout', () => {
 describe('凭据不出现在任何 argv 里', () => {
   it('SshConnectionOptions 里的 password 从不进 argv（走 SSH_ASKPASS）', () => {
     // 结构性保证：buildSshArgv 的入参类型里根本没有 secret 字段
-    const argv = buildSshArgv({
-      authKind: 'password',
-      knownHostsMode: 'strict',
-      remoteArgv: ['id', '-un'],
-    })
+    const argv = buildExecArgv('ssh', { authKind: 'password', knownHostsMode: 'strict' }, 'dp@host', [
+      'id',
+      '-un',
+    ])
     assert.equal(argv.join(' ').includes('password='), false)
     assert.equal(argv.join(' ').includes('--password'), false)
-    assert.deepEqual(argv.slice(-2), ['id', '-un'])
+    assert.equal(argv[argv.length - 1], 'id -un')
   })
 
   it('连接配置本身不要求 passwordRef 被本包解析', () => {

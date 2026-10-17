@@ -480,16 +480,24 @@ async function startSystemdTarget() {
     // /run/lock 少了这一条，systemd 会在起来之前就因为 mkdir 失败退出，而日志里什么都不留
     '--tmpfs', '/run', '--tmpfs', '/run/lock', '--tmpfs', '/tmp',
   ]
+  const whyOf = async () => {
+    const st = await pod(['inspect', '--format', '{{.State.ExitCode}} | {{.State.Error}}', TARGET_SYSD], { timeoutMs: 30_000 })
+    const logs = (await pod(['logs', '--tail', '20', TARGET_SYSD], { timeoutMs: 30_000 })).stdout.trim()
+    // 三个来源都取：日志常常是空的（systemd 还没来得及写就退了），
+    // 而 State.Error 里那句才是容器运行时给出的真因
+    return [st.stdout.trim(), logs].filter((s) => s !== '' && s !== '|').join(' / ') || '直接退出，没有留下任何输出'
+  }
+
   let r = await pod([...base, IMAGE_TARGET, '/sbin/init'])
   if (r.code !== 0 || (await isRunning(TARGET_SYSD)) === false) {
     await new Promise((s) => setTimeout(s, 2000))
-    const why = (await pod(['logs', '--tail', '20', TARGET_SYSD])).stdout.trim()
+    const why = await whyOf()
     await pod(['rm', '-f', TARGET_SYSD])
     r = await pod([...base, '--privileged', IMAGE_TARGET, '/sbin/init'])
     if (r.code !== 0 || (await isRunning(TARGET_SYSD)) === false) {
       await new Promise((s) => setTimeout(s, 2000))
-      const why2 = (await pod(['logs', '--tail', '20', TARGET_SYSD])).stdout.trim()
-      log(`  ⚠ systemd 靶机起不来（非特权：${why || '直接退出'}；特权：${why2 || '直接退出'}），systemd 场景跳过`)
+      const why2 = await whyOf()
+      log(`  ⚠ systemd 靶机起不来（非特权：${why}；特权：${why2}），systemd 场景跳过`)
       return
     }
   }

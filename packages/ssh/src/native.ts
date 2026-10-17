@@ -12,7 +12,7 @@ import type {
   Tunnel,
 } from './driver.js'
 import { DEFAULT_MAX_OUTPUT_BYTES, resolveTimeoutMs } from './driver.js'
-import { buildRshArgv, buildSshArgv, defaultPinPath, hostTarget, type SshArgvOptions } from './argv.js'
+import { buildExecArgv, buildRshArgv, buildSshArgv, defaultPinPath, hostTarget, type SshArgvOptions } from './argv.js'
 import { createAskpassHelper, type AskpassHelper } from './askpass.js'
 import { classifySshError, hostKeyHint, truncateOutput } from './parse.js'
 import { detectPrompt, promptHint } from './prompt.js'
@@ -248,10 +248,14 @@ export class NativeSshDriver implements SshDriver {
     if (askpass !== undefined) Object.assign(env, askpass.env)
 
     // 远端环境变量走 OpenSSH 的 `-o SetEnv=K=V`（OpenSSH 7.6+）。
-    const argv = [
-      ...buildSshArgv({ ...this.sshArgvBase(req.env), remoteArgv: req.argv }),
+    // argv 的形状由 buildExecArgv 统一管（选项 → 主机 → 命令）：三者的顺序错了都还能"成功"，
+    // 只是连到别的地方去 —— 命令放到主机前面，ssh 会把它当主机名解析。
+    const argv = buildExecArgv(
+      this.sshPath,
+      this.sshArgvBase(req.env),
       hostTarget(this.options.host, this.options.user),
-    ]
+      req.argv,
+    )
 
     try {
       return await this.spawn(argv, { timeoutMs, maxBytes, env, remoteArgv: req.argv })
@@ -399,7 +403,7 @@ export class NativeSshDriver implements SshDriver {
       sftpPath,
       '-b',
       '-',
-      ...buildSshArgv({ ...this.sshArgvBase(), remoteArgv: undefined }),
+      ...buildSshArgv(this.sshArgvBase()),
       hostTarget(this.options.host, this.options.user),
     ]
     // 批量脚本从 stdin 喂 —— 这是**协议数据**，不是"喂人类输入"，不违反铁律 0
