@@ -396,6 +396,20 @@ async function makeTransferHook(
       logger,
       ...(preferred !== undefined ? { preferred } : {}),
     })
+
+    // 传输**没报错**却报 0 个文件，是「看起来成功其实没搬动」唯一的信号，
+    // 而到这一步只能靠重现那条命令去查 —— 所以把 argv 打出来（command 已脱敏）。
+    // 平时是 debug（信息太碎），0 个文件时提到 warn：那时它就是排障的第一手材料。
+    if (result.filesTransferred === 0) {
+      logger.warn('apply.transport.empty', {
+        kind: result.kind,
+        exitCode: result.exitCode,
+        argv: result.command,
+      })
+    } else {
+      logger.debug('apply.transport.argv', { argv: result.command })
+    }
+
     return { filesWritten: result.filesTransferred, warnings: result.warnings }
   }
 }

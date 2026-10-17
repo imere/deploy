@@ -157,28 +157,41 @@ async function dumpRsync() {
   const rsh =
     'ssh -p 22 -i /root/.ssh/id_ed25519 -o BatchMode=yes ' +
     '-o UserKnownHostsFile=/root/.ssh/known_hosts -o StrictHostKeyChecking=accept-new'
-  const base = `rsync -a --stats -e '${rsh}' /work/src/static/index.html dp@${ip}`
-  // 三组：越靠后越接近 dp 真正发出的那条（dp 会带 --itemize-changes / --out-format / --rsync-path）
+  const fmt = "--itemize-changes --no-human-readable --out-format='%i %n'"
+  const sudo = "--rsync-path='sudo -n -u root rsync'"
+  // 五组，两两只差一个变量：先分出「要不要 sudo」，再分出「要不要那几个格式化选项」，
+  // 最后一组是 dp 真正的那条。-vv 是为了拿到 rsync 自己打印的 `opening connection
+  // using:` —— 那一行是「远端到底收到了什么命令」的原文，比任何推断都硬。
   const variants = [
-    ['裸 rsync', '', 'plain'],
-    ['带 --rsync-path=sudo', " --rsync-path='sudo -n -u root rsync'", 'sudo'],
-    [
-      'dp 同款（itemize + out-format + no-h + rsync-path）',
-      " --itemize-changes --no-human-readable --out-format='%i %n' --rsync-path='sudo -n -u root rsync'",
-      'exact',
-    ],
+    ['裸', '', 'plain'],
+    ['只加 sudo', sudo, 'sudo'],
+    ['只加格式化选项', fmt, 'fmt'],
+    ['sudo + 关掉 protect-args', `${sudo} --no-protect-args`, 'sudonp'],
+    ['dp 同款（sudo + 格式化选项）', `${fmt} ${sudo}`, 'exact'],
   ]
   for (const [label, extra, tag] of variants) {
     const dest = `/srv/static/releases/probe-${tag}`
-    const r = await execIn(CLIENT, `${base}${extra}:${dest}/ 2>&1`, { timeoutMs: 60_000 })
+    const cmd = `rsync -a --stats -vv -e '${rsh}' ${extra} /work/src/static/index.html dp@${ip}:${dest}/ 2>&1`
+    const r = await execIn(CLIENT, cmd, { timeoutMs: 60_000 })
+    // 不裁剪：sudo 报的 "not found / denied" 与 rsync 报的 "up to date" 都可能就是答案。
+    // 只截长度，不按关键字过滤 —— 过滤掉的那行往往正是真因。
     const out = (r.stdout + r.stderr)
-      .trim()
       .split('\n')
+      .slice(0, 40)
       .map((l) => `      ${l}`)
       .join('\n')
     const landed = await execIn(TARGET, `ls -l ${dest} 2>&1 | tail -3`)
-    log(`    裸 rsync（${label}）：退出 ${r.code}\n${out}\n      落盘：${landed.stdout.trim()}`)
+    // 落不到预期位置时必须知道它落哪儿了：报「created 1」却在预期位置找不到，
+    // 说明远端把路径解析成了别的地方（家目录下的相对路径是最常见的那种）。
+    const where = await execIn(TARGET, `find / -xdev -maxdepth 8 -name 'probe-${tag}' 2>/dev/null | head -5`)
+    log(
+      `    裸 rsync（${label}）：退出 ${r.code}\n${out}\n` +
+        `      落盘：${landed.stdout.trim()}\n      实际位置：${where.stdout.trim() || '（没找到）'}`,
+    )
   }
+  const vers = await execIn(CLIENT, 'rsync --version | head -1')
+  const vremote = await execIn(TARGET, 'rsync --version | head -1; command -v sudo')
+  log(`    rsync 版本：客户端 ${vers.stdout.trim()} │ 靶机 ${vremote.stdout.trim().split('\n').join(' │ ')}`)
 }
 
 async function scenario(name, fn) {
@@ -243,9 +256,13 @@ async function putScenarioConfig(name, targetHost) {
 
 /** 在客户端里跑 dp。只认退出码与 JSON，不认 stdout 里的客套话 */
 async function dp(argv) {
-  const r = await execIn(CLIENT, `node /opt/dp/packages/cli/build/bin.js ${argv.join(' ')}`, {
-    timeoutMs: 180_000,
-  })
+  // 一律 debug：传输那条 argv 只在 debug 打，而「报了 0 个文件」这种失败
+  // 的真因就在那条命令里。日志走 stderr，不影响 stdout 上的 JSON。
+  const r = await execIn(
+    CLIENT,
+    `node /opt/dp/packages/cli/build/bin.js ${[...argv, '--log-level=debug'].join(' ')}`,
+    { timeoutMs: 180_000 },
+  )
   let json
   try {
     json = JSON.parse(r.stdout)
@@ -260,13 +277,19 @@ async function dp(argv) {
     // 失败时两个流都要看：结构化报告在 stdout，日志行在 stderr，
     // 只看一个会出现「知道失败了，但不知道为什么」。
     // 日志不只看 error：传输选了哪条路（`apply.transport`）是 info，
-    // 而「报 0 个文件」这种失败，原因往往就在那一行里。
+    // 而「报 0 个文件」这种失败，原因往往就在那一行里（argv 在 warn 里）。
     get why() {
       const pretty = r.stdout.trim()
       const logs = r.stderr
         .split('\n')
-        .filter((l) => l.includes('"level"') && (l.includes('apply.') || l.includes('"level":"error"')))
-        .slice(-6)
+        .filter(
+          (l) =>
+            l.includes('"level"') &&
+            (l.includes('apply.') ||
+              l.includes('"level":"error"') ||
+              l.includes('"level":"warn"')),
+        )
+        .slice(-8)
         .join('\n')
       return [pretty, logs].filter((s) => s !== '').join('\n') || `退出 ${r.code}，两个流都是空的`
     },
@@ -307,7 +330,9 @@ async function preflightWrite(host) {
   const script =
     `ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts ` +
     `-i /root/.ssh/id_ed25519 dp@${host} ` +
-    `'id -un; ls -ld /srv /srv/static; for d in /srv /srv/static; do ` +
+    // sudo 那一路要先自证：dp 的 rsync 全程跑在 --rsync-path=sudo 下，
+    // 而「sudo 根本不能用」与「sudo 能用但 rsync 那侧没传」长得一模一样
+    `'id -un; sudo -n -u root id -un 2>&1; ls -ld /srv /srv/static; for d in /srv /srv/static; do ` +
     `if touch "$d/.dp-pre-$$" 2>/dev/null; then rm -f "$d/.dp-pre-$$"; echo "$d writable"; ` +
     `else echo "$d NOT writable"; fi; done'`
   const r = await execIn(CLIENT, script, { timeoutMs: 30_000 })
