@@ -110,6 +110,29 @@ const results = []
  */
 class Skip extends Error {}
 
+/**
+ * 失败时把「dp 眼里这台机器是什么样」也打印出来。
+ *
+ * 报 `release.root 不可写` 时有两个可能：dp 判断错了，或者这台机器真的写不进去。
+ * 只看错误码分不开这两种，而修错的那一个等于白修 —— facts 里的 canWrite 与 probeNotes
+ * 是机器自己给的答案，把它和下面的裸 ssh 实测对照，就能定位到是断言错了还是夹具错了。
+ */
+async function dumpFacts(name) {
+  const r = await dp(['facts', '--json', '--config', `/work/${name}.json`, '--host', 'target'])
+  if (r.code !== 0) {
+    log(`    facts 也失败了：${r.why}`)
+    return
+  }
+  const facts = r.json?.facts ?? r.json
+  const canWrite = facts?.capabilities?.canWrite ?? {}
+  const rows = Object.entries(canWrite)
+    .map(([k, v]) => `${k}=${v ? '可写' : '不可写'}`)
+    .join('  ')
+  log(`    dp 看到的 canWrite：${rows}`)
+  const notes = r.json?.probeNotes ?? []
+  if (notes.length > 0) log(`    probeNotes：${notes.join(' | ')}`)
+}
+
 async function scenario(name, fn) {
   if (only !== undefined && only !== name) {
     results.push({ name, state: 'skipped', detail: '未选中' })
@@ -128,6 +151,7 @@ async function scenario(name, fn) {
     }
     results.push({ name, state: 'fail', ms: Date.now() - started, detail: String(err?.stack ?? err) })
     log(`  ✖ ${name}\n${String(err?.message ?? err)}`)
+    await dumpFacts(name)
   }
 }
 
@@ -216,6 +240,26 @@ async function waitForSsh(name, host) {
     }
     await new Promise((r2) => setTimeout(r2, 1000))
   }
+}
+
+/**
+ * 以 dp 的身份、走 ssh 实测一遍「这几个目录到底写不写得进去」。
+ *
+ * 与 dp 自己的探测并列打印：两边不一致时，错的那个一眼可见 ——
+ * 都说不可写是夹具的问题，只有 dp 说不可写才是 dp 的问题。
+ */
+async function preflightWrite(host) {
+  for (const dir of ['/srv', '/srv/static', '/srv/nginx', '/srv/proc']) {
+    await execIn(TARGET, `mkdir -p ${dir} && chown dp:dp ${dir}`)
+  }
+  const script =
+    `ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts ` +
+    `-i /root/.ssh/id_ed25519 dp@${host} ` +
+    `'id -un; ls -ld /srv /srv/static; for d in /srv /srv/static; do ` +
+    `if touch "$d/.dp-pre-$$" 2>/dev/null; then rm -f "$d/.dp-pre-$$"; echo "$d writable"; ` +
+    `else echo "$d NOT writable"; fi; done'`
+  const r = await execIn(CLIENT, script, { timeoutMs: 30_000 })
+  log(`  裸 ssh 实测（dp 身份）：${(r.stdout + r.stderr).trim().split('\n').join(' │ ')}`)
 }
 
 /** 允许某场景所需的目录先存在，避免「第一次部署就要提权建根」这种额外变量 */
@@ -432,20 +476,31 @@ async function putKey(name) {
 async function startSystemdTarget() {
   const base = [
     'run', '-d', '--name', TARGET_SYSD, '--network', `${NET}:ip=${IP_SYSD}`,
-    '--systemd=always', '--tmpfs', '/run', '--tmpfs', '/tmp',
+    '--systemd=always', '--cgroupns=private',
+    // /run/lock 少了这一条，systemd 会在起来之前就因为 mkdir 失败退出，而日志里什么都不留
+    '--tmpfs', '/run', '--tmpfs', '/run/lock', '--tmpfs', '/tmp',
   ]
   let r = await pod([...base, IMAGE_TARGET, '/sbin/init'])
   if (r.code !== 0 || (await isRunning(TARGET_SYSD)) === false) {
-    const why = (await pod(['logs', '--tail', '10', TARGET_SYSD])).stdout.trim()
+    await new Promise((s) => setTimeout(s, 2000))
+    const why = (await pod(['logs', '--tail', '20', TARGET_SYSD])).stdout.trim()
     await pod(['rm', '-f', TARGET_SYSD])
     r = await pod([...base, '--privileged', IMAGE_TARGET, '/sbin/init'])
     if (r.code !== 0 || (await isRunning(TARGET_SYSD)) === false) {
-      log(`  ⚠ systemd 靶机起不来（第一次：${why || '直接退出'}），systemd 场景跳过`)
+      await new Promise((s) => setTimeout(s, 2000))
+      const why2 = (await pod(['logs', '--tail', '20', TARGET_SYSD])).stdout.trim()
+      log(`  ⚠ systemd 靶机起不来（非特权：${why || '直接退出'}；特权：${why2 || '直接退出'}），systemd 场景跳过`)
       return
     }
   }
 
-  const sysdUp = await execIn(TARGET_SYSD, 'systemctl is-system-running 2>&1 || true', { timeoutMs: 60_000 })
+  // 起来到进 running 之间有一段：第一次问几乎必然是 starting，问一次就判死等于把启动慢当成了不支持
+  let sysdUp = { stdout: '' }
+  for (let i = 0; i < 30; i += 1) {
+    sysdUp = await execIn(TARGET_SYSD, 'systemctl is-system-running 2>&1 || true', { timeoutMs: 30_000 })
+    if (/running|degraded/.test(sysdUp.stdout)) break
+    await new Promise((s) => setTimeout(s, 2000))
+  }
   if (/running|degraded/.test(sysdUp.stdout) === false) {
     log(`  ⚠ systemd 起来了但没进 running（${sysdUp.stdout.trim()}），systemd 场景跳过`)
     return
@@ -480,6 +535,7 @@ async function startContainers() {
   const sshd = await execIn(TARGET, 'mkdir -p /run/sshd && /usr/sbin/sshd -e 2>&1')
   if (sshd.code !== 0) throw new Error(`靶机的 sshd 起不来：${sshd.stdout.trim() || sshd.stderr.trim()}`)
   await waitForSsh(TARGET, hosts[TARGET])
+  await preflightWrite(hosts[TARGET])
 
   await startSystemdTarget()
 

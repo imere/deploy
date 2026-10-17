@@ -26,7 +26,7 @@ for (const scenario of SCENARIOS) {
   const file = join(TMP, `${scenario.name}.json`)
   writeFileSync(file, JSON.stringify(configFor(scenario, LOCAL_HOST), null, 2), 'utf8')
 
-  let out = ''
+  let out
   try {
     out = execFileSync(process.execPath, [BIN, 'plan', '--json', '--config', file], {
       encoding: 'utf8',
