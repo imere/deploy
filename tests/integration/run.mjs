@@ -488,18 +488,29 @@ async function startSystemdTarget() {
     return [st.stdout.trim(), logs].filter((s) => s !== '' && s !== '|').join(' / ') || '直接退出，没有留下任何输出'
   }
 
-  let r = await pod([...base, IMAGE_TARGET, '/sbin/init'])
-  if (r.code !== 0 || (await isRunning(TARGET_SYSD)) === false) {
-    await new Promise((s) => setTimeout(s, 2000))
-    const why = await whyOf()
-    await pod(['rm', '-f', TARGET_SYSD])
-    r = await pod([...base, '--privileged', IMAGE_TARGET, '/sbin/init'])
-    if (r.code !== 0 || (await isRunning(TARGET_SYSD)) === false) {
-      await new Promise((s) => setTimeout(s, 2000))
-      const why2 = await whyOf()
-      log(`  ⚠ systemd 靶机起不来（非特权：${why}；特权：${why2}），systemd 场景跳过`)
-      return
+  // 三种起法逐个试。能不能跑 systemd 取决于那台机器的 cgroup / seccomp 放不放行，
+  // 那是环境结论而不是 dp 的结论 —— 所以试完都不行就跳过并写明原因，不判失败。
+  const variants = [
+    [[], '非特权'],
+    [['--privileged'], '特权'],
+    [['--privileged', '--cgroupns=host', '-v', '/sys/fs/cgroup:/sys/fs/cgroup:rw'], '特权+挂 cgroup'],
+  ]
+  const failures = []
+  let up = false
+  for (const [extra, label] of variants) {
+    const r = await pod([...base, ...extra, IMAGE_TARGET, '/sbin/init'])
+    if (r.code === 0 && (await isRunning(TARGET_SYSD)) === true) {
+      up = true
+      break
     }
+    // 退出之后日志常常是空的，等一下再取，别把「还没来得及写」当成「没有输出」
+    await new Promise((s) => setTimeout(s, 2000))
+    failures.push(`${label}：${await whyOf()}`)
+    await pod(['rm', '-f', TARGET_SYSD])
+  }
+  if (up === false) {
+    log(`  ⚠ systemd 靶机起不来（${failures.join('；')}），systemd 场景跳过`)
+    return
   }
 
   // 起来到进 running 之间有一段：第一次问几乎必然是 starting，问一次就判死等于把启动慢当成了不支持

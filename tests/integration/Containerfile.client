@@ -13,12 +13,15 @@ RUN apt-get update \
        ca-certificates openssh-client rsync curl procps jq \
   && rm -rf /var/lib/apt/lists/*
 
-# 已知主机密钥落 /dev/null：容器是即用即弃的，把测试机指纹写进 ~/.ssh/known_hosts
-# 既没意义，又会让「主机密钥策略」这条真实路径在第二轮复用同一个 IP 时被绕开
+# 已知主机密钥落**真实文件**，而不是 /dev/null。
+# dp 默认走 knownHosts: strict（这是设计上的默认值，不是测试里可以放宽的东西），
+# 而 strict 读的就是 ssh 自己的 known_hosts —— 指向 /dev/null 等于让 strict 永远查不到密钥，
+# 报出来的是「主机密钥与 known_hosts 里记录的不一致」，看着像中间人，实际是夹具把它指空了。
+# 文件在容器里，容器即用即弃，所以「把测试机指纹留下来」这件事本身也没有副作用。
 RUN printf '%s\n' \
       'Host *' \
       '  StrictHostKeyChecking accept-new' \
-      '  UserKnownHostsFile /dev/null' \
+      '  UserKnownHostsFile /root/.ssh/known_hosts' \
       > /etc/ssh/ssh_config.d/90-dp-it.conf
 
 CMD ["sleep", "infinity"]
