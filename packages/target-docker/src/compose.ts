@@ -1,11 +1,6 @@
-import { DpError, RELEASES_DIR_NAME, type TargetContext } from '@dp/ports'
+import { DpError, RELEASES_DIR_NAME, joinRemotePath, type TargetContext } from '@dp/ports'
 import { renderString } from '@dp/template'
 import type { DockerCompose, DockerMode, DockerTargetConfig } from './types.js'
-
-/** 统一用 `/`：这些路径会进远端 argv 与 compose 的项目目录，反斜杠在 Linux 上是转义 */
-function joinPath(...parts: readonly string[]): string {
-  return parts.filter((p) => p !== '').join('/')
-}
 
 /**
  * release 目录。与 @dp/target-static 的 `<root>/releases/<id>` 布局**同源**（都取 ports 那份名字）
@@ -16,7 +11,7 @@ function joinPath(...parts: readonly string[]): string {
  * @returns 绝对路径，末尾不带 `/`。它会成为 compose 的项目目录与 cwd，所以一律用 `/` 分隔
  */
 export function releaseDir(ctx: TargetContext, releaseId: string): string {
-  return joinPath(ctx.root.replace(/\/+$/, ''), RELEASES_DIR_NAME, releaseId)
+  return joinRemotePath(ctx.root.replace(/\/+$/, ''), RELEASES_DIR_NAME, releaseId)
 }
 
 /**
@@ -181,12 +176,12 @@ export function resolveCompose(ctx: TargetContext, config: DockerTargetConfig, c
   }
 
   const projectDir = releaseDir(ctx, ctx.releaseId)
-  const files = resolvedFiles.map((f) => joinPath(projectDir, f))
+  const files = resolvedFiles.map((f) => joinRemotePath(projectDir, f))
 
   const envFile =
     c.envFile === undefined
       ? undefined
-      : joinPath(projectDir, pathValue(c.envFile, config, `${configPath}.compose.envFile`, 'envFile'))
+      : joinRemotePath(projectDir, pathValue(c.envFile, config, `${configPath}.compose.envFile`, 'envFile'))
 
   return {
     projectDir,

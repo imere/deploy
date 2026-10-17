@@ -1,5 +1,6 @@
 import {
   DpError,
+  excerptOutput,
   type DpErrorCode,
   type ExecResult,
   type Runner,
@@ -14,9 +15,6 @@ import type { DockerTargetConfig } from './types.js'
  * 默认命令超时。
  */
 const DEFAULT_TIMEOUT_MS = 300_000
-
-/** 错误信息里保留多少 docker 输出。整段塞进去会刷屏，并把真正有用的那几行挤走 */
-const OUTPUT_LIMIT = 2000
 
 /**
  * 执行器的四个阶段，与 `target.ts` 的四个 plan 方法**一一对应**。
@@ -100,22 +98,13 @@ export interface DockerExecFailure {
 
 // 失败信息组装
 
-/** 截断长输出。`docker compose up` 失败时 stderr 动辄几百行，整段塞进去等于什么都没说 */
-function excerpt(text: string): string {
-  const trimmed = text.trim()
-  if (trimmed.length === 0) return ''
-  return trimmed.length <= OUTPUT_LIMIT
-    ? trimmed
-    : `${trimmed.slice(0, OUTPUT_LIMIT)}…（已截断，原文 ${trimmed.length} 字节）`
-}
-
 /**
  * docker 的原话必须进错误信息。只报「启动失败」等于让用户自己上机器重跑一遍才知道原因，而他多半还得靠猜（镜像拉不到、端口占用、healthcheck 一直不绿）。stderr 优先。
  */
 function dockerOutput(result: ExecResult): string {
-  const err = excerpt(result.stderr)
+  const err = excerptOutput(result.stderr)
   if (err !== '') return `docker stderr：\n${err}`
-  const out = excerpt(result.stdout)
+  const out = excerptOutput(result.stdout)
   if (out !== '') return `docker stdout（stderr 为空）：\n${out}`
   return 'docker 没有留下任何输出 —— 多半是它根本没跑起来（不在 PATH、daemon 没起、或被这条命令的权限挡住）'
 }
@@ -493,7 +482,7 @@ async function readPs(session: Session, step: Step): Promise<ReturnType<typeof p
         path: err.path,
         ...(err.hint !== undefined ? { hint: err.hint } : {}),
         // 原样带上读不懂的那份输出：message 说「第几行坏了」，输出才让人看得见坏在哪
-        output: `compose ps stdout（原样）：\n${excerpt(stdout) || '(空)'}`,
+        output: `compose ps stdout（原样）：\n${excerptOutput(stdout) || '(空)'}`,
         healing: [`先看这份输出到底是什么形态：${argvText(argvOf(step))}`],
       })
     }
