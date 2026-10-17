@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DpError, type Facts, type Runner } from '@dp/ports'
+import type { DriverExecResult, ExecRequest, SshDriver } from '@dp/ssh'
 import {
   acquireFacts,
   hopJumpStrings,
@@ -271,5 +272,137 @@ describe('facts-source · hops 真的传到了连接层', () => {
     const got = rec.options() as { host: string; hops?: unknown }
     assert.equal(got.host, '10.0.0.5')
     assert.equal(got.hops, undefined)
+  })
+})
+
+/**
+ * 远端发布根的补测。
+ *
+ * 这一组挡的是**只有真机才看得出来**的那类错：默认探测表只探 /srv、/opt 这类祖先，
+ * 而发布根是 /srv/<name> —— 第一次部署时它几乎总不存在，canWrite 里根本没有它的键，
+ * `pickReleaseRoot` 只看得见 undefined，于是「明明建得出来」被报成 `DP.PATH.NOT_WRITABLE`。
+ * 本机的 local 分支有 `probeCreatable`，远端没有，两个分支就不再是同一套语义。
+ */
+describe('facts-source · 远端也要补测发布根', () => {
+  /** 远端事实，capabilities.canWrite 只带默认表探到的祖先 —— 正是修复前那份残缺的事实 */
+  function remoteFacts(canWrite: Record<string, boolean> = { '/srv': false, '/opt': false }): Facts {
+    return {
+      host: 'web',
+      platform: 'linux',
+      arch: 'x64',
+      init: 'systemd',
+      homedir: '/home/dp',
+      tmpdir: '/tmp',
+      env: { PATH: '/usr/bin' },
+      capabilities: {
+        canWrite,
+        canChown: [],
+        canSymlink: true,
+        systemdScope: 'system',
+        lingerEnabled: false,
+        canBindPrivilegedPort: false,
+        sudoAllowlist: [],
+      },
+      tools: {},
+    } as Facts
+  }
+
+  function connectWith(
+    facts: Facts,
+    reply: (script: string) => DriverExecResult,
+  ): { scripts: () => string[]; connect: NonNullable<Parameters<typeof acquireFacts>[0]['connect']> } {
+    const seen: string[] = []
+    const driver = {
+      kind: 'ssh2',
+      async available() {
+        return { ok: true }
+      },
+      async exec(req: ExecRequest) {
+        const script = req.argv[2] ?? ''
+        seen.push(script)
+        return reply(script)
+      },
+      async close() {},
+    } as unknown as SshDriver
+    const connect = (async () => ({
+      facts,
+      probeNotes: [] as readonly string[],
+      runner: {} as Runner,
+      driver,
+      tunnel: async () => ({ rshArgv: ['ssh'], close: async () => {} }),
+      close: async () => {},
+    })) as unknown as NonNullable<Parameters<typeof acquireFacts>[0]['connect']>
+    return { scripts: () => seen, connect }
+  }
+
+  it('显式 release.root：补测它自己，并把结论并进 canWrite', async () => {
+    const rec = connectWith(remoteFacts(), (script) => ({
+      code: 0,
+      stdout: script.includes('/srv/web') ? 'DPW\t/srv/web\t1\n' : '',
+      stderr: '',
+    }))
+    const got = await acquireFacts({
+      hostId: 'web',
+      host: { layout: 'auto', ssh: 'dp@10.0.0.5' },
+      env: { DP_SSH_KEY: 'k' },
+      projectName: 'web',
+      releaseRoot: '/srv/web',
+      connect: rec.connect,
+    })
+    assert.equal(
+      got.facts.capabilities.canWrite['/srv/web'],
+      true,
+      `显式发布根没被补测，pickReleaseRoot 只会读到 undefined：${JSON.stringify(got.facts.capabilities.canWrite)}`,
+    )
+    // 默认表探到的祖先结论不能被覆盖掉
+    assert.equal(got.facts.capabilities.canWrite['/srv'], false)
+  })
+
+  it('只给 projectName：候选整表补测，不是只测第一个', async () => {
+    const rec = connectWith(remoteFacts(), (script) => ({
+      code: 0,
+      stdout: script.includes('/opt/web') ? 'DPW\t/opt/web\t1\n' : '',
+      stderr: '',
+    }))
+    const got = await acquireFacts({
+      hostId: 'web',
+      host: { layout: 'auto', ssh: 'dp@10.0.0.5' },
+      env: { DP_SSH_KEY: 'k' },
+      projectName: 'web',
+      connect: rec.connect,
+    })
+    const script = rec.scripts()[0] ?? ''
+    assert.ok(script.includes('/srv/web'), `候选 /srv/web 没进补测：${script}`)
+    assert.ok(script.includes('/opt/web'), `候选 /opt/web 没进补测：${script}`)
+    assert.equal(got.facts.capabilities.canWrite['/opt/web'], true)
+  })
+
+  it('没有项目名也没有显式 root：不多跑这一趟（dp facts 不该为一个不存在的发布根付往返）', async () => {
+    const rec = connectWith(remoteFacts(), () => ({ code: 0, stdout: '', stderr: '' }))
+    await acquireFacts({
+      hostId: 'web',
+      host: { layout: 'auto', ssh: 'dp@10.0.0.5' },
+      env: { DP_SSH_KEY: 'k' },
+      connect: rec.connect,
+    })
+    assert.equal(rec.scripts().length, 0, `不该发补测 exec，实际发了 ${rec.scripts().length} 次`)
+  })
+
+  it('补测失败：canWrite 里仍然有这条键（记 false），notes 里带着原因', async () => {
+    const rec = connectWith(remoteFacts(), () => ({ code: 5, stdout: '', stderr: 'permission denied' }))
+    const got = await acquireFacts({
+      hostId: 'web',
+      host: { layout: 'auto', ssh: 'dp@10.0.0.5' },
+      env: { DP_SSH_KEY: 'k' },
+      projectName: 'web',
+      releaseRoot: '/srv/web',
+      connect: rec.connect,
+    })
+    assert.equal(got.facts.capabilities.canWrite['/srv/web'], false)
+    assert.equal(
+      got.probeNotes.some((n) => n.includes('/srv/web')),
+      true,
+      `notes 没说明 /srv/web 为什么是 false：${got.probeNotes.join(' | ')}`,
+    )
   })
 })

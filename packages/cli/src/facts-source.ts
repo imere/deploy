@@ -5,7 +5,7 @@ import { DpError, type Facts, type Platform, type Runner, assertPortInRange, par
 import type { HostConfig } from '@dp/schema'
 import type { Logger } from '@dp/log'
 import { probeLocalFacts, probeWritable } from '@dp/local'
-import { connectSsh, type AuthConfig, type HopSpec, type SshConnectionOptions } from '@dp/ssh'
+import { connectSsh, probeCreatableRemote, type AuthConfig, type HopSpec, type SshConnectionOptions } from '@dp/ssh'
 import { RELEASE_ROOT_CANDIDATES, expandTemplate } from '@dp/core'
 
 export const DEFAULT_CONNECT_TIMEOUT_MS = 30_000
@@ -279,9 +279,39 @@ export async function acquireFacts(request: FactsRequest): Promise<FactsResult> 
     ...(request.logger !== undefined ? { logger: request.logger } : {}),
     timeoutMs,
   })
+  const base = { ...connected.facts, host: request.hostId }
+  const notes = [...connected.probeNotes]
+
+  // 远端发布根必须**单独补测**。默认那张表探的是 /srv、/opt 这类祖先，而发布根是
+  // /srv/<name> 这种第一次部署时几乎总还不存在的路径 —— 不补测的话 canWrite 里根本没有它的键，
+  // pickReleaseRoot 只看得见 undefined，于是「明明建得出来」被报成「不可写」。
+  // 这与上面 local 分支的 probeCreatable 是同一件事，只是换了执行位置。
+  const targets =
+    request.releaseRoot !== undefined
+      ? [request.releaseRoot]
+      : request.projectName === undefined
+        ? []
+        : releaseRootCandidates(request.projectName, base.homedir, base.env, base.platform)
+
+  if (targets.length === 0) {
+    return {
+      facts: base,
+      probeNotes: notes,
+      close: () => connected.close(),
+      runner: connected.runner,
+    }
+  }
+
+  const extra = await probeCreatableRemote(connected.driver, targets, base.capabilities.canWrite)
   return {
-    facts: { ...connected.facts, host: request.hostId },
-    probeNotes: connected.probeNotes,
+    facts: {
+      ...base,
+      capabilities: {
+        ...base.capabilities,
+        canWrite: { ...base.capabilities.canWrite, ...extra.canWrite },
+      },
+    },
+    probeNotes: [...notes, ...extra.notes],
     close: () => connected.close(),
     // 同一条连接上的 Runner 交给调用方复用，别让人为了写文件再连一次
     runner: connected.runner,

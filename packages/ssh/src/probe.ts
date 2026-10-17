@@ -186,6 +186,72 @@ export async function probeFacts(driver: SshDriver, options: ProbeOptions): Prom
   return { facts, probeNotes: notes }
 }
 
+/**
+ * 远端版「这条路径建得出来吗」。
+ *
+ * 与 `@dp/cli` 里 `probeCreatable` 的本地语义严格对齐：**路径已存在就测它自己，不存在就往上找第一个存在的祖先测它**。
+ * 不做这层回退的话，`/srv/<name>` 这种发布根在第一次部署时必然不存在，而在一个不存在的目录里建文件一定失败 ——
+ * 于是 `canWrite` 里整张发布根候选表全是 false，plan 报「没有可写的发布目录」，而真机上它明明建得出来。
+ *
+ * 远端没有 `fs.existsSync`，所以「往上找」这一段只能在 shell 里做。
+ *
+ * @param driver 已建立的驱动。**必须**是实际执行用的那一条：探测用 A 凭据、写入用 B 凭据，探出来的可写性说明不了任何事
+ * @param paths 要判定的**完整路径**（发布根候选或显式 `release.root`）
+ * @param known 已实测过的结论（`facts.capabilities.canWrite`）。重复建文件去测同一个目录纯属浪费，每次都是真实 IO
+ * @param options 只留超时
+ * @returns 以入参路径为键的判定；`notes` 记的是「没能实测、保守记为不可写」的那些 —— 结论与依据必须一起交出去
+ */
+export async function probeCreatableRemote(
+  driver: SshDriver,
+  paths: readonly string[],
+  known: Readonly<Record<string, boolean>> = {},
+  options: { readonly timeoutMs?: number } = {},
+): Promise<{ canWrite: Record<string, boolean>; notes: readonly string[] }> {
+  const notes: string[] = []
+  const out: Record<string, boolean> = {}
+  const pending: string[] = []
+
+  for (const p of paths) {
+    const v = known[p]
+    if (v === undefined) {
+      if (!pending.includes(p)) pending.push(p)
+      continue
+    }
+    out[p] = v === true
+  }
+  if (pending.length === 0) return { canWrite: out, notes }
+
+  const q = (s: string): string => `'${s.replaceAll("'", `'\\''`)}'`
+  const script = [
+    // 往上找第一个存在的目录。`dirname` 走到根就不再变（`dirname /` === `/`），那时停 —— 不判会死循环
+    'nearest() { d=$1; while [ ! -d "$d" ]; do n=$(dirname "$d"); [ "$n" = "$d" ] && break; d=$n; done; printf "%s" "$d"; }',
+    // 真的建一个文件再删掉。只读挂载 / SELinux / ACL 都可能让 access(W_OK) 通过而实际写失败
+    'probeW() { p=$1; f="$p/.dp-w-$$"; if (set -C; : > "$f") 2>/dev/null; then rm -f "$f"; return 0; else return 1; fi; }',
+    ...pending.map(
+      (p) =>
+        `if probeW "$(nearest ${q(p)})"; then printf 'DPW\\t%s\\t1\\n' ${q(p)}; else printf 'DPW\\t%s\\t0\\n' ${q(p)}; fi`,
+    ),
+  ].join('\n')
+
+  try {
+    const res = await driver.exec({ argv: ['sh', '-c', script], timeoutMs: resolveTimeoutMs(options.timeoutMs) })
+    for (const raw of tagFields(res.stdout, 'DPW')) {
+      const [p, v] = raw.split('\t')
+      if (p !== undefined) out[p] = v === '1'
+    }
+  } catch (err) {
+    notes.push(`发布根可写性补测失败：${(err as Error).message}。这些路径保守记为不可写`)
+  }
+
+  for (const p of pending) {
+    if (out[p] === undefined) {
+      out[p] = false
+      notes.push(`${p} 没能实测出可写性（补测无结果行），保守记为不可写`)
+    }
+  }
+  return { canWrite: out, notes }
+}
+
 /** 复合探测脚本：一次往返拿完（标签化输出，见 tagField） */
 function compositeProbe(toolNames: readonly string[], writePaths: readonly string[]): string {
   const q = (s: string): string => `'${s.replaceAll("'", `'\\''`)}'`

@@ -128,6 +128,7 @@ export {
 export {
   canElevate,
   ELEVATION_HINT,
+  probeCreatableRemote,
   probeFacts,
   type CanElevateResult,
   type ProbeOptions,
