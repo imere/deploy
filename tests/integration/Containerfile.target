@@ -26,11 +26,12 @@ RUN useradd -m -s /bin/bash dp \
 
 # 主配置里 conf.d 的 include 必须真的存在，否则 nginx -t 只验证到影子 conf 自己通过，
 # 而真正 load 的链路一次都没走过
+# 不追加 Subsystem sftp：发行版的主配置里已经有一条，再写一条是重复定义，
+# sshd 直接拒绝启动（报 "Subsystem 'sftp' already defined"）
 RUN printf '%s\n' \
       'PermitRootLogin no' \
       'PasswordAuthentication no' \
       'UseDNS no' \
-      'Subsystem sftp /usr/lib/openssh/sftp-server' \
       >> /etc/ssh/sshd_config \
   && rm -f /etc/nginx/sites-enabled/default
 
