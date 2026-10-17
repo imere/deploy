@@ -2,6 +2,7 @@ import {
   CURRENT_LINK_NAME,
   DpError,
   INCOMING_SUFFIX,
+  joinRemotePath,
   RELEASES_DIR_NAME,
   type Runner,
   type SourceEntry,
@@ -35,11 +36,6 @@ const DIR_MODE = 0o755
 const FILE_MODE = 0o644
 const INDEX_MODE = 0o600
 
-/** 统一用 `/` —— Node 的 fs 在 Windows 上认正斜杠，不必为分隔符写两套分支 */
-function joinPath(...parts: readonly string[]): string {
-  return parts.filter((p) => p !== '').join('/')
-}
-
 interface Layout {
   readonly root: string
   readonly releasesDir: string
@@ -50,14 +46,14 @@ interface Layout {
 }
 
 function layout(root: string): Layout {
-  const releases = joinPath(root, RELEASES_DIR_NAME)
+  const releases = joinRemotePath(root, RELEASES_DIR_NAME)
   return {
     root,
     releasesDir: releases,
-    currentLink: joinPath(root, CURRENT_LINK_NAME),
-    indexFile: joinPath(root, '.dp', 'index.json'),
-    releaseDir: (id) => joinPath(releases, id),
-    stagingDir: (id) => joinPath(releases, `${id}${INCOMING_SUFFIX}`),
+    currentLink: joinRemotePath(root, CURRENT_LINK_NAME),
+    indexFile: joinRemotePath(root, '.dp', 'index.json'),
+    releaseDir: (id) => joinRemotePath(releases, id),
+    stagingDir: (id) => joinRemotePath(releases, `${id}${INCOMING_SUFFIX}`),
   }
 }
 
@@ -152,8 +148,8 @@ async function switchCurrent(
 /** 递归复制。**必须是复制而不是搬运** —— 搬走会把 release 目录掏空 */
 async function copyInto(runner: Runner, from: string, to: string): Promise<void> {
   for (const name of await runner.listDir(from)) {
-    const srcPath = joinPath(from, name)
-    const dstPath = joinPath(to, name)
+    const srcPath = joinRemotePath(from, name)
+    const dstPath = joinRemotePath(to, name)
     const stat = await runner.stat(srcPath)
     if (stat === null) continue
     if (stat.isDirectory) {
@@ -252,7 +248,7 @@ export async function deploy(input: DeployInput): Promise<DeployResult> {
   const previous = index.current ?? ctx.previousReleaseId
 
   await runner.mkdir(L.releasesDir, { recursive: true, mode: DIR_MODE })
-  await runner.mkdir(joinPath(ctx.root, '.dp'), { recursive: true, mode: 0o700 })
+  await runner.mkdir(joinRemotePath(ctx.root, '.dp'), { recursive: true, mode: 0o700 })
 
   // ① stage：写进 .incoming，**从不直接写进正在服务的目录**
   const staging = L.stagingDir(ctx.releaseId)
@@ -276,7 +272,7 @@ export async function deploy(input: DeployInput): Promise<DeployResult> {
     // 一份纯文件清单就会在 rename 前以「源不存在」翻车（真实盘则表现为 writeFile ENOENT）。
     await runner.mkdir(staging, { recursive: true, mode: DIR_MODE })
     for (const entry of input.entries) {
-      const target = joinPath(staging, entry.relativePath)
+      const target = joinRemotePath(staging, entry.relativePath)
       if (entry.kind === 'dir') {
         await runner.mkdir(target, { recursive: true, mode: entry.mode ?? DIR_MODE })
       } else {
@@ -343,7 +339,7 @@ export async function verifyRelease(
   const required = config.healthcheck?.fileExists ?? []
 
   for (const rel of required) {
-    const stat = await runner.stat(joinPath(base, rel))
+    const stat = await runner.stat(joinRemotePath(base, rel))
     if (stat === null) return { ok: false, reason: `缺少必需文件 ${rel}` }
   }
 
