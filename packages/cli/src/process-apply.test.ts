@@ -64,8 +64,8 @@ class FakeRunner implements Runner {
     this.execs.push({ argv: [...argv], ...(options !== undefined ? { options } : {}) })
     const forced = this.failWhen(argv)
     if (forced !== undefined) return { code: forced.code, stdout: forced.stdout ?? '', stderr: forced.stderr ?? '' }
-    // 存活断言走 `kill -0 <pid>`，argv[0] 是 sh、argv[2] 是那条命令
-    if (argv.includes('kill -0 "$1"')) {
+    // 存活断言走 `kill -0 <pid>`，argv[0] 是 sh、argv[2] 是那条脚本（多行，所以按包含判断）
+    if (argv.some((part) => part.includes('kill -0 "$1"'))) {
       const d = this.alive()
       return { code: d.code, stdout: d.stdout ?? '', stderr: d.stderr ?? '' }
     }
@@ -641,7 +641,7 @@ describe('dp verify', () => {
         assert.equal(error['code'], 'DP.PROC.NOT_RUNNING')
         assert.match(String(error['hint']), /端口|工作目录|权限|stdoutLog/)
         // 读的是 pidfile 里的 pid，不是 ps 的命令行 —— 同名进程会被误判成我们的
-        assert.ok(runner.execs.some((e) => e.argv.includes('kill -0 "$1"')))
+        assert.ok(runner.execs.some((e) => e.argv.some((part) => part.includes('kill -0 "$1"'))))
       },
       { process: true },
     )

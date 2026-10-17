@@ -1,6 +1,6 @@
 import { DpError, RELEASES_DIR_NAME, joinRemotePath, type Step, type Target, type TargetContext } from '@dp/ports'
 import { renderString, type RenderContext } from '@dp/template'
-import { START_SCRIPT_NAME, STOP_SCRIPT_NAME, graceSecondsOf } from './script.js'
+import { ALIVE_SCRIPT, START_SCRIPT_NAME, STOP_SCRIPT_NAME, graceSecondsOf } from './script.js'
 import type { ProcessTargetConfig } from './types.js'
 
 /** pidfile 的默认相对路径（相对发布根目录） */
@@ -183,11 +183,15 @@ export function previousStartArgv(ctx: TargetContext, releaseId: string): readon
  * 走 `sh -c` 而不是直接 exec `kill`：`kill` 通常是 shell 内建，磁盘上未必有
  * 独立可执行文件，把它当 argv[0] 会在一部分目标机上 ENOENT。
  *
+ * 判定体与停止脚本共用同一份（`ALIVE_SCRIPT`）：僵尸在两边都算死。否则会出现
+ * 「停止脚本说停不掉、verify 说它还活着」这种自相矛盾的现场 —— 那一次停止其实
+ * 已经成功了，只是没人给进程收尸。
+ *
  * @param pid 待检查的 pid
  * @returns 可直接交给 `Runner.exec` 的 argv
  */
 export function aliveArgv(pid: string): readonly string[] {
-  return ['sh', '-c', 'kill -0 "$1"', 'sh', pid]
+  return ['sh', '-c', ALIVE_SCRIPT, 'sh', pid]
 }
 
 const READ_ONLY_UNDO = '无需补偿：只查询状态，不改动任何文件'

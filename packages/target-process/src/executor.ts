@@ -464,7 +464,8 @@ export async function activateProcess(input: ProcessExecInput): Promise<ProcessE
 }
 
 /**
- * ③ verify：读 pidfile 里的 pid，再用 `kill -0` 断言它还活着。
+ * ③ verify：读 pidfile 里的 pid，再断言它还活着（`kill -0` + procfs 状态位，
+ * 僵尸算死）。
  *
  * 不用 `ps` 或 `pgrep` 比对命令行：pid 是部署时自己记下的，比对命令行会
  * 把「同名进程」误判成「我们的进程」。

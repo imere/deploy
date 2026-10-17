@@ -142,7 +142,7 @@ async function verifyOne(
       })
     }
 
-    // process：pidfile 里的 pid + `kill -0`。它不读 ps，所以「同名进程」不会被误判成
+    // process：pidfile 里的 pid + 存活断言。它不读 ps，所以「同名进程」不会被误判成
     // 「我们的进程」—— 而 ps 比对命令行恰恰会把那种现场判成通过
     const processSpec = input.projectConfig.target?.process
     if (processSpec !== undefined) {

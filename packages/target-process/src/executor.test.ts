@@ -12,6 +12,7 @@ import { linuxFacts } from '@dp/testkit'
 import { SCRIPT_MODE } from './script.js'
 import {
   activateProcess,
+  aliveArgv,
   installProcess,
   isProcessExecFailure,
   rollbackProcess,
@@ -273,7 +274,7 @@ describe('process 执行器 · verify', () => {
     runner.files.set(PID_FILE, '4242')
     const result = await verifyProcess({ runner, ctx: makeCtx(), config: makeConfig() })
     assert.equal(result.phase, 'verify')
-    assert.deepEqual(runner.calls, [['sh', '-c', 'kill -0 "$1"', 'sh', '4242']])
+    assert.deepEqual(runner.calls, [aliveArgv('4242')])
   })
 
   it('没有 pidfile → DP.PROC.NOT_RUNNING（进程没把自己记下来，通常是启动时就退了）', async () => {
@@ -329,7 +330,7 @@ describe('process 执行器 · rollback', () => {
     assert.deepEqual(runner.calls, [
       ['sh', '/srv/app/releases/r2/.dp/stop.sh'],
       ['sh', '/srv/app/releases/r1/.dp/start.sh'],
-      ['sh', '-c', 'kill -0 "$1"', 'sh', '4242'],
+      aliveArgv('4242'),
     ])
     assert.equal(result.phase, 'rollback')
     assert.equal(result.started, true)
@@ -373,7 +374,11 @@ describe('process 执行器 · rollback', () => {
     const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set('/srv/app/releases/r1/.dp/start.sh', '#!/bin/sh\n')
     runner.files.set(PID_FILE, '1234')
-    runner.handler = (argv) => (argv[0] === 'sh' && argv[2] === 'kill -0 "$1"' ? { code: 1, stdout: '', stderr: 'gone' } : { code: 0, stdout: '', stderr: '' })
+    // 存活断言那一发单独打回「进程没了」：要验的是「起完了却没活下来」这个现场
+    runner.handler = (argv) =>
+      argv[0] === 'sh' && String(argv[2]).includes('kill -0 "$1"')
+        ? { code: 1, stdout: '', stderr: 'gone' }
+        : { code: 0, stdout: '', stderr: '' }
     await assert.rejects(
       () => rollbackProcess({ runner, ctx: makeCtx({ previousReleaseId: 'r1' }), config: makeConfig() }),
       (err: unknown) => {

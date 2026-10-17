@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DpError, type TargetContext } from '@dp/ports'
+import { renderStopScript } from './script.js'
 import {
   aliveArgv,
   previousStartArgv,
@@ -101,7 +102,27 @@ describe('process target · argv', () => {
   })
 
   it('存活断言走 sh -c：kill 常常是 shell 内建，磁盘上未必有可执行文件', () => {
-    assert.deepEqual(aliveArgv('4242'), ['sh', '-c', 'kill -0 "$1"', 'sh', '4242'])
+    const argv = aliveArgv('4242')
+    assert.deepEqual([argv[0], argv[1], argv[3], argv[4]], ['sh', '-c', 'sh', '4242'])
+    assert.match(String(argv[2]), /kill -0 "\$1"/, 'pid 由 $1 传进去，不拼进脚本正文')
+  })
+
+  it('存活断言把**僵尸**算死：kill -0 对僵尸照样成功，只看它会把「已停」报成「杀不掉」', () => {
+    const body = String(aliveArgv('4242')[2])
+    // 读 /proc/<pid>/stat 的状态位，Z 就是已退出（只是没人收尸）
+    assert.match(body, /\/proc\/\$1\/stat/, body)
+    assert.match(body, /= Z/, body)
+    // 没有 procfs 的非 Linux 机器上退回 kill -0 的结论，不许硬判僵尸
+    assert.match(body, /\[ -r "\/proc\/\$1\/stat" \]/, body)
+  })
+
+  it('停止脚本与存活断言用的是同一份判定（僵尸在两边都算死）', () => {
+    const stopped = renderStopScript({ pidFile: '/x/.dp/p.pid', stopSignal: 'SIGTERM', stopTimeoutMs: 10_000 })
+    const body = String(aliveArgv('1')[2])
+    for (const line of ['kill -0 "$1" 2>/dev/null || return 1', '/proc/$1/stat', '= Z']) {
+      assert.ok(stopped.includes(line), `停止脚本缺判定行 ${line}：${stopped}`)
+      assert.ok(body.includes(line), `存活断言缺判定行 ${line}：${body}`)
+    }
   })
 
   it('版本目录只有一份拼法', () => {

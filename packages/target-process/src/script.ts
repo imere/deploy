@@ -21,6 +21,42 @@ const MIN_GRACE_SECONDS = 1
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 /**
+ * 「进程还活着吗」的判定体。**僵尸算死**。
+ *
+ * 只用 `kill -0` 是不够的：僵尸进程**已经退出**，只是父进程还没给它收尸，而
+ * `kill -0` 对它照样返回成功。服务进程是被 `setsid` 摘出去的孤儿，父进程退出后
+ * 由 1 号进程收养 —— 1 号进程不是 init（容器里常是 `sleep`）时没人收尸，于是
+ * 一次**已经成功**的停止会被判成「优雅期与强杀之后仍然存活」，真因被这句报错盖住。
+ *
+ * 判定顺序：`kill -0` 先过一遍（不存在 / 无权限直接算死），有 procfs 再读状态位。
+ * 没有 procfs 的非 Linux 目标机上退回 `kill -0` 的结论 —— 那一侧没有状态位可查，
+ * 硬判僵尸反而会把活着的进程当成死的。
+ *
+ * `$1` 是 pid。函数体，所以结束时是 `return`，不是 `exit`。
+ */
+const ALIVE_BODY: readonly string[] = [
+  'kill -0 "$1" 2>/dev/null || return 1',
+  'if [ -r "/proc/$1/stat" ]; then',
+  // 括号里的 comm 能含空格与 ')'，所以用「最长前缀」切到最后一个 ') ' 之后。
+  // 先赋空串：read 读到空文件时不赋值，而这段体是能跑在 `set -u` 下的
+  '  DP_LINE=""',
+  '  read -r DP_LINE < "/proc/$1/stat" 2>/dev/null || :',
+  '  DP_AFTER=${DP_LINE##*") "}',
+  '  DP_ST=${DP_AFTER%% *}',
+  '  [ "$DP_ST" = Z ] && return 1',
+  'fi',
+  'return 0',
+]
+
+/**
+ * 存活判定的完整 `sh -c` 脚本体。结尾是 `dp_alive "$1"` 的退出码。
+ *
+ * 单独导出是因为存活断言不止一处：停止脚本里要能在循环里反复调（那是函数体），
+ * `aliveArgv` 要的是「跑一次、退出码即结论」。
+ */
+export const ALIVE_SCRIPT = ['dp_alive() {', ...ALIVE_BODY.map((line) => `  ${line}`), '}', 'dp_alive "$1"'].join('\n')
+
+/**
  * 按 POSIX 单引号规则加引号：串内每个 `'` 换成 `'\''`。
  *
  * 用它而不是双引号，是因为双引号里 `$`、`` ` ``、`\` 仍会被解释 —— 而配置里的路径、
@@ -185,22 +221,27 @@ export function renderStopScript(input: StopScriptInput): string {
     `DP_PIDFILE=${shellQuote(input.pidFile)}`,
     `DP_SIGNAL=${shellQuote(input.stopSignal)}`,
     `DP_GRACE="${grace}"`,
+    // 存活判定走函数而不是裸 `kill -0`：僵尸（已退出、只是没人收尸）必须算死，
+    // 否则「停掉了」会被报成「杀不掉」
+    'dp_alive() {',
+    ...ALIVE_BODY.map((line) => `  ${line}`),
+    '}',
     'if [ ! -f "$DP_PIDFILE" ]; then exit 0; fi',
     'DP_PID=$(cat "$DP_PIDFILE" 2>/dev/null) || DP_PID=""',
     'case "$DP_PID" in ""|*[!0-9]*) rm -f "$DP_PIDFILE"; exit 0;; esac',
     'kill -s "$DP_SIGNAL" "$DP_PID" 2>/dev/null || true',
     'DP_I=0',
-    'while kill -0 "$DP_PID" 2>/dev/null; do',
+    'while dp_alive "$DP_PID"; do',
     '  DP_I=$((DP_I + 1))',
     '  if [ "$DP_I" -ge "$DP_GRACE" ]; then break; fi',
     '  sleep 1',
     'done',
     // 优雅期过了还活着 → 强杀，然后再确认一次
-    'if kill -0 "$DP_PID" 2>/dev/null; then',
+    'if dp_alive "$DP_PID"; then',
     '  kill -KILL "$DP_PID" 2>/dev/null || true',
     '  sleep 1',
     'fi',
-    'if kill -0 "$DP_PID" 2>/dev/null; then',
+    'if dp_alive "$DP_PID"; then',
     '  echo "dp: 进程 $DP_PID 在优雅期与强杀之后仍然存活" >&2',
     '  exit 1',
     'fi',

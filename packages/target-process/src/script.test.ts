@@ -62,7 +62,7 @@ describe('process 脚本 · 渲染', () => {
     const script = renderStopScript({ pidFile: '/srv/app/.dp/process.pid', stopSignal: 'SIGTERM', stopTimeoutMs: 10_000 })
     assert.match(script, /kill -s "\$DP_SIGNAL"/)
     assert.match(script, /kill -KILL "\$DP_PID"/)
-    const checks = script.split('\n').filter((line) => line.includes('kill -0 "$DP_PID"'))
+    const checks = script.split('\n').filter((line) => line.includes('dp_alive "$DP_PID"'))
     assert.ok(checks.length >= 3, `强杀之后还要再查一次：${script}`)
     assert.match(script, /exit 1/, '仍活着必须报错，而不是假装停掉了')
   })

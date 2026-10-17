@@ -71,6 +71,20 @@ function run(cmd, argv, opts = {}) {
 
 const pod = (argv, opts) => run('podman', argv, opts)
 const execIn = (name, script, opts) => pod(['exec', name, 'sh', '-c', script], opts)
+
+/**
+ * 「pid 还活着吗」的 shell 判定，**僵尸算死**。
+ *
+ * 靶机容器的 1 号进程是 `sleep`，不给孤儿收尸 —— 被停掉的服务进程会停在僵尸态，
+ * 而 `kill -0` 对僵尸照样返回成功。所以断言「上一版进程已停」时不能只看 kill -0：
+ * 那会把一次成功的停止判成「没停掉」，而进程其实早退出了。
+ *
+ * @param pid 待判定的 pid
+ * @returns 可直接拼进 `… && echo alive || echo gone` 的 sh 片段
+ */
+function aliveSh(pid) {
+  return `kill -0 ${pid} 2>/dev/null && [ "$(awk '{ sub(/^.*) /, ""); print $1 }' /proc/${pid}/stat 2>/dev/null)" != Z ]`
+}
 const log = (line) => process.stdout.write(`${line}\n`)
 
 /**
@@ -162,6 +176,23 @@ async function dumpTree(name) {
  * 分的是「rsync 本身就没传」与「--rsync-path=sudo 这条路上没传」——
  * 两者的报错在 dp 这一层长得一模一样（退出 0、0 个文件），只有分开跑才看得出来。
  */
+/**
+ * 把靶机的进程表与 pidfile 指向的那个 pid 的状态打出来。
+ *
+ * 「旧进程停不下来」有两种可能：它真没停（还在服务、占着端口），或者它已经退出、
+ * 只是变成了僵尸没人收尸 —— 两者的报错文本一模一样，只有状态位分得开。
+ */
+async function dumpProcess() {
+  const table = await execIn(TARGET, 'ps -eo pid,ppid,stat,args 2>&1 | head -40')
+  log(`    靶机进程表：\n${table.stdout.trim().split('\n').map((l) => `      ${l}`).join('\n')}`)
+  const which = await execIn(
+    TARGET,
+    'for p in $(cat /srv/proc/.dp/app.pid 2>/dev/null); do echo "pidfile=$p"; ' +
+      `awk '{ sub(/^.*) /, ""); print "stat="$1 }' /proc/$p/stat 2>&1; done`,
+  )
+  log(`    pidfile 指向的进程状态：${which.stdout.trim() || '（pidfile 已不在）'}`)
+}
+
 async function dumpRsync() {
   const ip = hosts[TARGET]
   const rsh =
@@ -225,6 +256,7 @@ async function scenario(name, fn) {
     await dumpFacts(name)
     await dumpTree(name)
     if (name === 'static') await dumpRsync()
+    if (name === 'process') await dumpProcess()
   }
 }
 
@@ -470,7 +502,7 @@ async function scenarioProcess() {
   const pid1 = (await execIn(TARGET, 'cat /srv/proc/.dp/app.pid')).stdout.trim()
   assert.match(pid1, /^\d+$/, 'pidfile 里不是 pid')
   assert.equal(
-    (await execIn(TARGET, `kill -0 ${pid1} && echo alive`)).stdout.trim(),
+    (await execIn(TARGET, `${aliveSh(pid1)} && echo alive || echo gone`)).stdout.trim(),
     'alive',
     'pidfile 里的 pid 已经不在了',
   )
@@ -484,8 +516,9 @@ async function scenarioProcess() {
   assert.equal(second.code, 0, `process 第二次 apply：${second.why}`)
   const pid2 = (await execIn(TARGET, 'cat /srv/proc/.dp/app.pid')).stdout.trim()
   assert.notEqual(pid2, pid1, '第二版还是旧 pid —— 旧进程根本没停')
+  // 僵尸算死：容器里没人收尸，被停掉的进程会停在 Z 态，那时 kill -0 仍返回成功
   assert.equal(
-    (await execIn(TARGET, `kill -0 ${pid1} 2>/dev/null && echo alive || echo gone`)).stdout.trim(),
+    (await execIn(TARGET, `${aliveSh(pid1)} && echo alive || echo gone`)).stdout.trim(),
     'gone',
     '上一版进程没被停掉',
   )
