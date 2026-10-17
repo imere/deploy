@@ -133,6 +133,19 @@ async function dumpFacts(name) {
   if (notes.length > 0) log(`    probeNotes：${notes.join(' | ')}`)
 }
 
+/**
+ * 把靶机上的发布根整棵树打出来。
+ *
+ * 「报 0 个文件」有两种可能：真没传过去，或者传过去了但计数错了。
+ * 光看 dp 的报告分不开这两种，而修错的那一个等于白修 —— 树是机器自己给的答案。
+ */
+async function dumpTree(name) {
+  const scenario = scenarioByName(name)
+  if (scenario === undefined) return
+  const r = await execIn(TARGET, `ls -R ${scenario.root} 2>&1 | head -40`)
+  log(`    靶机 ${scenario.root} 的实际内容：\n${r.stdout.trim().split('\n').map((l) => `      ${l}`).join('\n')}`)
+}
+
 async function scenario(name, fn) {
   if (only !== undefined && only !== name) {
     results.push({ name, state: 'skipped', detail: '未选中' })
@@ -152,6 +165,7 @@ async function scenario(name, fn) {
     results.push({ name, state: 'fail', ms: Date.now() - started, detail: String(err?.stack ?? err) })
     log(`  ✖ ${name}\n${String(err?.message ?? err)}`)
     await dumpFacts(name)
+    await dumpTree(name)
   }
 }
 
