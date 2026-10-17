@@ -470,19 +470,3 @@ describe('apply · 远端走 transport', () => {
     }, config)
   })
 })
-
-/**
- * 真机 e2e —— 需要一台真的机器与真的 rsync/tar，跑 `dp apply --host <真机>`。
- * 保留在仓库里是为了让「注入测试覆盖不到的那一段」有明确落点：
- * 真 spawn、真 ssh、真 argv。这里**永远 skip**，不许在 CI 里被打开。
- */
-describe.skip('apply · 远端 transport 真机 e2e', () => {
-  it('rsync/tar 真的把文件搬到远端 staging 并换向', async () => {
-    await withWorkspace(async (dir) => {
-      // 换成真装配：真 acquireFacts + 真 transfer
-      const { defaultApplyDeps } = await import('./deps.js')
-      const r = await run(dir, ['--json', '--host', 'prod'], defaultApplyDeps())
-      assert.equal(r.code, 0, `stderr: ${r.stderr}`)
-    })
-  })
-})

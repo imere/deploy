@@ -211,11 +211,3 @@ describe('runSftp', () => {
     })
   })
 })
-
-describe('真机集成（默认跳过）', () => {
-  describe('sftp 真实传输', { skip: '需要真实 sftp 与开了子系统的目标机' }, () => {
-    test('文件落到目标上', () => {
-      assert.fail('需要靶机后手工启用')
-    })
-  })
-})

@@ -710,16 +710,3 @@ async function makeRemoteConfigDir(): Promise<string> {
   )
   return dir
 }
-
-/**
- * 真机 e2e —— 需要一台真的机器。**永远 skip**，不许在 CI 打开。
- * 保留在仓库里是为了让「注入覆盖不到的那一段」有明确落点：真 ssh、真部署、真回滚。
- */
-describe.skip('ops · 真机 e2e', () => {
-  it('在真目标机上跑通 apply → status → verify → rollback', async () => {
-    await withLocalWorkspace(async (dir) => {
-      const r = await runCli('status', dir, ['--json', '--host', 'local'], defaultApplyDeps())
-      assert.equal(r.code, EXIT_OK, r.stderr)
-    })
-  })
-})

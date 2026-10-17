@@ -250,11 +250,3 @@ describe('runRsync · fake spawn 驱动', () => {
     assert.equal(result.filesTransferred, 0)
   })
 })
-
-describe('真机集成（默认跳过）', () => {
-  describe('rsync over ssh 真实传输', { skip: '需要真实 rsync/scp 与目标机；本地 facts.tools.rsync === null' }, () => {
-    test('增量传输生效', () => {
-      assert.fail('需要 dp-spike-env 起靶机后手工启用')
-    })
-  })
-})

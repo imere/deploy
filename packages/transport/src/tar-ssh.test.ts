@@ -200,11 +200,3 @@ describe('runTarSsh', () => {
     assert.ok(fake.records[0]!.killed.includes('SIGKILL'))
   })
 })
-
-describe('真机集成（默认跳过）', () => {
-  describe('tar over ssh 真实传输', { skip: '需要真实 tar 与目标机' }, () => {
-    test('文件落到目标上', () => {
-      assert.fail('需要 dp-spike-env 起靶机后手工启用')
-    })
-  })
-})
