@@ -239,14 +239,16 @@ export async function probeFacts(driver: SshDriver, options: ProbeOptions): Prom
  * @param driver 已建立的驱动。**必须**是实际执行用的那一条：探测用 A 凭据、写入用 B 凭据，探出来的可写性说明不了任何事
  * @param paths 要判定的**完整路径**（发布根候选或显式 `release.root`）
  * @param known 已实测过的结论（`facts.capabilities.canWrite`）。重复建文件去测同一个目录纯属浪费，每次都是真实 IO
- * @param options 只留超时
+ * @param options 超时，以及**写的时候用的身份**。`become` 给了就按提权后的身份探 ——
+ * 配了免密 sudo 却只按登录用户去探，`/etc/nginx/conf.d` 这种目录会被判成不可写，
+ * 而真写的时候 dp 明明是提权的：探测的身份与写入的身份必须是同一个
  * @returns 以入参路径为键的判定；`notes` 记的是「没能实测、保守记为不可写」的那些 —— 结论与依据必须一起交出去
  */
 export async function probeCreatableRemote(
   driver: SshDriver,
   paths: readonly string[],
   known: Readonly<Record<string, boolean>> = {},
-  options: { readonly timeoutMs?: number } = {},
+  options: { readonly timeoutMs?: number; readonly become?: BecomeConfig } = {},
 ): Promise<{ canWrite: Record<string, boolean>; notes: readonly string[] }> {
   const notes: string[] = []
   const out: Record<string, boolean> = {}
@@ -274,8 +276,15 @@ export async function probeCreatableRemote(
     ),
   ].join('\n')
 
+  // 提权包住的是**整条 sh**：只把 `sh` 换成 `sudo sh` 的话，重定向与 `set -C` 仍在
+  // 登录用户那一侧执行，探到的还是没提权的结果
+  const argv =
+    options.become === undefined || options.become.type === 'none'
+      ? ['sh', '-c', script]
+      : wrapCommand(['sh', '-c', script], options.become)
+
   try {
-    const res = await driver.exec({ argv: ['sh', '-c', script], timeoutMs: resolveTimeoutMs(options.timeoutMs) })
+    const res = await driver.exec({ argv, timeoutMs: resolveTimeoutMs(options.timeoutMs) })
     for (const raw of tagFields(res.stdout, 'DPW')) {
       const [p, v] = raw.split('\t')
       if (p !== undefined) out[p] = v === '1'

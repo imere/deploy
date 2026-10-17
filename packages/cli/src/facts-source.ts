@@ -7,6 +7,7 @@ import type { Logger } from '@dp/log'
 import { probeLocalFacts, probeWritable } from '@dp/local'
 import { connectSsh, probeCreatableRemote, type AuthConfig, type HopSpec, type SshConnectionOptions } from '@dp/ssh'
 import { RELEASE_ROOT_CANDIDATES, expandTemplate } from '@dp/core'
+import { becomeFor } from './become.js'
 
 export const DEFAULT_CONNECT_TIMEOUT_MS = 30_000
 
@@ -227,6 +228,13 @@ export function hopJumpStrings(hops: readonly HopSpec[] | undefined): readonly s
   })
 }
 
+/** canWrite 里判成「不可写」的那几条路径。提权复测只针对它们 —— 已经是 true 的不用再问 */
+function notWritable(canWrite: Readonly<Record<string, boolean>>): readonly string[] {
+  return Object.entries(canWrite)
+    .filter(([, v]) => v !== true)
+    .map(([k]) => k)
+}
+
 export async function acquireFacts(request: FactsRequest): Promise<FactsResult> {
   const env = request.env ?? process.env
   const timeoutMs = request.timeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS
@@ -286,12 +294,21 @@ export async function acquireFacts(request: FactsRequest): Promise<FactsResult> 
   // /srv/<name> 这种第一次部署时几乎总还不存在的路径 —— 不补测的话 canWrite 里根本没有它的键，
   // pickReleaseRoot 只看得见 undefined，于是「明明建得出来」被报成「不可写」。
   // 这与上面 local 分支的 probeCreatable 是同一件事，只是换了执行位置。
-  const targets =
+  const roots =
     request.releaseRoot !== undefined
       ? [request.releaseRoot]
       : request.projectName === undefined
         ? []
         : releaseRootCandidates(request.projectName, base.homedir, base.env, base.platform)
+
+  // canWrite 必须是「**dp 实际写的时候那个身份**能不能写」，不是「登录用户能不能写」。
+  // 配了免密 sudo 却只按登录用户探，/etc/nginx/conf.d 这类目录会被判成不可写，
+  // 而真写的时候 dp 明明是提权的 —— 探测与写入是同一个身份才有意义。
+  // 所以：默认表里判成不可写的那些，按提权后的身份再探一遍；只可能 false → true
+  // （提权探失败就维持 false），不会反过来把已实测的结论盖掉。
+  const become = becomeFor(request.host, `hosts.${request.hostId}`)
+  const retry = become === undefined || become.type === 'none' ? [] : notWritable(base.capabilities.canWrite)
+  const targets = [...new Set([...roots, ...retry])]
 
   if (targets.length === 0) {
     return {
@@ -302,7 +319,20 @@ export async function acquireFacts(request: FactsRequest): Promise<FactsResult> 
     }
   }
 
-  const extra = await probeCreatableRemote(connected.driver, targets, base.capabilities.canWrite)
+  // 要按提权复测的那几条**必须**从 known 里摘掉：`known` 的语义是「已实测过就别再建一次文件」，
+  // 而这一趟换的是身份，上一次的结论正是要被推翻的那个
+  const known = Object.fromEntries(
+    Object.entries(base.capabilities.canWrite).filter(([k]) => !retry.includes(k)),
+  )
+  const extra = await probeCreatableRemote(connected.driver, targets, known, {
+    ...(become !== undefined ? { become } : {}),
+  })
+  // 提权探过的那些要说出来：sudo 能写遍全场是事实，但读者有权知道 canWrite 是
+  // 按哪个身份得出的 —— 否则「为什么这台机器上什么都可写」又会变成一次猜谜
+  const becomeNote =
+    retry.length > 0
+      ? [`canWrite 中 ${retry.length} 条按 hosts.${request.hostId}.become（提权后）复测过：${retry.join('、')}`]
+      : []
   return {
     facts: {
       ...base,
@@ -311,7 +341,7 @@ export async function acquireFacts(request: FactsRequest): Promise<FactsResult> 
         canWrite: { ...base.capabilities.canWrite, ...extra.canWrite },
       },
     },
-    probeNotes: [...notes, ...extra.notes],
+    probeNotes: [...notes, ...becomeNote, ...extra.notes],
     close: () => connected.close(),
     // 同一条连接上的 Runner 交给调用方复用，别让人为了写文件再连一次
     runner: connected.runner,

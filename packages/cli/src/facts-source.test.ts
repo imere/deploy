@@ -298,16 +298,24 @@ describe('facts-source · 远端也要补测发布根', () => {
   function connectWith(
     facts: Facts,
     reply: (script: string) => DriverExecResult,
-  ): { scripts: () => string[]; connect: NonNullable<Parameters<typeof acquireFacts>[0]['connect']> } {
+  ): {
+    scripts: () => string[]
+    argvs: () => (readonly string[])[]
+    connect: NonNullable<Parameters<typeof acquireFacts>[0]['connect']>
+  } {
     const seen: string[] = []
+    const seenArgv: (readonly string[])[] = []
     const driver = {
       kind: 'ssh2',
       async available() {
         return { ok: true }
       },
       async exec(req: ExecRequest) {
-        const script = req.argv[2] ?? ''
+        // 取最后一个元素：提权形态是 `sudo -n -u root -- sh -c <script>`，
+        // 脚本仍然在末位（认死 argv[2] 会在提权那侧读到 `-u`）
+        const script = req.argv[req.argv.length - 1] ?? ''
         seen.push(script)
+        seenArgv.push(req.argv)
         return reply(script)
       },
       async close() {},
@@ -320,7 +328,7 @@ describe('facts-source · 远端也要补测发布根', () => {
       tunnel: async () => ({ rshArgv: ['ssh'], close: async () => {} }),
       close: async () => {},
     })) as unknown as NonNullable<Parameters<typeof acquireFacts>[0]['connect']>
-    return { scripts: () => seen, connect }
+    return { scripts: () => seen, argvs: () => seenArgv, connect }
   }
 
   it('显式 release.root：补测它自己，并把结论并进 canWrite', async () => {
@@ -392,5 +400,83 @@ describe('facts-source · 远端也要补测发布根', () => {
       true,
       `notes 没说明 /srv/web 为什么是 false：${got.probeNotes.join(' | ')}`,
     )
+  })
+
+  /**
+   * 真机教训：配了免密 sudo，conf.d 这种目录却仍被判不可写 ——
+   * 因为探测只按登录用户跑了一遍。探测的身份与写入的身份必须是同一个。
+   */
+  it('配了 become：默认表里判 false 的那几条按提权后的身份复测', async () => {
+    const rec = connectWith(remoteFacts({ '/srv': false, '/etc/nginx/conf.d': false }), (script) => ({
+      code: 0,
+      stdout: script.includes('/etc/nginx/conf.d') ? 'DPW\t/etc/nginx/conf.d\t1\n' : '',
+      stderr: '',
+    }))
+    const got = await acquireFacts({
+      hostId: 'web',
+      host: { layout: 'auto', ssh: 'dp@10.0.0.5', become: {
+        type: 'sudo',
+        user: 'root',
+        method: 'nopasswd',
+        passwordRef: undefined,
+        preserveEnv: false,
+        template: undefined,
+      } },
+      env: { DP_SSH_KEY: 'k' },
+      projectName: 'web',
+      releaseRoot: '/srv/web',
+      connect: rec.connect,
+    })
+    assert.equal(got.facts.capabilities.canWrite['/etc/nginx/conf.d'], true)
+    const argv = rec.argvs()[0] ?? []
+    assert.equal(argv[0], 'sudo', `复测必须走提权，实际 argv：${argv.join(' ')}`)
+    assert.ok(
+      got.probeNotes.some((n) => n.includes('become') && n.includes('/etc/nginx/conf.d')),
+      `note 里要说清 canWrite 是按提权后的身份得出的：${got.probeNotes.join(' | ')}`,
+    )
+  })
+
+  it('没配 become：默认表里已经 false 的那几条不复测（只补测发布根）', async () => {
+    const rec = connectWith(remoteFacts({ '/srv': false, '/etc/nginx/conf.d': false }), () => ({
+      code: 0,
+      stdout: '',
+      stderr: '',
+    }))
+    await acquireFacts({
+      hostId: 'web',
+      host: { layout: 'auto', ssh: 'dp@10.0.0.5' },
+      env: { DP_SSH_KEY: 'k' },
+      projectName: 'web',
+      releaseRoot: '/srv/web',
+      connect: rec.connect,
+    })
+    const script = rec.scripts()[0] ?? ''
+    assert.ok(!script.includes('/etc/nginx/conf.d'), `没配 become 就不该复测它：${script}`)
+    assert.ok(script.includes('/srv/web'), '发布根照旧要补测')
+  })
+
+  it('提权复测也失败：维持 false，不把「没探出来」当成可写', async () => {
+    const rec = connectWith(remoteFacts({ '/etc/nginx/conf.d': false }), () => ({
+      code: 5,
+      stdout: '',
+      stderr: 'sudo: a password is required',
+    }))
+    const got = await acquireFacts({
+      hostId: 'web',
+      host: { layout: 'auto', ssh: 'dp@10.0.0.5', become: {
+        type: 'sudo',
+        user: 'root',
+        method: 'nopasswd',
+        passwordRef: undefined,
+        preserveEnv: false,
+        template: undefined,
+      } },
+      env: { DP_SSH_KEY: 'k' },
+      projectName: 'web',
+      releaseRoot: '/srv/web',
+      connect: rec.connect,
+    })
+    assert.equal(got.facts.capabilities.canWrite['/etc/nginx/conf.d'], false)
+    assert.equal(got.facts.capabilities.canWrite['/srv/web'], false)
   })
 })

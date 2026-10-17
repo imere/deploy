@@ -4,7 +4,7 @@
  * 只做「配置 → 运行形态」的翻译，不做任何编排：步骤顺序与失败处理在 apply.ts。
  */
 import type { SourceSpec } from '@dp/local'
-import { DpError, type BecomeConfig, type SourceEntry, type TargetContext } from '@dp/ports'
+import { DpError, type SourceEntry, type TargetContext } from '@dp/ports'
 import { dirname, sep } from 'node:path'
 import type { HostConfig, ProjectConfig } from '@dp/schema'
 import type { DockerTargetConfig } from '@dp/target-docker'
@@ -12,6 +12,7 @@ import type { NginxTargetConfig } from '@dp/target-nginx'
 import type { ProcessTargetConfig } from '@dp/target-process'
 import type { SystemdTargetConfig } from '@dp/target-systemd'
 import { chooseTransport, type TransferRequest, type TransportKind, type TransportPreference } from '@dp/transport'
+import { becomeFor } from '../become.js'
 import type { ApplyDeps } from '../deps.js'
 import { dockerConfigFor } from '../docker-config.js'
 import { type FactsResult, hopJumpStrings, resolveAuth, resolveSshEndpoint } from '../facts-source.js'
@@ -109,65 +110,6 @@ export function transportPreference(hostConfig: HostConfig, path: string): Trans
   // 全是 local-copy 等价于「没写偏好」——给协商一条空链它会退回默认链，
   // 而用户明写的东西被悄悄丢掉是最难发现的一类行为
   return mapped.length === 0 ? undefined : mapped
-}
-
-/**
- * schema 的 become（配置形态）→ ports 的 become（运行形态）。
- *
- * 两个形状不一样是刻意的：配置形态带 method / passwordRef（凭据解析是
- * schema 的职责），运行形态只描述「怎么提权」。
- *
- * 有两类配置**明确拒绝**而不是凑一个值出来 —— 歧义靠拒绝，不靠默认值：
- *  - `custom`：schema 里没有承载命令模板的字段，凑一个就是凭空发明行为；
- *  - `method: stdin | pty`：要密码的提权，而运行形态没有密码通道。
- */
-export function becomeFor(hostConfig: HostConfig, path: string): BecomeConfig | undefined {
-  const b = hostConfig.become
-  if (b === undefined) return undefined
-  switch (b.type) {
-    case 'none':
-      return { type: 'none' }
-    case 'sudo': {
-      // stdin / pty 意味着「sudo 要问密码」。传输层没有密码通道（passwordRef 是
-      // schema 的事，BecomeConfig 里根本没有承载它的字段），而 @dp/ssh 对
-      // nonInteractive=false 的处理是**直接拒绝**（become.ts：铁律 0 不许等 stdin）。
-      // 与其让它在深处抛一句看不懂的 refusal，不如在这里说清「没接」。
-      if (b.method === 'stdin' || b.method === 'pty') {
-        throw new DpError('DP.CONFIG.INVALID', `become.method=${b.method} 尚未接入传输层`, {
-          path: `${path}.become.method`,
-          hint: '传输层没有密码通道，带密码的 sudo 会撞铁律 0。请配免密 sudo（nopasswd）或改用 su',
-        })
-      }
-      return {
-        type: 'sudo',
-        ...(b.user !== undefined ? { user: b.user } : {}),
-        nonInteractive: true,
-      }
-    }
-    case 'doas':
-      return { type: 'doas', ...(b.user !== undefined ? { user: b.user } : {}) }
-    case 'su': {
-      if (b.user === undefined || b.user === '') {
-        throw new DpError('DP.CONFIG.INVALID', 'become.type=su 必须写 become.user', {
-          path: `${path}.become.user`,
-          hint: "su 不给用户名就没有目标身份，写成 { \"type\": \"su\", \"user\": \"www-data\" }",
-        })
-      }
-      return { type: 'su', user: b.user }
-    }
-    case 'custom': {
-      // schema 已保证 template 存在且含 ${cmd}；这里再兜一次是因为本函数也会被
-      // 不经过 schema 的路径调用（测试夹具、--facts 旁路），「custom 一定有模板」
-      // 得在代码里也成立，否则 wrapCommand 会在更深处抛一个不带配置项位置的错
-      if (b.template === undefined || b.template.trim() === '') {
-        throw new DpError('DP.CONFIG.INVALID', 'become.type=custom 缺少 template', {
-          path: `${path}.become.template`,
-          hint: '模板形如 `dzdo -u root ${cmd}`；${cmd} 会被替换成被提权的那条命令',
-        })
-      }
-      return { type: 'custom', template: b.template }
-    }
-  }
 }
 
 export interface ApplyTargetInput {

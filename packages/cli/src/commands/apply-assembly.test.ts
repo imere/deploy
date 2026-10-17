@@ -7,6 +7,7 @@
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { join } from 'node:path'
 import type { SourceSpec } from '@dp/local'
 import type { SourceEntry } from '@dp/ports'
 import { sourceBaseFor, withParentDirs } from './apply-assembly.js'
@@ -35,9 +36,10 @@ describe('sourceBaseFor', () => {
     assert.equal(sourceBaseFor(spec), '/work/dist')
   })
 
-  it('分隔符统一成正斜杠：拼出来的串要进远端 argv', () => {
-    const spec: SourceSpec = { root: String.raw`D:\work\dist`, mode: 'contents' }
-    assert.equal(sourceBaseFor(spec), 'D:/work/dist')
+  it('结果里的分隔符一律是正斜杠：拼出来的串要进 rsync / scp 的远端 argv', () => {
+    // join 用的是当前平台的分隔符，这条断言在两侧都成立（POSIX 上本来就是 /）
+    const spec: SourceSpec = { root: join('work', 'dist'), mode: 'contents' }
+    assert.equal(sourceBaseFor(spec), 'work/dist')
   })
 })
 
