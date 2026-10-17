@@ -20,9 +20,9 @@ import { defineConfig } from '@dp/schema'
 export default defineConfig({
   projects: {
     web: {
-      source: './dist',          // 要传什么：目录（尾随 / 影响语义）或若干文件
-      host: 'prod',              // 传到哪：`hosts` 里的名字
-      to: '/var/www/web',        // 远端哪里
+      source: { root: './dist/**' }, // 要传什么：`./dist/**` 只放目录内容；`./dist` 连目录本身一起放
+      hosts: ['prod'],               // 传到哪：`hosts` 里的名字，一台或多台
+      release: { root: '/var/www/web' }, // 放哪：远端发布根；不写则按实测能力推导
     },
   },
   hosts: {
@@ -31,25 +31,19 @@ export default defineConfig({
 })
 ```
 
-跑起来：`dp deploy web --env prod`。
+跑起来：`dp deploy web`。
 
-**上面的配置里省掉了什么？** 传输方式（自动协商 rsync/tar-ssh/sftp）、target 类型（自动识别）、release 布局与回滚（默认开启）、日志脱敏（默认开启）、是否提权（探测后再决定要不要问密码）、target 的生效步骤（没有 target 就不需要）。
+**上面的配置里省掉了什么？** 传输方式（自动协商 rsync/tar-ssh/sftp）、target 类型（自动识别，缺省 static）、release 布局与回滚（默认开启）、日志脱敏（默认开启）、是否提权（探测后再决定要不要问密码）、target 的生效步骤（没有 target 段就按 static 走）。
 
-只有三个字段是真正必填的：**谁（source）、去哪（host）、放哪（to 或 target）**。
-
----
-
-## 2. 同样的配置，写成 JSON
-
-`dp` 按顺序自动发现 `deploy.config.ts | .js | .json`（前者能写逻辑，后者最通用），也支持 `--config` 指定。JSON 里就是同一个对象：
+必填的只有 **谁（source.root）、去哪（hosts）**；放哪不写就由实测能力推导。JSON 里同一个对象：
 
 ```json
 {
   "projects": {
     "web": {
-      "source": "./dist",
-      "host": "prod",
-      "to": "/var/www/web"
+      "source": { "root": "./dist/**" },
+      "hosts": ["prod"],
+      "release": { "root": "/var/www/web" }
     }
   },
   "hosts": {
@@ -58,9 +52,13 @@ export default defineConfig({
 }
 ```
 
-字段提示有三条路：TS / JS 写法直接吃 `defineConfig()` 的类型；JSON 写法跑 `dp schema` 拿 JSON Schema（默认输出到 stdout，`--out <路径>` 会写到指定文件），在编辑器的 JSON Schema 关联设置里把它绑到 `deploy.config.json`。配置文件本身**不收** `$schema` 这类元键：schema 拒未知字段，写了过不了校验。
+---
 
-文件与对象走同一份 schema：`defineConfig()` 就是配置文件的编程式入口，不存在「文件里能写的比对象里多」。
+## 2. 字段提示与 schema
+
+`dp` 按顺序自动发现 `deploy.config.ts | .js | .json`（前者能写逻辑，后者最通用），也支持 `--config` 指定。文件与对象走同一份 schema：`defineConfig()` 就是配置文件的编程式入口，不存在「文件里能写的比对象里多」。
+
+字段提示有三条路：TS / JS 写法直接吃 `defineConfig()` 的类型；JSON 写法跑 `dp schema` 拿 JSON Schema（默认输出到 stdout，`--out <路径>` 会写到指定文件），在编辑器的 JSON Schema 关联设置里把它绑到 `deploy.config.json`。配置文件本身**不收** `$schema` 这类元键：schema 拒未知字段，写了过不了校验。
 
 ---
 
@@ -72,31 +70,24 @@ export default defineConfig({
 
 ```ts
 export default defineConfig({
-  defaults: { release: { keep: 5 } },
+  projects: { web: { source: { root: './dist/**' }, hosts: ['web'] } },
+  hosts: { web: { ssh: 'deploy@origin.example.com' } },
   profiles: {
     staging: { hosts: { web: { ssh: 'deploy@stg.example.com' } } },
-    prod:    { hosts: { web: { ssh: 'deploy@prod.example.com' } }, release: { keep: 10 } },
+    prod:    { hosts: { web: { ssh: 'deploy@prod.example.com' } } },
   },
 })
 ```
 
 `dp deploy web --env prod`。**没有 `--env` 时必须有明确的默认 profile，否则报错** —— 不猜环境，猜错了就是把预发的东西发到生产。
 
-### 3.2 project × env 的矩阵：多个项目同时多环境
+profile 能覆写的只有 **hosts**（合成顺序 `defaults.hosts ⊂ hosts ⊂ profiles.<env>.hosts`，schema 只留有真实语义的字段）：「同一台机器名在预发连别处、生产连快一点」是环境差异，release / transport / activation 不随环境变 —— 想按环境调 keep，把它写进项目段或用配置生成器按环境生成整份配置。
 
-```ts
-profiles: {
-  prod: {
-    projects: {
-      web:   { host: 'prod-web',   to: '/srv/web' },
-      admin: { host: 'prod-admin', to: '/srv/admin' },
-      api:   { target: { type: 'docker', compose: { projectName: 'api' } } },
-    },
-  },
-}
-```
+### 3.2 一次推整个环境：`--all`
 
-`dp deploy --all --env prod` → 一次把整个环境推上去（按主机逐个扇出）。
+`dp apply --all --env prod` → 把 `projects` 里的每个项目都推上去（按主机逐个扇出）；`dp plan --all` 用同一个覆盖口径先出计划。
+
+profile 段能覆写的只有上表那四类：hosts / release / transport / activation。项目的 target 类型与 source 是项目自己的属性，不随环境变 —— 「同一项目在不同环境连不同机器」交给 hosts 覆写，别在 profiles 里试图重定义项目。
 
 ### 3.3 环境变量插值与 secretRef
 
@@ -111,8 +102,9 @@ profiles: {
 
 凭据**永远写成 ref，不写明文**：
 
-```yaml
-auth: { type: password, passwordRef: env:DEPLOY_PASSWORD }
+```ts
+// auth 段在 hosts.<id> 下
+{ auth: { type: 'password', passwordRef: 'env:DEPLOY_PASSWORD' } }
 ```
 
 scheme 目前只有 `env:`（环境变量）一种 —— 别的来源没有实现，写了也取不到值。
@@ -131,30 +123,36 @@ scheme 目前只有 `env:`（环境变量）一种 —— 别的来源没有实�
 
 已落地的写法：
 
-```yaml
-hosts:
-  prod:
-    ssh: 'deploy@10.0.0.7'          # user@host[:port]。与 hops 二选一
-    become:                          # 可选。不写 = 纯普通用户，同样受支持
-      type: sudo                     # none | sudo | su | doas | custom
-      user: root
-      method: auto                   # auto | nopasswd | stdin | pty
-      passwordRef: env:SUDO_PASSWORD
-      preserveEnv: false
-    layout: auto                     # auto | system | user。路径由能力推导，不写死系统路径
-    transport:
-      strategy: auto                 # auto | rsync | tar-ssh | sftp | local
-      delete: false
-
-  local-box: { local: true }         # 本机目标
+```ts
+// hosts / become / layout / transport 段都在 hosts.<id> 下
+{
+  host: {
+    ssh: 'deploy@10.0.0.7',        // user@host[:port]。与 hops 二选一
+    become: {                      // 可选。不写 = 纯普通用户，同样受支持
+      type: 'sudo',                // none | sudo | su | doas | custom
+      user: 'root',
+      method: 'auto',              // auto | nopasswd | stdin | pty
+      passwordRef: 'env:SUDO_PASSWORD',
+      preserveEnv: false,
+    },
+    layout: 'auto',                // auto | system | user。路径由能力推导，不写死系统路径
+    transport: {
+      strategy: 'auto',            // auto | rsync | tar-ssh | sftp | scp | local
+      delete: false,
+    },
+  },
+  localBox: { local: true },       // 本机目标
+}
 ```
 
 多跳：把整条链写进 `hops`，**最后一跳就是目标机**：
 
-```yaml
-    hops:
-      - { ssh: 'ops@jump.example.com', auth: { type: agent } }
-      - { ssh: 'deploy@10.0.0.7',     auth: { type: key, identityFile: '~/.ssh/id_ed25519' } }
+```ts
+// 一跳一个条目，最后一跳就是目标机
+hops: [
+  { ssh: 'ops@jump.example.com', auth: { type: 'agent' } },
+  { ssh: 'deploy@10.0.0.7',      auth: { type: 'key', identityFile: '~/.ssh/id_ed25519' } },
+]
 ```
 
 这些限制都会在配置加载或拼 argv 时**显式报错**，不会静默降级。
@@ -194,11 +192,15 @@ hosts:
 
 一个 project 可以同时投向**多台主机**：
 
-```yaml
-projects:
-  web:
-    source: { root: './dist' }
-    hosts: ['prod-web-01', 'prod-web-02', 'prod-web-03']   # 不写则投向所有主机
+```ts
+{
+  projects: {
+    web: {
+      source: { root: './dist' },
+      hosts: ['prod-web-01', 'prod-web-02', 'prod-web-03'], // 不写则投向所有主机
+    },
+  },
+}
 ```
 
 扇出的单位要清楚：**一次部署里，每台主机各自算一条独立的 plan**（各自的 Facts 可能不同 ——
@@ -257,32 +259,42 @@ activation，跨机重复运行也就安全了。
 conf **不手写**，由 `@dp/target-nginx` 从结构化配置生成。`confd` 不在这里 —— 它是
 `target.confd`，由实测可写性推导（目标机上的路径不是配置项）。
 
-```yaml
-projects:
-  web:
-    source: { root: './dist' }
-    release: { root: '/srv/web' }
-    target:
-      type: [static, nginx]        # 先按静态投放，再换 conf
-      # confd: '/etc/nginx/conf.d' # 推导不出来时才显式写（注意写的是主配置 include 的那个目录）
-      nginx:
-        filename: '${project}.conf'   # 可选，默认 <项目名>.conf。不含目录
-        force: false                  # 覆盖未带 `# managed by dp` 的同名文件（仍先备份）
-        reload: [systemctl, reload, nginx]   # argv[]；false = 由外部机制重载
-        server:                       # 单个块，或块数组
-          serverName: ['www.example.com']
-          listen: [80, '443 ssl']
-          root: '${release.current}'  # 软链，不是具体版本目录
-          index: ['index.html']
-          locations:
-            - path: '/'
-              tryFiles: '$uri $uri/ /index.html'
-            - path: '/api/'
-              proxy:
-                upstream: 'http://127.0.0.1:8080'   # 末尾斜杠的两种语义不同，它报错而不替你选
-                websocket: true
-                timeouts: { connect: 5, send: 30, read: 30 }
-          extra: ['add_header X-Deployed-By dp always;']   # 原样输出，连 `;` 都不补 —— 分号自己写
+```ts
+{
+  projects: {
+    web: {
+      source: { root: './dist' },
+      release: { root: '/srv/web' },
+      target: {
+        type: ['static', 'nginx'],   // 先按静态投放，再换 conf
+        // confd: '/etc/nginx/conf.d', // 推导不出来时才显式写（注意写的是主配置 include 的那个目录）
+        nginx: {
+          filename: '${project}.conf', // 可选，默认 <项目名>.conf。不含目录
+          force: false,                // 覆盖未带 `# managed by dp` 的同名文件（仍先备份）
+          reload: ['systemctl', 'reload', 'nginx'], // argv[]；false = 由外部机制重载
+          server: {                    // 单个块，或块数组
+            serverName: ['www.example.com'],
+            listen: [80, '443 ssl'],
+            root: '${release.current}', // 软链，不是具体版本目录
+            index: ['index.html'],
+            locations: [
+              { path: '/', tryFiles: '$uri $uri/ /index.html' },
+              {
+                path: '/api/',
+                proxy: {
+                  upstream: 'http://127.0.0.1:8080', // 末尾斜杠的两种语义不同，它报错而不替你选
+                  websocket: true,
+                  timeouts: { connect: 5, send: 30, read: 30 },
+                },
+              },
+            ],
+            extra: ['add_header X-Deployed-By dp always;'], // 原样输出，连 `;` 都不补 —— 分号自己写
+          },
+        },
+      },
+    },
+  },
+}
 ```
 
 生效顺序固定：**渲染到影子目录 → `nginx -t` 影子校验 → 备份 → 原子 rename → 整棵树 `-t`
@@ -297,24 +309,32 @@ projects:
 `docker compose`。`build-push` / `build-load` / `image-only` 需要本机 docker 与镜像仓库，
 **显式报 `DP.DOCKER.MODE_UNSUPPORTED`**，不按 remote-cli 静默降级。
 
-```yaml
-projects:
-  api:
-    source: { root: './deploy' }        # compose 文件在这里，随 release 一起上传
-    release: { root: '/srv/api' }
-    target:
-      type: docker
-      docker:
-        mode: remote-cli
-        compose:
-          files: ['docker-compose.yml', 'docker-compose.prod.yml']  # 相对 release 目录，按顺序生效
-          projectName: 'api'            # compose -p：容器名/网络名前缀，只允许 [a-z0-9_-]
-          envFile: '.env.prod'          # 可选 → --env-file
-          pull: true                    # 默认 true：浮动 tag 不 pull 等于部署上一轮的镜像
-          wait: true                    # 默认 true：up --wait，关掉后 verify 是唯一一道关
-        healthcheck:
-          services: ['api']             # 可选，空 = ps 输出里每个服务都要通过
-          expectStates: ['running', 'healthy']
+```ts
+{
+  projects: {
+    api: {
+      source: { root: './deploy' }, // compose 文件在这里，随 release 一起上传
+      release: { root: '/srv/api' },
+      target: {
+        type: 'docker',
+        docker: {
+          mode: 'remote-cli',
+          compose: {
+            files: ['docker-compose.yml', 'docker-compose.prod.yml'], // 相对 release 目录，按顺序生效
+            projectName: 'api',   // compose -p：容器名/网络名前缀，只允许 [a-z0-9_-]
+            envFile: '.env.prod', // 可选 → --env-file
+            pull: true,           // 默认 true：浮动 tag 不 pull 等于部署上一轮的镜像
+            wait: true,           // 默认 true：up --wait，关掉后 verify 是唯一一道关
+          },
+          healthcheck: {
+            services: ['api'],    // 可选，空 = ps 输出里每个服务都要通过
+            expectStates: ['running', 'healthy'],
+          },
+        },
+      },
+    },
+  },
+}
 ```
 
 **compose 文件里的变量不由 dp 解释**：compose 自己用 `${VAR}` 插值、`$$` 转义，dp 再
@@ -427,20 +447,17 @@ command 当参数传进去的回滚会变成「用当前配置的命令在上一
 ## 7. 覆盖优先级
 
 ```
-CLI --set / 参数  >  project 内的 target  >  profiles.<env>.projects.<name>
-                 >  profiles.<env>.defaults  >  defaults      （后者被前者覆盖）
+schema 默认值（withDefault）  <  defaults.hosts[<id>]  <  hosts[<id>]  <  profiles.<env>.hosts[<id>]
 ```
 
-嵌套对象**深合并**，数组**整体替换**（数组合并的语义永远说不清）。
+后者胜出。合成只发生在 **hosts** 一段（连接层随环境变），在 `@dp/cli` 的 targets 一处实现；
+项目段（source / release / target / transport / healthcheck / activation）没有环境覆写层 ——
+它们是项目自己的属性。命令行参数（`--config / --env / --project / --host / --all`）
+做的是**选择与路由**，不是值覆盖。
 
-`dp plan` 会输出「最终生效配置」的解析结果与来源，例如：
-
-```
-release.keep = 10        ← profiles.prod.release.keep
-transport.strategy = auto ← defaults（本次协商结果：tar-ssh）
-```
-
-**每一个生效值都要能解释「它从哪来」** —— 这是配置系统的可调试性底线。
+「这次会做什么」由 `dp plan` 打出来：布局、发布根、步数与目标机能力候选（可达/可写逐项
+给 ✓/✗ 与原因）。配置值本身没有「每个值打印来源」这道输出 —— 覆盖链只此一处实现，
+查链就去读那一处，不做两份可能与真值分叉的解释器。
 
 ---
 
@@ -450,8 +467,7 @@ transport.strategy = auto ← defaults（本次协商结果：tar-ssh）
 schema 改过就重跑一次），不是手抄的 —— 抄出来的表一定会
 和实现分叉，而分叉之后用户照着文档写的配置在校验期就被顶回来。
 
-（`defaults` 与 `profiles.<env>` 的字段是 `hosts` / `release` / `transport` / `activation`
-四段的子集，写法同上，故不重复列出。）
+（`defaults.hosts` 与 `profiles.<env>.hosts` 就是 `hosts` 同形状的覆写位，故不重复列出。）
 
 | 字段 | 必填 | 类型 / 取值 |
 | --- | --- | --- |

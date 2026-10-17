@@ -597,29 +597,27 @@ export const projectSchema = obj(
 )
 
 /**
- * 配置根。`defaults` 与 `profiles` 是同一组段的两种复用方式，优先级由 `@dp/core` 合成阶段定，schema 层不判先后 ——合并语义只有一处，判两次的结果是两边对同一份配置给出不同答案。
+ * 配置根。`defaults` 与 `profiles` 的合成只发生在 `hosts` 一段：
+ * `defaults.hosts[<id>]` ⊂ `hosts[<id>]` ⊂ `profiles.<env>.hosts[<id>]`（后者胜出，
+ * 合成只在 `@dp/cli` 的 targets 一处），因为「同一条连接在不同环境里不同」才是环境差异。
+ * 其余段不给覆写位 —— schema 里留一个写了没效果的键，等于把「配置为什么不起作用」
+ * 变成一次静默误导；要覆写 release / transport / activation，直接写在项目段上。
  */
 export const configSchema = obj(
   {
     defaults: opt(
       obj({
         hosts: opt(record(hostSchema)),
-        release: opt(releaseSchema),
-        transport: opt(transportSchema),
-        activation: opt(activationSchema),
       }),
     ),
     hosts: opt(record(hostSchema)),
     projects: record(projectSchema),
     profiles: opt(
       record(
-        obj({
-          hosts: opt(record(hostSchema)),
-          release: opt(releaseSchema),
-          transport: opt(transportSchema),
-          activation: opt(activationSchema),
-        }),
-        '环境档案（dev / staging / prod）',
+        obj(
+          { hosts: opt(record(hostSchema)) },
+          '环境档案（dev / staging / prod）。只覆写 hosts',
+        ),
       ),
     ),
   },
