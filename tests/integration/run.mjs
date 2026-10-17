@@ -161,9 +161,10 @@ function writeFixtures() {
 function config(project, extra) {
   return {
     hosts: {
+      // 单跳没有 auth 字段：私钥走 ssh 的默认身份文件（容器里就是 /root/.ssh/id_ed25519），
+      // 这也是真实部署里最常见的形态 —— 不靠配置里再写一遍路径
       target: {
         ssh: `dp@${extra.targetHost}:22`,
-        auth: { type: 'key', identityFile: '/root/.ssh/id_ed25519' },
         become: { type: 'sudo', user: 'root', method: 'nopasswd' },
         transport: { strategy: 'auto' },
       },
