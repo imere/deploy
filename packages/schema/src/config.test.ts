@@ -560,6 +560,23 @@ describe('become · custom 的命令模板', () => {
     assert.match(e.message, /\$\{cmd\}/)
   })
 
+  it('模板在 ${cmd} 之外出现 ${ 报错：执行期只做字面替换，其它 ${ 会原样进远端 shell', () => {
+    const e = codeOf(() => defineBecome({ type: 'custom', template: 'dzdo -u root ${cmd} < ${release.log}' }))
+    assert.equal(e.code, 'DP.CONFIG.INVALID')
+    assert.equal(e.path, 'become.template')
+    // ${cmdless} 以 cmd 开头却不是占位 —— 按原文比对 ${cmd} 全串，不能按前缀放行
+    const e2 = codeOf(() => defineBecome({ type: 'custom', template: 'dzdo ${cmd} ${cmdless}' }))
+    assert.equal(e2.path, 'become.template')
+    // 提示要说清后果与去处：模板不渲染，字面 $ 写不进去
+    assert.match(e.hint ?? '', /原样进远端 shell/)
+    assert.match(e.hint ?? '', /cmd/)
+  })
+
+  it('占位重复出现仍放行：运行期是全量替换，每个占位都会被换掉', () => {
+    const parsed = defineBecome({ type: 'custom', template: 'a ${cmd} b ${cmd}' })
+    assert.equal(parsed.template, 'a ${cmd} b ${cmd}')
+  })
+
   it('空白模板按没给处理', () => {
     const e = codeOf(() => defineBecome({ type: 'custom', template: '   ' }))
     assert.equal(e.path, 'become.template')

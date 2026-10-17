@@ -102,7 +102,7 @@ export const becomeSchema = constrained(
       method: withDefault(oneOf(['auto', 'nopasswd', 'stdin', 'pty'] as const), 'auto'),
       passwordRef: opt(str('凭据引用，如 env:SUDO_PASSWORD —— 绝不直接写密码')),
       preserveEnv: withDefault(bool(), false),
-      template: opt(str('type=custom 的命令模板，必须含 ${cmd}')),
+      template: opt(str('type=custom 的命令模板。除 ${cmd} 外不得再出现 ${（会原样进远端 shell）')),
     },
     '提权方式。type: none = 纯普通用户，同样是一等公民',
   ),
@@ -127,6 +127,23 @@ export const becomeSchema = constrained(
         path: `${path}.template`,
         hint: '没有占位的模板会把被提权的命令整条丢掉 —— 那表现成「提权成功了但什么都没发生」',
       })
+    }
+    // become 的执行路径不走模板渲染：运行期就是一次字面 `${cmd}` 替换。模板里其余的
+    // `${` 没有任何引擎会去解释，原样落到远端 shell 手里 —— 校验层是唯一能看见这条
+    // 旁路的地方，在这里拒绝；等 shell 举手就晚了
+    let dollar = value.template.indexOf('${')
+    while (dollar !== -1) {
+      if (!value.template.startsWith('${cmd}', dollar)) {
+        throw new DpError(
+          'DP.CONFIG.INVALID',
+          `become.template 在 \${cmd} 之外出现 \${：${value.template.slice(dollar, dollar + 12)}`,
+          {
+            path: `${path}.template`,
+            hint: '模板除 ${cmd} 外不许出现 ${ —— 写上去的字面序列会原样进远端 shell 参与分词与展开。需要字面 $ 的值放进 cmd，别放进模板',
+          },
+        )
+      }
+      dollar = value.template.indexOf('${', dollar + 1)
     }
   },
 )
