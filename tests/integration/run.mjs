@@ -208,13 +208,15 @@ async function dp(argv) {
     stdout: r.stdout,
     stderr: r.stderr,
     // 失败时两个流都要看：结构化报告在 stdout，日志行在 stderr，
-    // 只看一个会出现「知道失败了，但不知道为什么」
+    // 只看一个会出现「知道失败了，但不知道为什么」。
+    // 日志不只看 error：传输选了哪条路（`apply.transport`）是 info，
+    // 而「报 0 个文件」这种失败，原因往往就在那一行里。
     get why() {
       const pretty = r.stdout.trim()
       const logs = r.stderr
         .split('\n')
-        .filter((l) => l.includes('"level":"error"') || l.includes('error'))
-        .slice(-3)
+        .filter((l) => l.includes('"level"') && (l.includes('apply.') || l.includes('"level":"error"')))
+        .slice(-6)
         .join('\n')
       return [pretty, logs].filter((s) => s !== '').join('\n') || `退出 ${r.code}，两个流都是空的`
     },
@@ -281,6 +283,9 @@ async function swapSource(src, text) {
 async function scenarioStatic() {
   await seedDir(TARGET, '/srv/static')
   await putScenarioConfig('static', hosts[TARGET])
+  // 源在**客户端**里：它空了的话 dp 报的是 SOURCE.EMPTY，而真因在夹具不在 dp —— 先自查一眼
+  const srcLs = await execIn(CLIENT, 'ls -1 /work/src/static')
+  assert.notEqual(srcLs.stdout.trim(), '', '客户端里的源目录是空的，先修夹具')
 
   const first = await dp(['apply', '--json', '--config', '/work/static.json'])
   assert.equal(first.code, 0, `apply 退出 ${first.code}：${first.why}`)
