@@ -1,0 +1,50 @@
+name: Integration
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # 单测里的 Runner 是自己写的假的，这里 ssh / rsync / nginx -t / systemctl 全都是真的。
+  # 断言一律读机器（文件内容、HTTP 响应、is-active），不读 dp 自己的报告
+  containers:
+    name: 真机靶机（podman）
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+
+    - name: Setup Node
+      uses: actions/setup-node@v7
+      with:
+        node-version-file: .nvmrc
+
+    - name: Install pnpm
+      run: |
+        npm install -g pnpm@12.6.0
+        pnpm --version
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+
+    # 镜像里装 sshd / nginx / systemd，跑不起来就别用「跳过」掩盖 —— 那是环境结论，不是通过
+    - name: 确认容器运行时可用
+      run: podman version --format '{{.Version}}' || (sudo apt-get update && sudo apt-get install -y podman)
+
+    - name: Build
+      run: pnpm build
+
+    - name: 真机集成测试
+      run: node tests/integration/run.mjs
+
+    # 失败时容器保留下来才看得见现场，所以清理放在末尾而不是嵌在测试里
+    - name: 清理容器
+      if: always()
+      run: podman rm -f dp-it-client dp-it-target dp-it-target-sysd || true

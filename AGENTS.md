@@ -23,6 +23,7 @@ pnpm 单仓多包，包名前缀 `@dp/*`。**Node ≥ 24**。
 ```
 pnpm build                # tsc -b，产物 packages/<pkg>/build
 pnpm test                 # 构建 + node --test + 覆盖率 → build/coverage/lcov.info
+pnpm run integration      # 真机集成测试：podman 靶机 + 真 ssh，见 tests/integration/
 pnpm verify               # build + lint + test + 八项静态门禁（verify:gates）
 pnpm run verify:selfcheck # 门禁自检：注入违规看它们是否还拦得住
 pnpm run verify:mutation  # 变异测试（每个变异都要整包跑一遍测试，慢，常规交给 CI 周跑）
@@ -49,6 +50,7 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：它依赖的 esbuild 平台�
 
 ```
 packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / target-docker / target-systemd / target-process / cli 均已接线）
+tests/          真机集成测试：容器靶机（sshd / nginx / systemd）+ 跑构建产物的客户端
 openspec/        行为契约（source of truth）：specs/<capability>/spec.md
 docs/           只留两份参考：config.md（配置字段）、decisions.md（决策与理由）
 scripts/        构建与八道门禁；build-binary.mjs 出单文件产物，link-workspace.mjs 补 pnpm 链接
@@ -163,4 +165,10 @@ build/          覆盖率产物所在根目录（已 gitignore）
 
 ## 测试靶机
 
-需要真 SSH 目标时起容器靶机（跳板机 + 内网靶机各一台），e2e 用 `DP_SSH_E2E=1` 打开并指向跳板机。
+`pnpm run integration` 自带靶机，不需要人先起什么：它用容器起一台客户端（跑 dp）
+与两台靶机（sshd + nginx，另一台由 systemd 拉起），真 ssh 进去部署，
+断言读的是机器（文件内容、HTTP 响应、`systemctl is-active`），不读 dp 自己的报告。
+没有容器运行时时它**退 4 并明说没跑**，不假装跑过 —— 本机跑不了就交给 CI。
+
+单元层的 `@dp/ssh` 另有真机用例，默认跳过，用 `DP_SSH_E2E=1` 加 `DP_SSH_HOST` /
+`DP_SSH_USER` 打开并指向一台手动起的靶机。

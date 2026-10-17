@@ -1,0 +1,24 @@
+# 集成测试的客户端：跑 dp 的那台机器。
+#
+# 客户端也进容器，是为了让「本机」不成为一个变量 —— 没有 ssh-agent、
+# ~/.ssh 的权限语义、缺 rsync 这类差异，会让同一个结果在不同机器上真假难辨。
+FROM docker.io/library/node:24-bookworm
+
+# 同靶机：显式清空机器上可能存在的过期代理
+ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY=
+ENV no_proxy= NO_PROXY=
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+       ca-certificates openssh-client rsync curl procps jq \
+  && rm -rf /var/lib/apt/lists/*
+
+# 已知主机密钥落 /dev/null：容器是即用即弃的，把测试机指纹写进 ~/.ssh/known_hosts
+# 既没意义，又会让「主机密钥策略」这条真实路径在第二轮复用同一个 IP 时被绕开
+RUN printf '%s\n' \
+      'Host *' \
+      '  StrictHostKeyChecking accept-new' \
+      '  UserKnownHostsFile /dev/null' \
+      > /etc/ssh/ssh_config.d/90-dp-it.conf
+
+CMD ["sleep", "infinity"]

@@ -2,7 +2,8 @@
 
 把目录或文件部署到 nginx / docker / 静态目录：目标可以在远端也可以在本机，传输方式自动协商，失败自动回滚。
 
-端到端已跑通（本机路径为真跑；远端真机用例默认跳过，需 `DP_SSH_E2E=1`）。
+端到端已跑通。集成层由 `pnpm run integration` 承担：容器起靶机（sshd / nginx / systemd），
+真 ssh 进去部署，断言读的是机器而不是 dp 自己的报告（CI 每次都跑）。
 
 ```bash
 dp deploy          # 自动识别项目类型、自动选传输方式、自动提权、自动验证，失败自动回滚
@@ -78,6 +79,7 @@ openspec/        行为契约（source of truth）
 ```bash
 pnpm install
 pnpm verify        # build + lint + test + 八项静态门禁
+pnpm run integration        # 真机集成测试（需要容器运行时）
 pnpm run verify:selfcheck   # 门禁自检：注入违规看它们是否还拦得住
 pnpm run verify:mutation    # 变异测试
 pnpm run build:bin # 打成单文件可执行程序 → build/bin/dp-<platform>-<arch>
