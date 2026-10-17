@@ -17,6 +17,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { configFor, scenarioByName, sshHost } from './scenarios.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
@@ -157,30 +158,10 @@ function writeFixtures() {
   return WORK
 }
 
-/** 每个场景一份配置。ssh 用户是普通用户 dp，写系统目录全靠 become */
-function config(project, extra) {
-  return {
-    hosts: {
-      // 单跳没有 auth 字段：私钥走 ssh 的默认身份文件（容器里就是 /root/.ssh/id_ed25519），
-      // 这也是真实部署里最常见的形态 —— 不靠配置里再写一遍路径
-      target: {
-        ssh: `dp@${extra.targetHost}:22`,
-        become: { type: 'sudo', user: 'root', method: 'nopasswd' },
-        transport: { strategy: 'auto' },
-      },
-    },
-    projects: {
-      [project]: {
-        host: 'target',
-        source: { root: `/work/src/${extra.src}` },
-        release: { root: extra.root, keep: 3 },
-        target: extra.target,
-      },
-    },
-  }
-}
-
-async function putConfig(name, value) {
+async function putScenarioConfig(name, targetHost) {
+  const scenario = scenarioByName(name)
+  if (scenario === undefined) throw new Error(`没有 ${name} 这个场景`)
+  const value = configFor(scenario, sshHost(targetHost))
   const file = join(WORK, `${name}.json`)
   writeFileSync(file, JSON.stringify(value, null, 2), 'utf8')
   await pod(['cp', file, `${CLIENT}:/work/${name}.json`])
@@ -236,12 +217,7 @@ async function swapSource(src, text) {
 // ── 场景 ────────────────────────────────────────────────────────────────────
 async function scenarioStatic() {
   await seedDir(TARGET, '/srv/static')
-  await putConfig('static', config('static-site', {
-    targetHost: hosts[TARGET],
-    src: 'static',
-    root: '/srv/static',
-    target: { type: 'static' },
-  }))
+  await putScenarioConfig('static', hosts[TARGET])
 
   const first = await dp(['apply', '--json', '--config', '/work/static.json'])
   assert.equal(first.code, 0, `apply 退出 ${first.code}：${first.stderr}`)
@@ -280,22 +256,7 @@ async function scenarioStatic() {
 async function scenarioNginx() {
   await seedDir(TARGET, '/srv/nginx')
   await execIn(TARGET, 'nginx -t && nginx')
-  await putConfig('nginx', config('web', {
-    targetHost: hosts[TARGET],
-    src: 'nginx',
-    root: '/srv/nginx',
-    target: {
-      type: 'nginx',
-      nginx: {
-        server: {
-          serverName: ['target'],
-          listen: [8080],
-          root: '${release.current}',
-          index: ['index.html'],
-        },
-      },
-    },
-  }))
+  await putScenarioConfig('nginx', hosts[TARGET])
 
   const first = await dp(['apply', '--json', '--config', '/work/nginx.json'])
   assert.equal(first.code, 0, `nginx apply：${first.stderr}`)
@@ -328,21 +289,7 @@ async function scenarioNginx() {
 
 async function scenarioProcess() {
   await seedDir(TARGET, '/srv/proc')
-  await putConfig('process', config('app', {
-    targetHost: hosts[TARGET],
-    src: 'app',
-    root: '/srv/proc',
-    target: {
-      type: 'process',
-      process: {
-        command: '/usr/local/bin/node',
-        args: ['${release.current}/server.js', '8082', '${release.current}/index.html'],
-        workingDirectory: '${release.current}',
-        pidFile: '.dp/app.pid',
-        stdoutLog: '.dp/app.log',
-      },
-    },
-  }))
+  await putScenarioConfig('process', hosts[TARGET])
 
   const first = await dp(['apply', '--json', '--config', '/work/process.json'])
   assert.equal(first.code, 0, `process apply：${first.stderr}`)
@@ -387,23 +334,7 @@ async function scenarioProcess() {
 async function scenarioSystemd() {
   if (systemdReady !== true) throw new Skip('这台容器里的 systemd 没起来，跑什么都不能证明什么')
   await seedDir(TARGET_SYSD, '/srv/sysd')
-  await putConfig('systemd', config('sysd', {
-    targetHost: hosts[TARGET_SYSD],
-    src: 'app',
-    root: '/srv/sysd',
-    target: {
-      type: 'systemd',
-      systemd: {
-        unit: 'dp-it-app.service',
-        description: 'integration fixture',
-        execStart: '/usr/local/bin/node ${release.current}/server.js',
-        workingDirectory: '${release.current}',
-        environment: { PORT: '8083' },
-        user: 'dp',
-        scope: 'system',
-      },
-    },
-  }))
+  await putScenarioConfig('systemd', hosts[TARGET_SYSD])
 
   const first = await dp(['apply', '--json', '--config', '/work/systemd.json'])
   assert.equal(first.code, 0, `systemd apply：${first.stderr}`)

@@ -41,6 +41,10 @@ jobs:
     - name: Build
       run: pnpm build
 
+    # 配置形状这类错误不必起容器就能查出来，先查：起完容器才发现要多花好几分钟
+    - name: 场景配置的形状
+      run: node tests/integration/check-configs.mjs
+
     - name: 真机集成测试
       run: node tests/integration/run.mjs
 
