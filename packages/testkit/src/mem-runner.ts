@@ -188,7 +188,6 @@ export class MemoryRunner implements Runner {
  * 不变量跟着测试走 —— 调用方在每个用例收尾处调它，漏了 timeout 或喂了 stdin 的命令当场红。
  *
  * @param runner 一次用例里真正跑过的那个 {@link MemoryRunner}
- * @returns void；不满足时以断言失败终止
  */
 export function assertExecInvariants(runner: MemoryRunner): void {
   for (const call of runner.execs) {
