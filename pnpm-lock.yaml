@@ -56,9 +56,15 @@ importers:
       '@dp/target-nginx':
         specifier: workspace:*
         version: link:../target-nginx
+      '@dp/target-process':
+        specifier: workspace:*
+        version: link:../target-process
       '@dp/target-static':
         specifier: workspace:*
         version: link:../target-static
+      '@dp/target-systemd':
+        specifier: workspace:*
+        version: link:../target-systemd
       '@dp/template':
         specifier: workspace:*
         version: link:../template
@@ -145,6 +151,19 @@ importers:
         specifier: ^5.9.0
         version: 5.9.3
 
+  packages/target-process:
+    dependencies:
+      '@dp/ports':
+        specifier: workspace:*
+        version: link:../ports
+      '@dp/template':
+        specifier: workspace:*
+        version: link:../template
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
   packages/target-static:
     dependencies:
       '@dp/ports':
@@ -154,6 +173,19 @@ importers:
       '@dp/local':
         specifier: workspace:*
         version: link:../local
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
+  packages/target-systemd:
+    dependencies:
+      '@dp/ports':
+        specifier: workspace:*
+        version: link:../ports
+      '@dp/template':
+        specifier: workspace:*
+        version: link:../template
+    devDependencies:
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
