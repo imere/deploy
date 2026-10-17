@@ -455,6 +455,57 @@ async function ensureImages() {
   }
 }
 
+/** 容器是否还活着。退出码只能说明启动时那一下，活没活着得问状态 */
+async function isRunning(name) {
+  const r = await pod(['inspect', name], { timeoutMs: 30_000 })
+  try {
+    return JSON.parse(r.stdout)[0]?.State?.Running === true
+  } catch {
+    return false
+  }
+}
+
+async function putKey(name) {
+  await pod(['cp', join(WORK, 'key.pub'), `${name}:/home/dp/.ssh/authorized_keys`])
+  await execIn(name, 'chown dp:dp /home/dp/.ssh/authorized_keys && chmod 600 /home/dp/.ssh/authorized_keys')
+}
+
+/**
+ * systemd 那台单独起：systemctl 要求 1 号进程是自己，塞进普通靶机里它只会报
+ * "System has not been booted with systemd"。
+ *
+ * 起不来**不判失败**：容器里的 systemd 能不能跑取决于那台机器的 cgroup 与 seccomp
+ * 放不放行（CI 上就不放行），那是环境结论，不是 dp 的结论。重试一次特权模式，
+ * 还是不行就把 systemd 场景标成跳过并写明原因。
+ */
+async function startSystemdTarget() {
+  const base = [
+    'run', '-d', '--name', TARGET_SYSD, '--network', `${NET}:ip=${IP_SYSD}`,
+    '--systemd=always', '--tmpfs', '/run', '--tmpfs', '/tmp',
+  ]
+  let r = await pod([...base, IMAGE_TARGET, '/sbin/init'])
+  if (r.code !== 0 || (await isRunning(TARGET_SYSD)) === false) {
+    const why = (await pod(['logs', '--tail', '10', TARGET_SYSD])).stdout.trim()
+    await pod(['rm', '-f', TARGET_SYSD])
+    r = await pod([...base, '--privileged', IMAGE_TARGET, '/sbin/init'])
+    if (r.code !== 0 || (await isRunning(TARGET_SYSD)) === false) {
+      log(`  ⚠ systemd 靶机起不来（第一次：${why || '直接退出'}），systemd 场景跳过`)
+      return
+    }
+  }
+
+  const sysdUp = await execIn(TARGET_SYSD, 'systemctl is-system-running 2>&1 || true', { timeoutMs: 60_000 })
+  if (/running|degraded/.test(sysdUp.stdout) === false) {
+    log(`  ⚠ systemd 起来了但没进 running（${sysdUp.stdout.trim()}），systemd 场景跳过`)
+    return
+  }
+  await resolveHost(TARGET_SYSD)
+  await putKey(TARGET_SYSD)
+  await execIn(TARGET_SYSD, 'systemctl enable --now ssh 2>&1 || systemctl enable --now sshd 2>&1 || true')
+  await waitForSsh(TARGET_SYSD, hosts[TARGET_SYSD])
+  systemdReady = true
+}
+
 async function startContainers() {
   const rm = await pod(['rm', '-f', CLIENT, TARGET, TARGET_SYSD])
   void rm
@@ -469,37 +520,17 @@ async function startContainers() {
   const target = await pod(['run', '-d', '--name', TARGET, '--network', `${NET}:ip=${IP_TARGET}`, IMAGE_TARGET])
   if (target.code !== 0) throw new Error(`起靶机失败：${target.stderr}`)
 
-  // systemd 那台要真的由 systemd 拉起来：systemctl 需要 1 号进程是自己，
-  // 用 sshd 当 1 号进程的容器里 systemctl 只能报 "System has not been booted with systemd"
-  const sysd = await pod([
-    'run', '-d', '--name', TARGET_SYSD, '--network', `${NET}:ip=${IP_SYSD}`, '--systemd=always',
-    '--tmpfs', '/run', '--tmpfs', '/tmp', IMAGE_TARGET, '/sbin/init',
-  ])
-  if (sysd.code !== 0) throw new Error(`起 systemd 靶机失败：${sysd.stderr}`)
-
   await pod(['exec', CLIENT, 'sh', '-c', 'ssh-keygen -q -t ed25519 -N "" -f /root/.ssh/id_ed25519'])
   await pod(['cp', `${CLIENT}:/root/.ssh/id_ed25519.pub`, join(WORK, 'key.pub')])
   await resolveHost(TARGET)
-  await resolveHost(TARGET_SYSD)
-  for (const name of [TARGET, TARGET_SYSD]) {
-    await pod(['cp', join(WORK, 'key.pub'), `${name}:/home/dp/.ssh/authorized_keys`])
-    await execIn(name, 'chown dp:dp /home/dp/.ssh/authorized_keys && chmod 600 /home/dp/.ssh/authorized_keys')
-  }
+  await putKey(TARGET)
   // sshd 不交给 CMD：让 1 号进程去跑它，起不来的后果是容器直接退出，只剩一句
   // 「exited」而看不出为什么。这里显式起并接住它的原话
   const sshd = await execIn(TARGET, 'mkdir -p /run/sshd && /usr/sbin/sshd -e 2>&1')
   if (sshd.code !== 0) throw new Error(`靶机的 sshd 起不来：${sshd.stdout.trim() || sshd.stderr.trim()}`)
   await waitForSsh(TARGET, hosts[TARGET])
 
-  // systemd 靶机的 sshd 由 systemd 管，等它自己起来
-  const sysdUp = await execIn(TARGET_SYSD, 'systemctl is-system-running 2>&1 || true', { timeoutMs: 60_000 })
-  if (/running|degraded/.test(sysdUp.stdout) === false) {
-    log(`  ⚠ systemd 靶机没起来（${sysdUp.stdout.trim()}）`)
-  } else {
-    await execIn(TARGET_SYSD, 'systemctl enable --now ssh 2>&1 || systemctl enable --now sshd 2>&1 || true')
-    await waitForSsh(TARGET_SYSD, hosts[TARGET_SYSD])
-    systemdReady = true
-  }
+  await startSystemdTarget()
 
   await execIn(CLIENT, 'mkdir -p /opt/dp /work')
   await pod(['cp', join(ROOT, 'packages'), `${CLIENT}:/opt/dp/packages`])
