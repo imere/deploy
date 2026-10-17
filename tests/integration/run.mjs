@@ -65,6 +65,22 @@ const pod = (argv, opts) => run('podman', argv, opts)
 const execIn = (name, script, opts) => pod(['exec', name, 'sh', '-c', script], opts)
 const log = (line) => process.stdout.write(`${line}\n`)
 
+/**
+ * 容器名解析出来的地址。**不用容器名当主机名**：名字能不能解析取决于那台机器上装的是
+ * netavark 还是 CNI、dns 插件开没开 —— CI 上 podman 4.9.3 就解析不了，报的是
+ * `Could not resolve hostname`，而真因是网络后端，不是 ssh。
+ */
+const hosts = {}
+
+async function resolveHost(name) {
+  const r = await pod(['inspect', '--format', 'json', name], { timeoutMs: 30_000 })
+  const nets = JSON.parse(r.stdout)[0]?.NetworkSettings?.Networks ?? {}
+  const ip = nets[NET]?.IPAddress ?? ''
+  if (ip === '') throw new Error(`拿不到 ${name} 在 ${NET} 上的地址（网络后端不支持？）`)
+  hosts[name] = ip
+  return ip
+}
+
 // ── 报告 ────────────────────────────────────────────────────────────────────
 const results = []
 
@@ -196,7 +212,7 @@ async function swapSource(src, text) {
 async function scenarioStatic() {
   await seedDir(TARGET, '/srv/static')
   await putConfig('static', config('static-site', {
-    targetHost: TARGET,
+    targetHost: hosts[TARGET],
     src: 'static',
     root: '/srv/static',
     target: { type: 'static' },
@@ -240,7 +256,7 @@ async function scenarioNginx() {
   await seedDir(TARGET, '/srv/nginx')
   await execIn(TARGET, 'nginx -t && nginx')
   await putConfig('nginx', config('web', {
-    targetHost: TARGET,
+    targetHost: hosts[TARGET],
     src: 'nginx',
     root: '/srv/nginx',
     target: {
@@ -261,7 +277,7 @@ async function scenarioNginx() {
   const conf = await execIn(TARGET, 'cat /etc/nginx/conf.d/web.conf')
   assert.match(conf.stdout, /# managed by dp/, 'conf 缺管理标记')
   assert.equal(
-    (await execIn(CLIENT, 'curl -sS -m 10 http://target:8080/index.html')).stdout.trim(),
+    (await execIn(CLIENT, `curl -sS -m 10 http://${hosts[TARGET]}:8080/index.html`)).stdout.trim(),
     '<h1>nginx-v1</h1>',
     'nginx 没在提供第一个版本',
   )
@@ -270,7 +286,7 @@ async function scenarioNginx() {
   const second = await dp(['apply', '--json', '--config', '/work/nginx.json'])
   assert.equal(second.code, 0, `nginx 第二次 apply：${second.stderr}`)
   assert.equal(
-    (await execIn(CLIENT, 'curl -sS -m 10 http://target:8080/index.html')).stdout.trim(),
+    (await execIn(CLIENT, `curl -sS -m 10 http://${hosts[TARGET]}:8080/index.html`)).stdout.trim(),
     '<h1>nginx-v2</h1>',
   )
   const reloadOk = await execIn(TARGET, 'nginx -t')
@@ -279,7 +295,7 @@ async function scenarioNginx() {
   const back = await dp(['rollback', '--json', '--config', '/work/nginx.json'])
   assert.equal(back.code, 0, `nginx rollback：${back.stderr}`)
   assert.equal(
-    (await execIn(CLIENT, 'curl -sS -m 10 http://target:8080/index.html')).stdout.trim(),
+    (await execIn(CLIENT, `curl -sS -m 10 http://${hosts[TARGET]}:8080/index.html`)).stdout.trim(),
     '<h1>nginx-v1</h1>',
     'nginx 回滚后还在提供新版本',
   )
@@ -288,7 +304,7 @@ async function scenarioNginx() {
 async function scenarioProcess() {
   await seedDir(TARGET, '/srv/proc')
   await putConfig('process', config('app', {
-    targetHost: TARGET,
+    targetHost: hosts[TARGET],
     src: 'app',
     root: '/srv/proc',
     target: {
@@ -313,7 +329,7 @@ async function scenarioProcess() {
     'pidfile 里的 pid 已经不在了',
   )
   assert.equal(
-    (await execIn(CLIENT, 'curl -sS -m 10 http://target:8082/')).stdout.trim(),
+    (await execIn(CLIENT, `curl -sS -m 10 http://${hosts[TARGET]}:8082/`)).stdout.trim(),
     '<h1>app-v1</h1>',
   )
 
@@ -328,7 +344,7 @@ async function scenarioProcess() {
     '上一版进程没被停掉',
   )
   assert.equal(
-    (await execIn(CLIENT, 'curl -sS -m 10 http://target:8082/')).stdout.trim(),
+    (await execIn(CLIENT, `curl -sS -m 10 http://${hosts[TARGET]}:8082/`)).stdout.trim(),
     '<h1>app-v2</h1>',
   )
 
@@ -337,7 +353,7 @@ async function scenarioProcess() {
   const pid3 = (await execIn(TARGET, 'cat /srv/proc/.dp/app.pid')).stdout.trim()
   assert.notEqual(pid3, pid2, '回滚没起新进程')
   assert.equal(
-    (await execIn(CLIENT, 'curl -sS -m 10 http://target:8082/')).stdout.trim(),
+    (await execIn(CLIENT, `curl -sS -m 10 http://${hosts[TARGET]}:8082/`)).stdout.trim(),
     '<h1>app-v1</h1>',
     '回滚后还在提供新版本',
   )
@@ -347,7 +363,7 @@ async function scenarioSystemd() {
   if (systemdReady !== true) throw new Skip('这台容器里的 systemd 没起来，跑什么都不能证明什么')
   await seedDir(TARGET_SYSD, '/srv/sysd')
   await putConfig('systemd', config('sysd', {
-    targetHost: TARGET_SYSD,
+    targetHost: hosts[TARGET_SYSD],
     src: 'app',
     root: '/srv/sysd',
     target: {
@@ -372,7 +388,7 @@ async function scenarioSystemd() {
     'unit 不是 active',
   )
   assert.equal(
-    (await execIn(CLIENT, 'curl -sS -m 10 http://dp-it-target-sysd:8083/')).stdout.trim(),
+    (await execIn(CLIENT, `curl -sS -m 10 http://${hosts[TARGET_SYSD]}:8083/`)).stdout.trim(),
     '<h1>app-v1</h1>',
   )
 
@@ -380,7 +396,7 @@ async function scenarioSystemd() {
   const second = await dp(['apply', '--json', '--config', '/work/systemd.json'])
   assert.equal(second.code, 0, `systemd 第二次 apply：${second.stderr}`)
   assert.equal(
-    (await execIn(CLIENT, 'curl -sS -m 10 http://dp-it-target-sysd:8083/')).stdout.trim(),
+    (await execIn(CLIENT, `curl -sS -m 10 http://${hosts[TARGET_SYSD]}:8083/`)).stdout.trim(),
     '<h1>app-v2</h1>',
   )
   const enabled = await execIn(TARGET_SYSD, 'systemctl is-enabled dp-it-app.service 2>&1 || true')
@@ -389,7 +405,7 @@ async function scenarioSystemd() {
   const back = await dp(['rollback', '--json', '--config', '/work/systemd.json'])
   assert.equal(back.code, 0, `systemd rollback：${back.stderr}`)
   assert.equal(
-    (await execIn(CLIENT, 'curl -sS -m 10 http://dp-it-target-sysd:8083/')).stdout.trim(),
+    (await execIn(CLIENT, `curl -sS -m 10 http://${hosts[TARGET_SYSD]}:8083/`)).stdout.trim(),
     '<h1>app-v1</h1>',
     '回滚后 unit 还在跑新版本',
   )
@@ -436,12 +452,14 @@ async function startContainers() {
 
   await pod(['exec', CLIENT, 'sh', '-c', 'ssh-keygen -q -t ed25519 -N "" -f /root/.ssh/id_ed25519'])
   await pod(['cp', `${CLIENT}:/root/.ssh/id_ed25519.pub`, join(WORK, 'key.pub')])
+  await resolveHost(TARGET)
+  await resolveHost(TARGET_SYSD)
   for (const name of [TARGET, TARGET_SYSD]) {
     await pod(['cp', join(WORK, 'key.pub'), `${name}:/home/dp/.ssh/authorized_keys`])
     await execIn(name, 'chown dp:dp /home/dp/.ssh/authorized_keys && chmod 600 /home/dp/.ssh/authorized_keys')
     await execIn(name, 'mkdir -p /run/sshd && /usr/sbin/sshd')
   }
-  await waitForSsh(TARGET, TARGET)
+  await waitForSsh(TARGET, hosts[TARGET])
 
   // systemd 靶机的 sshd 由 systemd 管，等它自己起来
   const sysdUp = await execIn(TARGET_SYSD, 'systemctl is-system-running 2>&1 || true', { timeoutMs: 60_000 })
@@ -449,7 +467,7 @@ async function startContainers() {
     log(`  ⚠ systemd 靶机没起来（${sysdUp.stdout.trim()}）`)
   } else {
     await execIn(TARGET_SYSD, 'systemctl enable --now ssh 2>&1 || systemctl enable --now sshd 2>&1 || true')
-    await waitForSsh(TARGET_SYSD, TARGET_SYSD)
+    await waitForSsh(TARGET_SYSD, hosts[TARGET_SYSD])
     systemdReady = true
   }
 
