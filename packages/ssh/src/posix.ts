@@ -184,19 +184,35 @@ export function removeScript(path: string): string {
 }
 
 /**
- * 原子改名/移动。跨设备时 `mv` 会退化成"复制 + 删除"，那不是原子的 —— 但这一层不做设备检查：为此多一趟 `stat`不划算，而 release 目录与 current 软链本来就该在同一个文件系统上。
+ * 原子改名/移动，语义对齐 `rename(2)`：目标存在就被**替换**。
+ *
+ * 为什么必须先试 `-T`：不带 `-T` 的 `mv` 在目标是「指向目录的软链」时，不会替换
+ * 那个软链，而是把源**挪进它指着的目录**。真机实测的后果是第二次部署之后
+ * `current` 仍旧指向上一版（站点还是旧内容），而换向前建的临时软链作为残留留在
+ * 旧版本目录里 —— 整个过程退出码 0，报告也说成功。
+ *
+ * 不支持 `-T` 的 `mv`（busybox 那侧）退回「先摘软链再 mv」：那一刻不再原子
+ * （current 会短暂不存在），但结论是对的 —— 结论错而过程看着漂亮，比不原子糟。
+ * 只在目标是软链或不存在时才摘，绝不 `rm` 一个真实目录。
  *
  * @param from 源路径
  * @param to 目标路径。**存在就被覆盖**（`-f`）：发布流程里"覆盖上一个版本"
  * 是常态，为此失败只会让第二次部署莫名其妙地报错
- * @returns 一条 `sh -c` 脚本；`mv` 失败（跨设备、只读、目标非空目录）退出码 5
+ * @returns 一条 `sh -c` 脚本；`mv` 失败（跨设备、只读、目标是真实目录）退出码 5
  */
 export function renameScript(from: string, to: string): string {
-  return script(
-    OP_RENAME,
-    { from, to },
-    [`a=${q(from)}`, `b=${q(to)}`, 'mv -f -- "$a" "$b" || exit 5'].join('\n'),
-  )
+  const body = [
+    `a=${q(from)}`,
+    `b=${q(to)}`,
+    'if mv -T -f -- "$a" "$b" 2>/dev/null; then exit 0; fi',
+    'if [ -L "$b" ] || [ ! -d "$b" ]; then',
+    '  rm -f -- "$b"',
+    '  mv -f -- "$a" "$b" || exit 5',
+    '  exit 0',
+    'fi',
+    'exit 5',
+  ].join('\n')
+  return script(OP_RENAME, { from, to }, body)
 }
 
 /**
