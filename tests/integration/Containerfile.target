@@ -12,7 +12,9 @@ RUN printf '%s\n' 'Acquire::Retries "8";' > /etc/apt/apt.conf.d/80dp-it-retries
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
-       ca-certificates openssh-server nginx-light rsync procps sudo curl systemd \
+       # systemd-sysv 不是凑数：/sbin/init 这个软链是**它**给的，只装 systemd 的机器上
+       # 没有那个文件，容器里「以 /sbin/init 起」就成了「没有任何东西可起」
+       ca-certificates openssh-server nginx-light rsync procps sudo curl systemd systemd-sysv \
   && rm -rf /var/lib/apt/lists/*
 
 # dp：一个普通部署用户。给它 NOPASSWD sudo 是为了让「become」这条路径也被真跑一遍 ——

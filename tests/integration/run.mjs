@@ -675,21 +675,31 @@ async function startSystemdTarget() {
   // 三种起法逐个试。能不能跑 systemd 取决于那台机器的 cgroup / seccomp 放不放行，
   // 那是环境结论而不是 dp 的结论 —— 所以试完都不行就跳过并写明原因，不判失败。
   const variants = [
-    [[], '非特权'],
-    [['--privileged'], '特权'],
-    [['--privileged', '--cgroupns=host', '-v', '/sys/fs/cgroup:/sys/fs/cgroup:rw'], '特权+挂 cgroup'],
+    [[], '非特权', '/sbin/init'],
+    [['--privileged'], '特权', '/sbin/init'],
+    [['--privileged', '--cgroupns=host', '-v', '/sys/fs/cgroup:/sys/fs/cgroup:rw'], '特权+挂 cgroup', '/sbin/init'],
+    // /sbin/init 是 systemd-sysv 给的软链，镜像里没有它时「起 systemd」等于「没有东西可起」；
+    // 换绝对路径再试一次，两种错（找不到 vs 起来又退）的原因完全不同
+    [
+      ['--privileged', '--cgroupns=host', '-v', '/sys/fs/cgroup:/sys/fs/cgroup:rw'],
+      '特权+挂 cgroup+绝对路径',
+      '/usr/lib/systemd/systemd',
+    ],
   ]
   const failures = []
   let up = false
-  for (const [extra, label] of variants) {
-    const r = await pod([...base, ...extra, IMAGE_TARGET, '/sbin/init'])
+  for (const [extra, label, init] of variants) {
+    const r = await pod([...base, ...extra, IMAGE_TARGET, init])
     if (r.code === 0 && (await isRunning(TARGET_SYSD)) === true) {
       up = true
       break
     }
     // 退出之后日志常常是空的，等一下再取，别把「还没来得及写」当成「没有输出」
     await new Promise((s) => setTimeout(s, 2000))
-    failures.push(`${label}：${await whyOf()}`)
+    // podman 自己的报错（"executable file not found" 之类）在 run 的 stderr 上 ——
+    // 不带上的话这条原因只剩「退出 1」，分不清是没找到还是起来又退了
+    const own = `${r.stdout}${r.stderr}`.trim()
+    failures.push(`${label}：${own !== '' ? own.split('\n').slice(-2).join(' / ') : await whyOf()}`)
     await pod(['rm', '-f', TARGET_SYSD])
   }
   if (up === false) {
