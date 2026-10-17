@@ -63,7 +63,11 @@ export function buildRsyncArgv(
   if (req.deleteExtraneous === true) argv.push('--delete')
   if (req.dryRun === true) argv.push('--dry-run')
 
-  argv.push('--itemize-changes', '--human-readable=0', '--out-format=%i %n', '--stats')
+  // --no-human-readable 而不是 --human-readable=0：后者 rsync 直接拒
+  // （`option does not take an argument`）—— -h 只吃「重复次数」不吃 =级别，
+  // 降到 0 的唯一写法是 --no-h。要的是纯数字，否则 --stats 里的字节数会带 K/M 后缀，
+  // 解析层拿到的是「1.23M」这种没法比大小的串。
+  argv.push('--itemize-changes', '--no-human-readable', '--out-format=%i %n', '--stats')
   argv.push('-e', rshValueForRsync(buildRshArgv(options.rsh)))
 
   const rsyncPathOpt = buildRsyncPath(req.become)

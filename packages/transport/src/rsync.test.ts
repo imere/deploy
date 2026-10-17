@@ -27,10 +27,20 @@ const opts = {
 }
 
 describe('buildRsyncArgv', () => {
-  test('机器可读选项齐备：itemize / human-readable=0 / out-format / stats', () => {
+  /**
+   * `--human-readable=0` 这条曾经写在实现里，而 rsync 根本不认 ——
+   * `-h` 只吃「重复次数」、不吃 `=级别`，真机上直接 `option does not take an argument` 退出 1。
+   * 降到 0 的唯一写法是 `--no-h`。这条断言钉的就是「不许再写回 =0」。
+   */
+  test('机器可读选项齐备：itemize / no-human-readable / out-format / stats', () => {
     const argv = buildRsyncArgv(req, opts)
     assert.ok(argv.includes('--itemize-changes'))
-    assert.ok(argv.includes('--human-readable=0'))
+    assert.ok(argv.includes('--no-human-readable'), '必须是 --no-human-readable；--human-readable=0 会被 rsync 拒')
+    assert.equal(
+      argv.some((a) => a.startsWith('--human-readable')),
+      false,
+      '--human-readable 的任何 = 形式都不存在，rsync 不接受它带参数',
+    )
     assert.ok(argv.includes('--out-format=%i %n'))
     assert.ok(argv.includes('--stats'))
   })
