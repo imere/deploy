@@ -134,6 +134,11 @@ const results = []
  */
 class Skip extends Error {}
 
+/** 场景跑在哪台靶机上。systemd 独占一台（它要求 PID 1 是 systemd） */
+function targetOf(name) {
+  return name === 'systemd' ? TARGET_SYSD : TARGET
+}
+
 /**
  * 失败时把「dp 眼里这台机器是什么样」也打印出来。
  *
@@ -166,7 +171,9 @@ async function dumpFacts(name) {
 async function dumpTree(name) {
   const scenario = scenarioByName(name)
   if (scenario === undefined) return
-  const r = await execIn(TARGET, `ls -R ${scenario.root} 2>&1 | head -40`)
+  // systemd 跑的是另一台靶机：拿 TARGET 去 ls 只能得到「没有这个目录」，
+  // 而那句话会被读成「东西没传过去」—— 排查方向从第一行就错了
+  const r = await execIn(targetOf(name), `ls -R ${scenario.root} 2>&1 | head -40`)
   log(`    靶机 ${scenario.root} 的实际内容：\n${r.stdout.trim().split('\n').map((l) => `      ${l}`).join('\n')}`)
 }
 
@@ -242,6 +249,10 @@ async function scenario(name, fn) {
   }
   const started = Date.now()
   try {
+    // 场景之间源目录是同一棵，上一个场景改过的内容必须在这里清掉，否则
+    // 「第一版应该是 v1」会拿到上一个场景留下的 v2
+    writeFixtures()
+    await pushSources()
     await fn()
     results.push({ name, state: 'pass', ms: Date.now() - started })
     log(`  ✔ ${name}（${Date.now() - started}ms）`)
@@ -262,7 +273,9 @@ async function scenario(name, fn) {
 
 // ── 环境与夹具 ──────────────────────────────────────────────────────────────
 function writeFixtures() {
-  rmSync(WORK, { recursive: true, force: true })
+  // 只清 src：WORK 里还躺着 key.pub 与 stagePackages 的产物，整棵 rm 会把他们一起带走，
+  // 而这两个是建容器阶段用过的、没人会在场景开始时重建
+  rmSync(join(WORK, 'src'), { recursive: true, force: true })
   mkdirSync(join(WORK, 'src', 'static'), { recursive: true })
   mkdirSync(join(WORK, 'src', 'nginx'), { recursive: true })
   mkdirSync(join(WORK, 'src', 'app'), { recursive: true })
@@ -391,7 +404,18 @@ async function seedDir(name, dir, owner = 'dp') {
 
 async function swapSource(src, text) {
   writeFileSync(join(WORK, 'src', src, 'index.html'), text, 'utf8')
-  // 先删再拷：往一个已存在的目录里 cp 会把源目录塞成它的子目录（/work/src/src）
+  await pushSources()
+}
+
+/**
+ * 把本地夹具整棵推到客户端里（先删再拷）。
+ *
+ * 每个场景开头都要走一次：`swapSource` 是把 app 改成 v2 **留在原地**的，
+ * 上一个场景没把它改回去，下一个场景的第一版就变成 v2 —— 于是 systemd 的
+ * 「第一版应该是 v1」直接拿到 v2，报错还指向完全无关的回滚代码。
+ * 场景之间共享一棵源目录，就必须每次从干净的那棵开始。
+ */
+async function pushSources() {
   await execIn(CLIENT, 'rm -rf /work/src')
   await pod(['cp', join(WORK, 'src'), `${CLIENT}:/work/src`])
 }
