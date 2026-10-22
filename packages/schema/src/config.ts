@@ -435,6 +435,12 @@ export const systemdSchema = obj(
     after: opt(arr(str('After 的单元名'))),
     requires: opt(arr(str('Requires 的单元名'))),
     wantedBy: withDefault(str('WantedBy 的 target'), 'multi-user.target'),
+    /**
+     * 是否 `systemctl enable`。默认 true —— unit 里既然写了 `[Install] WantedBy`，
+     * 不去 enable 就等于「声明要开机自启却没人去建那条软链」，重启后服务消失，
+     * 而这种症状最难往部署工具上想
+     */
+    enabled: withDefault(bool('是否 systemctl enable（开机自启）'), true),
     /** 逃生舱：原样输出，不做转义与校验 */
     extra: opt(arr(str('原样输出的 unit 行'))),
   },
@@ -654,7 +660,7 @@ export type NginxInput = InputOf<typeof nginxSchema>
 export type DockerConfig = Infer<typeof dockerSchema>
 /** 配置文件里的写法，字段全部可选 */
 export type DockerInput = InputOf<typeof dockerSchema>
-/** 归一化后的 systemd 段。restart / scope / wantedBy 一定有值 */
+/** 归一化后的 systemd 段。restart / scope / wantedBy / enabled 一定有值 */
 export type SystemdConfig = Infer<typeof systemdSchema>
 /** systemd 段的可写形态，除 unitDir 外字段全部可选 */
 export type SystemdInput = InputOf<typeof systemdSchema>

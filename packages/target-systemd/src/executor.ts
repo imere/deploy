@@ -81,6 +81,8 @@ export interface SystemdExecResult {
   readonly reloaded: boolean
   /** 真发过 restart 且成功 */
   readonly restarted: boolean
+  /** 真发过 `systemctl enable` 且成功。`enabled: false` 时恒为 false */
+  readonly enabled: boolean
   readonly warnings: readonly string[]
   readonly steps: readonly SystemdStepTrace[]
 }
@@ -238,6 +240,7 @@ class Session {
   private readonly undo: UndoEntry[] = []
   private daemonReloaded = false
   private unitRestarted = false
+  private unitEnabled = false
 
   constructor(
     readonly input: SystemdExecInput,
@@ -290,6 +293,10 @@ class Session {
 
   restarted(): void {
     this.unitRestarted = true
+  }
+
+  enabledUnit(): void {
+    this.unitEnabled = true
   }
 
   pushUndo(label: string, run: () => Promise<void>): void {
@@ -372,6 +379,7 @@ class Session {
       dryRun: this.dryRun,
       reloaded: this.daemonReloaded,
       restarted: this.unitRestarted,
+      enabled: this.unitEnabled,
       warnings: [...this.warnings],
       steps: [...this.steps],
     }
@@ -457,6 +465,8 @@ export async function installSystemd(input: SystemdExecInput): Promise<SystemdEx
  * @throws DpError `DP.SYSD.UNIT_NOT_MANAGED` —— 目标 unit 存在、不带 managed 标记、也没 force
  * @throws DpError `DP.SYSD.DAEMON_RELOAD_FAILED` —— unit 已落盘但 systemd 没读到，
  * 机器仍在跑旧 unit；不回滚（盘上这份是好的）
+ * @throws DpError `DP.SYSD.ENABLE_FAILED` —— 服务在跑，但开机自启那条软链没建上
+ * （重启后它不会自己起来）；不回滚，理由同上
  * @throws DpError `DP.SYSD.RESTART_FAILED` —— unit 已生效、服务起不来；不回滚，
  * 理由同 nginx 的 reload 失败：为一个服务问题退掉一次成功的发布，只会把一件事变成两件
  */
@@ -518,6 +528,29 @@ export async function activateSystemd(input: SystemdExecInput): Promise<SystemdE
 
   // 到这一步 unit 已经被 systemd 接受，替换落定。
   session.commit()
+
+  const enableStep = plan.find((step) => step.id === 'systemd.enable')
+  if (enableStep !== undefined) {
+    session.begin(enableStep)
+    if (session.dryRun) {
+      session.skip(enableStep)
+    } else {
+      const enabled = await session.exec(argvOf(enableStep))
+      if (enabled.code !== 0) {
+        return session.fail(enableStep, 'DP.SYSD.ENABLE_FAILED', `systemctl enable ${session.paths.unitName} 失败（退出码 ${enabled.code}）`, {
+          output: outputOf(enabled),
+          hint:
+            '服务本身没受影响 —— unit 已落盘、daemon-reload 已过，缺的只是 WantedBy 那条软链，' +
+            '也就是**这台机器重启后服务不会自己起来**。' +
+            '常见原因是 wants 目录不可写（system scope 要提权，看 hosts.<主机>.become）或 ' +
+            `${session.config.wantedBy ?? 'multi-user.target'} 在这台机器上不存在。` +
+            '修好后再部署一次即可；确实不该开机自启就把 projects.*.target.systemd.enabled 设成 false',
+        })
+      }
+      session.pass(enableStep)
+      session.enabledUnit()
+    }
+  }
 
   const restartStep = stepAt(plan, 'systemd.restart')
   session.begin(restartStep)

@@ -45,6 +45,7 @@
 | `DP.SYSD.UNIT_NOT_MANAGED` | unit 覆盖 | ✅ | abort（同名文件不带 `# managed by dp`，需 `force`） | `@dp/target-systemd` |
 | `DP.SYSD.TEST_FAILED` | unit 校验 | ✅ | abort（候选只在影子目录，unitDir 未被碰） | `@dp/target-systemd` |
 | `DP.SYSD.DAEMON_RELOAD_FAILED` | 生效 | ❌ | **不回滚 unit**：盘上的 unit 是好的，只是 systemd 还没读到 | `@dp/target-systemd` |
+| `DP.SYSD.ENABLE_FAILED` | 生效 | ❌ | **不回滚 unit**：服务在跑，缺的只是开机自启那条软链（重启后不会自己起来） | `@dp/target-systemd` |
 | `DP.SYSD.RESTART_FAILED` | 生效 | ❌ | **不回滚 unit**：unit 已生效，起不来是服务自己的问题 | `@dp/target-systemd` |
 | `DP.SYSD.NO_PREVIOUS` | 回滚 | ✅ | abort（首次部署无备份可还原，**不返回假成功**） | `@dp/target-systemd` |
 | `DP.SYSD.NOT_ACTIVE` | 验收 | ❌ | abort（unit 不在 active）；**回不回滚由上层决定** | `@dp/target-systemd` |

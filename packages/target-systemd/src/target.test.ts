@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DpError } from '@dp/ports'
-import { analyzeVerifyArgv, systemctlArgv, systemdTarget, unitPaths } from './target.js'
+import { analyzeVerifyArgv, enableArgv, systemctlArgv, systemdTarget, unitPaths } from './target.js'
 import type { SystemdTargetConfig } from './types.js'
 
 function makeConfig(over: Partial<SystemdTargetConfig> = {}): SystemdTargetConfig {
@@ -39,13 +39,32 @@ describe('systemd target · plan', () => {
     assert.equal(kinds.has('activate'), false)
   })
 
-  it('activate 顺序是 备份 → 替换 → daemon-reload → restart', () => {
+  it('activate 顺序是 备份 → 替换 → daemon-reload → enable → restart', () => {
     const plan = systemdTarget.planActivate(makeCtx(), makeConfig())
     assert.deepEqual(plan.map((s) => s.id), [
       'systemd.backup',
       'systemd.replace',
       'systemd.daemon-reload',
+      'systemd.enable',
       'systemd.restart',
+    ])
+  })
+
+  it('enabled: false 时计划里就没有 enable 这一步（执行器也据此跳过）', () => {
+    const plan = systemdTarget.planActivate(makeCtx(), makeConfig({ enabled: false }))
+    assert.ok(!plan.some((s) => s.id === 'systemd.enable'))
+    // 缺的不是「少了什么」而是「restart 仍然在」：关掉自启不能顺手把服务也关掉
+    assert.ok(plan.some((s) => s.id === 'systemd.restart'))
+  })
+
+  it('enable 的 argv 带 unit 名，user scope 时 --user 在子命令之前', () => {
+    const paths = unitPaths(makeCtx(), makeConfig())
+    assert.deepEqual(enableArgv(paths), ['systemctl', 'enable', 'api.service'])
+    assert.deepEqual(enableArgv(unitPaths(makeCtx(), makeConfig({ scope: 'user' }))), [
+      'systemctl',
+      '--user',
+      'enable',
+      'api.service',
     ])
   })
 

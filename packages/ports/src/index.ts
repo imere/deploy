@@ -261,6 +261,9 @@ export const DP_ERROR_CODES = [
   'DP.SYSD.RESTART_FAILED',
   'DP.SYSD.NO_PREVIOUS',
   'DP.SYSD.NOT_ACTIVE',
+  // unit 已在盘上且服务已起，缺的只是开机自启那条 wants 软链。它与上面几条的
+  // 处置方式都不同（服务现在是好的，坏的是重启之后），混进去就会报成「unit 没生效」
+  'DP.SYSD.ENABLE_FAILED',
   // ↓ process 目标（@dp/target-process）追加。它自带进程管理（不依赖 systemd），
   // 所以停止/启动/存活三类失败都得自己报，不能借 systemd 那一组 —— 借了之后
   // 「systemctl 不在 PATH」与「进程自己退了」会混成同一句。NO_PREVIOUS 是「上一版

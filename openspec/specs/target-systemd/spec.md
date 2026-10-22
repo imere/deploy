@@ -81,9 +81,28 @@
 - **WHEN** 目标 unit 不存在
 - **THEN** 判定为新建，不做备份
 
-### Requirement: 生效顺序固定为备份、原子替换、重载、重启
+### Requirement: 写了 `[Install]` 就必须 enable
 
-系统 SHALL 按备份、写中间文件后改名、重载守护进程、重启单元的顺序生效，MUST NOT 直接写目标文件。
+系统 SHALL 在重载之后、重启之前执行 `systemctl enable`，MUST NOT 只把 `WantedBy` 写进 unit 而不建那条软链。
+
+#### Scenario: 默认行为
+
+- **WHEN** 配置没有显式关闭自启
+- **THEN** 生效阶段发出 `systemctl enable <unit>`，且它排在 `daemon-reload` 之后、`restart` 之前
+
+#### Scenario: 显式关闭自启
+
+- **WHEN** 配置把自启关掉
+- **THEN** 生效阶段不发 enable，**服务照旧重启**
+
+#### Scenario: enable 失败
+
+- **WHEN** `systemctl enable` 退出码非 0
+- **THEN** 报错说明服务本身没受影响、缺的是开机自启，MUST NOT 把它报成「unit 没生效」，也 MUST NOT 回滚 unit
+
+### Requirement: 生效顺序固定为备份、原子替换、重载、enable、重启
+
+系统 SHALL 按备份、写中间文件后改名、重载守护进程、enable、重启单元的顺序生效，MUST NOT 直接写目标文件。
 
 #### Scenario: 替换生效单元
 

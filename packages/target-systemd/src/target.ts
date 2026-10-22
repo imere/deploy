@@ -154,6 +154,27 @@ export function analyzeVerifyArgv(paths: UnitPaths, candidate: string): readonly
 }
 
 /**
+ * 这一步要不要进计划。**计划与执行器共用这一个判据** —— 两边各判一次，症状是
+ * 「计划里有、执行器没跑」（`result()` 会报漏步骤）或反过来（执行器找不到这一步）。
+ *
+ * @param config systemd 段
+ * @returns true 表示要 `systemctl enable`
+ */
+export function shouldEnable(config: SystemdTargetConfig): boolean {
+  return config.enabled !== false
+}
+
+/**
+ * `systemctl enable` 的 argv。**幂等**：已经 enable 过的 unit 再跑一次仍返回 0。
+ *
+ * @param paths `unitPaths()` 的结果
+ * @returns 完整 argv
+ */
+export function enableArgv(paths: UnitPaths): readonly string[] {
+  return systemctlArgv(paths, 'enable', paths.unitName)
+}
+
+/**
  * 渲染 unit 全文的唯一出口。计划与执行都走它，保证两处内容逐字相同 ——
  * verify 阶段靠逐字比对判断「线上这份是不是 dp 写的」，出口分叉的话这个比对就没意义。
  *
@@ -210,7 +231,7 @@ export const systemdTarget: Target<SystemdTargetConfig> = {
     ]
   },
 
-  /** ② 备份 → 原子替换 → daemon-reload → restart。这是**唯一会动生效 unit** 的阶段 */
+  /** ② 备份 → 原子替换 → daemon-reload → enable → restart。这是**唯一会动生效 unit** 的阶段 */
   planActivate(ctx, config): readonly Step[] {
     const paths = unitPaths(ctx, config)
     return [
@@ -237,6 +258,23 @@ export const systemdTarget: Target<SystemdTargetConfig> = {
         undo: '无需补偿：reload 只让 systemd 重读磁盘',
         detail: { argv: systemctlArgv(paths, 'daemon-reload') },
       },
+      // enable 排在 daemon-reload 之后、restart 之前：systemd 要读过 unit 才知道
+      // 它的 [Install] 段（enable 建的就是 WantedBy 那条软链），而 start/restart 与
+      // 是否 enable 无关，先建软链再起服务不会留下「起了但没自启」的窗口
+      ...(shouldEnable(config)
+        ? [
+            {
+              id: 'systemd.enable',
+              kind: 'activate' as const,
+              title: `开机自启：systemctl enable ${paths.unitName}`,
+              host: ctx.host,
+              undo:
+                '无需补偿：enable 只在 unit 目录之外（wants 目录）加一条软链，' +
+                '撤掉它是 `systemctl disable`，而这台机器上服务本来就该是 enabled 的',
+              detail: { argv: enableArgv(paths) },
+            },
+          ]
+        : []),
       {
         id: 'systemd.restart',
         kind: 'activate',

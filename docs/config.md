@@ -388,11 +388,14 @@ projects:
         restartSec: 5
         after: ['network.target']
         wantedBy: 'multi-user.target'
+        enabled: true               # 默认 true：写了 [Install] 就要 enable，否则重启后服务不起来
         extra: ['MemoryMax=512M']   # 逐行原样输出；行里带换行等于多出几条指令，会被拒
 ```
 
 生效顺序固定：**渲染 → 写影子候选 → `systemd-analyze verify` → 备份 → 原子 rename →
-`daemon-reload` → `restart`**。影子候选落在版本目录下而不是 unitDir 之下 —— unitDir 会被
+`daemon-reload` → `enable` → `restart`**。`enabled: false` 时跳掉 enable 一步，服务照旧
+重启 —— 关掉自启的正当理由是「这个服务本来就不该开机自启」，不是「enable 跑不动」；
+后者报 `DP.SYSD.ENABLE_FAILED`（服务本身没受影响，缺的是重启之后那一半）。影子候选落在版本目录下而不是 unitDir 之下 —— unitDir 会被
 systemd 递归扫描，同名的候选放那儿就是往机器里塞一份重复 unit。只覆盖带
 `# managed by dp` 的文件；遇同名未标记文件报 `DP.SYSD.UNIT_NOT_MANAGED`，需要 `force`
 才继续（仍先备份）。值里的控制字符在渲染期就被拒（unit 是一行一条指令，换行等于注入）。

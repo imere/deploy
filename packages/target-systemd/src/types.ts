@@ -41,6 +41,14 @@ export interface SystemdTargetConfig {
   readonly requires?: readonly string[]
   readonly wantedBy?: string
   /**
+   * 是否 `systemctl enable`。默认（不给）为 true。
+   *
+   * 关掉它的正当理由不是「enable 会失败」，而是**这个服务本来就不该开机自启**
+   * （只由别的 unit 拉起的、或人工拉的）。因为 enable 跑不动而关掉它，等于用配置
+   * 把「机器上缺一条 wants 软链」这件事悄悄抹掉 —— 那正是下次重启才会发现的那类问题。
+   */
+  readonly enabled?: boolean
+  /**
    * 逃生舱。**逐行**原样输出，不做转义。
    *
    * 只挡一件事：行里的控制字符。unit 是「一行一条指令」的格式，

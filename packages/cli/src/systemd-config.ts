@@ -135,6 +135,7 @@ export function systemdConfigFor(input: SystemdTranslateInput): SystemdTargetCon
     ...(systemd.after !== undefined ? { after: systemd.after } : {}),
     ...(systemd.requires !== undefined ? { requires: systemd.requires } : {}),
     ...(systemd.wantedBy !== undefined ? { wantedBy: systemd.wantedBy } : {}),
+    ...(systemd.enabled !== undefined ? { enabled: systemd.enabled } : {}),
     ...(systemd.extra !== undefined ? { extra: systemd.extra } : {}),
   }
 }

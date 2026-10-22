@@ -219,7 +219,7 @@ describe('systemd 执行器 · install', () => {
 })
 
 describe('systemd 执行器 · activate', () => {
-  it('备份 → 原子替换 → daemon-reload → restart', async () => {
+  it('备份 → 原子替换 → daemon-reload → enable → restart', async () => {
     const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     runner.files.set('/etc/systemd/system/api.service', `${MANAGED_MARKER}\n[Unit]\n`)
     const result = await activateSystemd({ runner, ctx: makeCtx(), config: makeConfig() })
@@ -228,20 +228,49 @@ describe('systemd 执行器 · activate', () => {
       'systemd.backup',
       'systemd.replace',
       'systemd.daemon-reload',
+      'systemd.enable',
       'systemd.restart',
     ])
     // 备份走 rename，替换走「写中间文件 + rename」：任何时刻 unitDir 里都有完整的一份
     assert.equal(runner.files.has('/etc/systemd/system/api.service.dp-backup'), true)
     assert.equal(runner.files.has('/etc/systemd/system/api.service.dp-new'), false)
     assert.equal(result.reloaded, true)
+    assert.equal(result.enabled, true)
     assert.equal(result.restarted, true)
+  })
+
+  it('enabled: false 时不发 enable，但服务照旧重启（关自启不等于关服务）', async () => {
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
+    const result = await activateSystemd({ runner, ctx: makeCtx(), config: makeConfig({ enabled: false }) })
+    assert.equal(result.enabled, false)
+    assert.equal(result.restarted, true)
+    assert.ok(!runner.calls.some((argv) => argv.includes('enable')), JSON.stringify(runner.calls))
+  })
+
+  it('enable 失败 → DP.SYSD.ENABLE_FAILED，说清「服务在跑、重启后起不来」', async () => {
+    const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
+    runner.files.set('/etc/systemd/system/api.service', `${MANAGED_MARKER}\n[Unit]\n`)
+    runner.handler = (argv) =>
+      argv.includes('enable') ? { code: 1, stdout: '', stderr: 'Failed to enable unit' } : { code: 0, stdout: '', stderr: '' }
+    await assert.rejects(
+      () => activateSystemd({ runner, ctx: makeCtx(), config: makeConfig() }),
+      (err: unknown) => {
+        assert.ok(err instanceof DpError)
+        assert.equal(err.code, 'DP.SYSD.ENABLE_FAILED')
+        assert.match(String(err.hint ?? ''), /重启后/)
+        return true
+      },
+    )
+    // 不回滚：unit 是好的、服务已经起过，只为一条软链退掉一次成功发布更糟
+    assert.equal(runner.files.get('/etc/systemd/system/api.service')?.includes('ExecStart='), true)
   })
 
   it('user scope 时 systemctl 带 --user，且范围选项排在子命令之前', async () => {
     const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     await activateSystemd({ runner, ctx: makeCtx(), config: makeConfig({ scope: 'user' }) })
     assert.deepEqual(runner.calls[0], ['systemctl', '--user', 'daemon-reload'])
-    assert.deepEqual(runner.calls[1], ['systemctl', '--user', 'restart', 'api.service'])
+    assert.deepEqual(runner.calls[1], ['systemctl', '--user', 'enable', 'api.service'])
+    assert.deepEqual(runner.calls[2], ['systemctl', '--user', 'restart', 'api.service'])
   })
 
   it('restart 失败 → DP.SYSD.RESTART_FAILED，且不还原 unit（为一个服务问题退掉一次成功的发布更糟）', async () => {
