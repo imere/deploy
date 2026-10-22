@@ -419,7 +419,14 @@ async function dpHost(argv) {
  */
 async function dockerReady() {
   for (const argv of [['--version'], ['compose', 'version']]) {
-    const r = await run('docker', argv, { timeoutMs: 60_000 })
+    let r
+    try {
+      r = await run('docker', argv, { timeoutMs: 60_000 })
+    } catch (err) {
+      // spawn 直接失败（机器上没有 docker 这个可执行文件）。它必须落到「跳过」：
+      // 抛上去就变成这个场景失败，而失败的意思是「dp 不对」，事实是这台机器没装
+      return `跑不了 docker ${argv.join(' ')}：${String(err?.message ?? err)}`
+    }
     if (r.code !== 0) return `docker ${argv.join(' ')} 不可用：${(r.stderr || r.stdout).trim().slice(0, 200)}`
   }
   return undefined
