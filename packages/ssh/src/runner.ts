@@ -27,6 +27,41 @@ const EXIT_DENIED = 5
 const EXIT_NO_BASE64 = 6
 
 /**
+ * cwd 包装层的专用退出码与标记。
+ *
+ * 远端会话的 cwd 是登录目录（随 sshd 配置与 shell 而变），而 `docker compose`
+ * 之类靠 cwd 解析相对路径（volumes 的源、build.context、env_file）：少了这层，
+ * 同一份 compose 在远端挂的是家目录下的路径，而且**不报错**。
+ * 用一个专门的退出码加标记，是为了把「目录进不去」与「命令自己退了同样的码」分开。
+ */
+const CWD_EXIT = 111
+const CWD_MARK = 'dp: cwd'
+const CWD_MISSING = '不存在'
+
+/**
+ * 给 argv 套一层 `cd … && exec "$@"`。
+ *
+ * 走 `sh -c` 而不是在 ssh 命令行上拼 `cd x && ...`：后者要把 argv 拼成字符串，
+ * 而那正是注入面 —— argv 元素级交给 `exec "$@"` 才没有那一层。
+ *
+ * @param argv 原 argv
+ * @param cwd 远端工作目录（绝对路径）
+ * @returns 可直接交给驱动的 argv
+ */
+export function withCwd(argv: readonly string[], cwd: string): readonly string[] {
+  return [
+    'sh',
+    '-c',
+    `if [ ! -d "$1" ]; then echo "${CWD_MARK} ${CWD_MISSING}：$1" >&2; exit ${CWD_EXIT}; fi; ` +
+      `cd -- "$1" || { echo "${CWD_MARK} 进不去：$1" >&2; exit ${CWD_EXIT}; }; ` +
+      'shift; exec "$@"',
+    'sh',
+    cwd,
+    ...argv,
+  ]
+}
+
+/**
  * 远端命令以本文件约定的退出码结束时的错误。
  */
 export class RemoteCommandError extends DpError {
@@ -223,17 +258,27 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
     /**
      * 只接 argv，**没有 execShell** —— 注入的面在接口层就被掐掉了（packages/ports/src/index.ts 明确说明）。
      */
-    exec(argv: readonly string[], execOptions: ExecOptions = {}): Promise<ExecResult> {
+    async exec(argv: readonly string[], execOptions: ExecOptions = {}): Promise<ExecResult> {
       if (argv.length === 0) {
-        return Promise.reject(
-          new DpError('DP.CONFIG.INVALID', 'exec 收到空 argv', { hint: '至少给出可执行文件名' }),
-        )
+        throw new DpError('DP.CONFIG.INVALID', 'exec 收到空 argv', { hint: '至少给出可执行文件名' })
       }
-      return driver.exec({
-        argv: elevate(argv),
+      const cwd = execOptions.cwd
+      const sent = cwd === undefined ? argv : withCwd(argv, cwd)
+      const res = await driver.exec({
+        argv: elevate(sent),
         timeoutMs: execOptions.timeoutMs ?? resolveTimeoutMs(options.timeoutMs),
         env: options.env,
       })
+      // cwd 进不去是**路径错误**，不是「命令失败了」：把它按命令失败交上去，
+      // 上层只能报「up 退出码 111」，而真问题是目录不对
+      if (cwd !== undefined && res.code === CWD_EXIT && res.stderr.includes(CWD_MARK)) {
+        throw ioError(
+          res.stderr.includes(CWD_MISSING) ? 'ENOENT' : 'EACCES',
+          cwd,
+          res.stderr.trim().split(/\r?\n/)[0] ?? '',
+        )
+      }
+      return res
     },
 
     // ------------------------------------------------ filesystem

@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { DpError, type DpErrorCode, type Facts, type Runner } from '@dp/ports'
 import { FakeSshDriver } from './fake-driver.js'
-import { createSshRunner, isUnder, normalizeRemotePath } from './runner.js'
+import { createSshRunner, isUnder, normalizeRemotePath, withCwd } from './runner.js'
 
 const FACTS: Facts = {
   host: 'dp-target',
@@ -82,6 +82,62 @@ describe('SshRunner.exec', () => {
 
   it('空 argv 拒绝', async () => {
     await expectCode(() => makeRunner().exec([]), 'DP.CONFIG.INVALID')
+  })
+})
+
+/**
+ * cwd 这一层：`docker compose` 靠它解析相对路径（volumes 的源、build.context、
+ * env_file），而远端会话的 cwd 是登录目录 —— 少了这层，同一份 compose 在远端
+ * 挂载的是家目录下的路径，而且不报错。
+ */
+describe('SshRunner.exec · cwd', () => {
+  const PS = ['docker', 'compose', 'ps']
+  const CWD = '/srv/app/releases/r1'
+
+  it('给了 cwd 就套一层 cd，argv 仍元素级传给 exec "$@"', async () => {
+    const driver = new FakeSshDriver({ responses: { [withCwd(PS, CWD).join(' ')]: { code: 0, stdout: '[]' } } })
+    const res = await makeRunner(driver).exec(PS, { cwd: CWD })
+    assert.equal(res.code, 0)
+    const argv = driver.calls[0]?.argv ?? []
+    assert.equal(argv[0], 'sh')
+    assert.equal(argv[1], '-c')
+    assert.equal(argv[3], 'sh', '脚本里的 $1 才是 cwd，$0 只是占位')
+    assert.equal(argv[4], CWD)
+    assert.deepEqual(argv.slice(5), PS, '命令与参数一个元素一个元素地传，不拼字符串')
+    assert.match(String(argv[2]), /exec "\$@"/)
+  })
+
+  it('不给 cwd 就不套 —— 多一层 sh 会让「我们到底发了什么」变难读', async () => {
+    const driver = new FakeSshDriver({ responses: { [PS.join(' ')]: { code: 0, stdout: '[]' } } })
+    await makeRunner(driver).exec(PS)
+    assert.deepEqual(driver.calls[0]?.argv, PS)
+  })
+
+  it('cwd 不存在 → 报的是路径错误，不是「命令退出码 111」', async () => {
+    const driver = new FakeSshDriver({
+      responses: {
+        [withCwd(PS, '/srv/app/releases/r9').join(' ')]: {
+          code: 111,
+          stdout: '',
+          stderr: 'dp: cwd 不存在：/srv/app/releases/r9',
+        },
+      },
+    })
+    await expectCode(
+      () => makeRunner(driver).exec(PS, { cwd: '/srv/app/releases/r9' }),
+      // 与本机 Runner 同一个码：本机是 spawn 带 cwd 直接 ENOENT，两边不一致的话
+      // 「只有远端才有的问题」会被当成命令失败
+      'DP.PATH.NOT_WRITABLE',
+    )
+  })
+
+  it('同样的退出码没有标记时**不**被当成 cwd 问题 —— 那是命令自己的退出码', async () => {
+    const driver = new FakeSshDriver({
+      responses: { [withCwd(PS, CWD).join(' ')]: { code: 111, stdout: '', stderr: 'boom' } },
+    })
+    const res = await makeRunner(driver).exec(PS, { cwd: CWD })
+    assert.equal(res.code, 111)
+    assert.equal(res.stderr, 'boom')
   })
 })
 
