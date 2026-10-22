@@ -12,7 +12,10 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { SCENARIOS, configFor, LOCAL_HOST } from './scenarios.mjs'
+import { SCENARIOS, configFor, hopsHost, LOCAL_HOST } from './scenarios.mjs'
+
+/** 多跳那份的 host 段：形状检查不连机器，跳板与目标都写成占位串即可 */
+const HOPS_HOST = hopsHost(['jump'], 'target')
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
@@ -24,7 +27,8 @@ mkdirSync(TMP, { recursive: true })
 let bad = 0
 for (const scenario of SCENARIOS) {
   const file = join(TMP, `${scenario.name}.json`)
-  writeFileSync(file, JSON.stringify(configFor(scenario, LOCAL_HOST), null, 2), 'utf8')
+  const host = scenario.hostKind === 'hops' ? HOPS_HOST : LOCAL_HOST
+  writeFileSync(file, JSON.stringify(configFor(scenario, host), null, 2), 'utf8')
 
   let out
   try {

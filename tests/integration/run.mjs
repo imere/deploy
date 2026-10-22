@@ -18,7 +18,7 @@ import { spawn } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { configFor, scenarioByName, sshHost } from './scenarios.mjs'
+import { configFor, hopsHost, scenarioByName, sshHost } from './scenarios.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
@@ -29,12 +29,14 @@ const NET = 'dp-it-net'
 const CLIENT = 'dp-it-client'
 const TARGET = 'dp-it-target'
 const TARGET_SYSD = 'dp-it-target-sysd'
+const JUMP = 'dp-it-jump'
 // 地址写死而不是问网络要：问出来的地址依赖后端给不给（CI 上就不给），
 // 写死之后「连不上」才是真的连不上，而不是「没拿到地址」
 const SUBNET = '10.93.0.0/24'
 const IP_CLIENT = '10.93.0.2'
 const IP_TARGET = '10.93.0.10'
 const IP_SYSD = '10.93.0.11'
+const IP_JUMP = '10.93.0.20'
 
 const args = new Set(process.argv.slice(2))
 const only = args.has('--only') ? process.argv[process.argv.indexOf('--only') + 1] : undefined
@@ -300,10 +302,10 @@ function writeFixtures() {
   return WORK
 }
 
-async function putScenarioConfig(name, targetHost) {
+async function putScenarioConfig(name, targetHost, hostOverride) {
   const scenario = scenarioByName(name)
   if (scenario === undefined) throw new Error(`没有 ${name} 这个场景`)
-  const value = configFor(scenario, sshHost(targetHost))
+  const value = configFor(scenario, hostOverride ?? sshHost(targetHost))
   const file = join(WORK, `${name}.json`)
   writeFileSync(file, JSON.stringify(value, null, 2), 'utf8')
   await pod(['cp', file, `${CLIENT}:/work/${name}.json`])
@@ -562,6 +564,43 @@ async function scenarioProcess() {
   )
 }
 
+/**
+ * 多跳：配置里给的是 `hops`，语义是**最后一跳就是目标机**。
+ *
+ * 断言分两层：落点与路径。落点只说明部署成功，而直连也能做到 ——
+ * 跳板机的 sshd 日志里多出来的会话才是「这次真的走了跳板」的机器级证据。
+ * 少任何一层，「-J 里被塞进了目标机自己」这类错误都会当成通过。
+ */
+async function scenarioHops() {
+  await seedDir(TARGET, '/srv/hops')
+  await putScenarioConfig('hops', hosts[TARGET], hopsHost([hosts[JUMP]], hosts[TARGET]))
+  const accepted = () =>
+    execIn(JUMP, "grep -c 'Accepted publickey' /var/log/sshd.log 2>/dev/null || echo 0")
+  const before = Number((await accepted()).stdout.trim())
+  const out = await execIn(CLIENT, 'cat /work/hops.json')
+
+  const first = await dp(['apply', '--json', '--config', '/work/hops.json'])
+  assert.equal(first.code, 0, `hops apply：${first.why}\n配置：${out.stdout}`)
+  assert.equal(
+    (await execIn(TARGET, 'cat /srv/hops/current/index.html')).stdout.trim(),
+    '<h1>static-v1</h1>',
+  )
+  const after = Number((await accepted()).stdout.trim())
+  assert.ok(
+    after > before,
+    `跳板上没有新的 ssh 会话（${before} → ${after}）—— 这次部署没经过跳板，` +
+      '而直连同样能部署成功，那样这个场景就等于没测',
+  )
+
+  await swapSource('static', '<h1>static-v2</h1>')
+  const second = await dp(['apply', '--json', '--config', '/work/hops.json'])
+  assert.equal(second.code, 0, `hops 第二次 apply：${second.why}`)
+  assert.equal(
+    (await execIn(TARGET, 'cat /srv/hops/current/index.html')).stdout.trim(),
+    '<h1>static-v2</h1>',
+  )
+}
+
 async function scenarioSystemd() {
   if (systemdReady !== true) throw new Skip('这台容器里的 systemd 没起来，跑什么都不能证明什么')
   await seedDir(TARGET_SYSD, '/srv/sysd')
@@ -674,6 +713,29 @@ async function putKey(name) {
 }
 
 /**
+ * 跳板机：与靶机同一个镜像，只是**只用它做转发**。
+ *
+ * sshd 的日志重定向到文件是刻意的：`-e` 让 sshd 把认证记录写 stderr，而 exec 那次的
+ * stderr 抓完就丢了。多跳要证明的是「连接真的经过跳板」，而唯一的机器级证据就是
+ * 跳板上多出来的那几条 `Accepted publickey` —— 只断言「部署成功了」证明不了这一点，
+ * 因为直连同样能部署成功。
+ */
+async function startJump() {
+  const started = await pod([
+    'run', '-d', ...noProxyEnv, '--name', JUMP, '--network', `${NET}:ip=${IP_JUMP}`, IMAGE_TARGET,
+  ])
+  if (started.code !== 0) throw new Error(`起跳板机失败：${started.stderr}`)
+  await resolveHost(JUMP)
+  await putKey(JUMP)
+  const sshd = await execIn(
+    JUMP,
+    "mkdir -p /run/sshd && (setsid /usr/sbin/sshd -e >> /var/log/sshd.log 2>&1 < /dev/null &) && sleep 1",
+  )
+  if (sshd.code !== 0) throw new Error(`跳板机的 sshd 起不来：${(sshd.stdout + sshd.stderr).trim()}`)
+  await waitForSsh(JUMP, hosts[JUMP])
+}
+
+/**
  * systemd 那台单独起：systemctl 要求 1 号进程是自己，塞进普通靶机里它只会报
  * "System has not been booted with systemd"。
  *
@@ -774,6 +836,8 @@ async function startContainers() {
   await waitForSsh(TARGET, hosts[TARGET])
   await preflightWrite(hosts[TARGET])
 
+  await startJump()
+
   await startSystemdTarget()
 
   await execIn(CLIENT, 'mkdir -p /opt/dp /work')
@@ -843,9 +907,10 @@ async function main() {
     await scenario('static', scenarioStatic)
     await scenario('nginx', scenarioNginx)
     await scenario('process', scenarioProcess)
+    await scenario('hops', scenarioHops)
     await scenario('systemd', scenarioSystemd)
   } finally {
-    if (!keep) await pod(['rm', '-f', CLIENT, TARGET, TARGET_SYSD], { timeoutMs: 60_000 })
+    if (!keep) await pod(['rm', '-f', CLIENT, TARGET, TARGET_SYSD, JUMP], { timeoutMs: 60_000 })
   }
 
   const failed = results.filter((r) => r.state === 'fail')

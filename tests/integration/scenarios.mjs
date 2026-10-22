@@ -12,6 +12,7 @@
  * @property {string} src      客户端里的源目录（/work/src/<src>）
  * @property {string} srcMode  contents = 只放目录内容；self = 连目录本身一起放过去
  * @property {string} root     靶机上的发布根
+ * @property {string} [hostKind] 'hops' = 这一份的 host 段走多跳（ssh 与 hops 互斥）
  * @property {object} target   projects.*.target 整段
  */
 
@@ -70,6 +71,18 @@ export const SCENARIOS = [
     },
   },
   {
+    // 与 static 同一个目标类型，差别只在**怎么连过去**：经一跳跳板。
+    // 多跳的语义是「最后一跳就是目标机」，而这份配置不体现那件事 ——
+    // 它体现的是「走跳板也能部署完」，落点仍是 /srv/hops 下那份静态站点
+    name: 'hops',
+    project: 'hop-site',
+    src: 'static',
+    srcMode: 'contents',
+    root: '/srv/hops',
+    hostKind: 'hops',
+    target: { type: 'static' },
+  },
+  {
     name: 'systemd',
     project: 'sysd',
     src: 'app',
@@ -117,6 +130,22 @@ export function configFor(scenario, host) {
 export function sshHost(targetHost) {
   return {
     ssh: `dp@${targetHost}:22`,
+    become: { type: 'sudo', user: 'root', method: 'nopasswd' },
+    transport: { strategy: 'auto' },
+  }
+}
+
+/**
+ * 多跳那一份。`hops` 与 `ssh` 互斥，**最后一跳就是目标机** ——
+ * 中间那几跳只负责转发，目标机上不会再连一次自己。
+ *
+ * @param {string[]} jumps 跳板机（真机是 IP，形状检查时是占位串）
+ * @param {string} targetHost 目标机
+ * @returns hosts.* 的那一段
+ */
+export function hopsHost(jumps, targetHost) {
+  return {
+    hops: [...jumps, targetHost].map((h) => ({ ssh: `dp@${h}:22` })),
     become: { type: 'sudo', user: 'root', method: 'nopasswd' },
     transport: { strategy: 'auto' },
   }
