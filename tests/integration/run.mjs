@@ -37,6 +37,8 @@ const IP_CLIENT = '10.93.0.2'
 const IP_TARGET = '10.93.0.10'
 const IP_SYSD = '10.93.0.11'
 const IP_JUMP = '10.93.0.20'
+/** docker 场景里 compose 映射到宿主上的端口 */
+const DOCKER_PORT = 18084
 
 const args = new Set(process.argv.slice(2))
 const only = args.has('--only') ? process.argv[process.argv.indexOf('--only') + 1] : undefined
@@ -285,6 +287,24 @@ function writeFixtures() {
   writeFileSync(join(WORK, 'src', 'static', 'index.html'), '<h1>static-v1</h1>', 'utf8')
   writeFileSync(join(WORK, 'src', 'nginx', 'index.html'), '<h1>nginx-v1</h1>', 'utf8')
   writeFileSync(join(WORK, 'src', 'app', 'index.html'), '<h1>app-v1</h1>', 'utf8')
+  mkdirSync(join(WORK, 'src', 'docker', 'site'), { recursive: true })
+  writeFileSync(join(WORK, 'src', 'docker', 'site', 'index.html'), '<h1>docker-v1</h1>', 'utf8')
+  writeFileSync(
+    join(WORK, 'src', 'docker', 'docker-compose.yml'),
+    [
+      'services:',
+      '  web:',
+      '    image: nginx:1.27-alpine',
+      '    ports:',
+      `      - '${DOCKER_PORT}:80'`,
+      // 相对路径是刻意保留的：compose 按**项目目录**解析它，而项目目录由 dp 传的
+      // cwd 决定 —— cwd 错了这里会静默挂到别的目录上（家目录是最常见的那个）
+      '    volumes:',
+      "      - ./site:/usr/share/nginx/html:ro",
+      '',
+    ].join('\n'),
+    'utf8',
+  )
   writeFileSync(
     join(WORK, 'src', 'app', 'server.js'),
     [
@@ -351,6 +371,58 @@ async function dp(argv) {
       return [pretty, logs].filter((s) => s !== '').join('\n') || `退出 ${r.code}，两个流都是空的`
     },
   }
+}
+
+/**
+ * 在**集成脚本自己这台机器**上跑 dp（docker 场景用）。
+ *
+ * 与 `dp()` 只差一个落点：那个在客户端容器里，这个在宿主上 —— docker 目标要的是
+ * 一台真有 docker 守护进程的机器，而容器里塞一个 dockerd 能不能起取决于宿主，
+ * 那样跑出来的结论是「环境允不允许」，不是「dp 对不对」。
+ */
+async function dpHost(argv) {
+  const r = await run(process.execPath, [join(ROOT, 'packages/cli/build/bin.js'), ...argv, '--log-level=debug'], {
+    timeoutMs: 180_000,
+  })
+  let json
+  try {
+    json = JSON.parse(r.stdout)
+  } catch {
+    json = undefined
+  }
+  return {
+    code: r.code,
+    json,
+    stdout: r.stdout,
+    stderr: r.stderr,
+    get why() {
+      const pretty = r.stdout.trim()
+      const logs = r.stderr
+        .split('\n')
+        .filter(
+          (l) =>
+            l.includes('"level"') &&
+            (l.includes('apply.') || l.includes('"level":"error"') || l.includes('"level":"warn"')),
+        )
+        .slice(-8)
+        .join('\n')
+      return [pretty, logs].filter((s) => s !== '').join('\n') || `退出 ${r.code}，两个流都是空的`
+    },
+  }
+}
+
+/**
+ * docker 场景能不能跑。**不具备就跳过**，不判失败：这台机器上没有 docker 守护进程，
+ * 部署失败说明的是环境，不是 dp。缺 compose 插件同样跳过 —— `docker compose`
+ * 是 dp 真正会发的那条命令，只有 `docker` 没有插件时它必然失败，而那也不说明
+ * dp 有错。
+ */
+async function dockerReady() {
+  for (const argv of [['--version'], ['compose', 'version']]) {
+    const r = await run('docker', argv, { timeoutMs: 60_000 })
+    if (r.code !== 0) return `docker ${argv.join(' ')} 不可用：${(r.stderr || r.stdout).trim().slice(0, 200)}`
+  }
+  return undefined
 }
 
 async function waitForSsh(name, host) {
@@ -562,6 +634,64 @@ async function scenarioProcess() {
     '<h1>app-v1</h1>',
     '回滚后还在提供新版本',
   )
+}
+
+/**
+ * docker 目标：跑在宿主上，断言读的是**真的容器** —— HTTP 打到映射出来的端口上，
+ * 而不是读 dp 的报告。回滚后同样再打一次。
+ */
+async function scenarioDocker() {
+  const blocked = await dockerReady()
+  if (blocked !== undefined) throw new Skip(blocked)
+  const releaseRoot = join(WORK, 'dkr')
+  rmSync(releaseRoot, { recursive: true, force: true })
+  const scenario = scenarioByName('docker')
+  if (scenario === undefined) throw new Error('没有 docker 这个场景')
+  const file = join(WORK, 'docker.json')
+  writeFileSync(
+    file,
+    JSON.stringify(
+      configFor(scenario, { local: true }, { srcRoot: join(WORK, 'src'), releaseRoot }),
+      null,
+      2,
+    ),
+    'utf8',
+  )
+
+  const first = await dpHost(['apply', '--json', '--config', file])
+  assert.equal(first.code, 0, `docker apply：${first.why}`)
+  await expectServed('<h1>docker-v1</h1>')
+
+  await swapSource('docker', '<h1>docker-v2</h1>')
+  const second = await dpHost(['apply', '--json', '--config', file])
+  assert.equal(second.code, 0, `docker 第二次 apply：${second.why}`)
+  await expectServed('<h1>docker-v2</h1>')
+
+  const back = await dpHost(['rollback', '--json', '--config', file])
+  assert.equal(back.code, 0, `docker rollback：${back.why}`)
+  await expectServed('<h1>docker-v1</h1>', '回滚后容器里还是新版本')
+
+  // 收场：compose 项目留在宿主上会占着端口，下一轮的第一次 up 就会撞上它。
+  // 失败只提示不判失败 —— 它不影响这次部署成不成立
+  const down = await run('docker', ['compose', '-p', 'dpitdkr', 'down', '--remove-orphans'], {
+    cwd: join(releaseRoot, 'current'),
+    timeoutMs: 120_000,
+  })
+  if (down.code !== 0) log(`  ⚠ docker 收场失败：${(down.stdout + down.stderr).trim().slice(0, 300)}`)
+}
+
+/** 打到映射出来的端口上读实际内容。这是「容器里跑的是哪一版」的机器级答案 */
+async function expectServed(expected, what = '部署后容器里不是这一版') {
+  const deadline = Date.now() + 60_000
+  let got
+  for (;;) {
+    const r = await run('curl', ['-sS', '-m', '10', `http://127.0.0.1:${DOCKER_PORT}/`], { timeoutMs: 30_000 })
+    got = r.stdout.trim()
+    if (got === expected) return
+    if (Date.now() > deadline) break
+    await new Promise((s) => setTimeout(s, 1000))
+  }
+  assert.equal(got, expected, `${what}（读到的是 ${got || '（空）'}）`)
 }
 
 /**
@@ -908,6 +1038,7 @@ async function main() {
     await scenario('nginx', scenarioNginx)
     await scenario('process', scenarioProcess)
     await scenario('hops', scenarioHops)
+    await scenario('docker', scenarioDocker)
     await scenario('systemd', scenarioSystemd)
   } finally {
     if (!keep) await pod(['rm', '-f', CLIENT, TARGET, TARGET_SYSD, JUMP], { timeoutMs: 60_000 })

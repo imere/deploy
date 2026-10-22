@@ -71,6 +71,25 @@ export const SCENARIOS = [
     },
   },
   {
+    // docker 目标跑在**集成脚本自己这台机器**上（hostKind: local），不进靶机容器：
+    // 容器里塞一个 dockerd 要嵌套 namespace 与 iptables，能不能起取决于宿主，
+    // 而那样跑出来的结论是「环境允不允许」，不是「dp 对不对」。宿主有真 docker
+    // 与真 compose，dp 经 local Runner 直接调它们 —— 盘上的容器是真的
+    name: 'docker',
+    project: 'dkr',
+    src: 'docker',
+    srcMode: 'contents',
+    root: '/tmp/dp-it-docker',
+    hostKind: 'local',
+    target: {
+      type: 'docker',
+      docker: {
+        mode: 'remote-cli',
+        compose: { files: ['docker-compose.yml'], projectName: 'dpitdkr', pull: true, wait: true },
+      },
+    },
+  },
+  {
     // 与 static 同一个目标类型，差别只在**怎么连过去**：经一跳跳板。
     // 多跳的语义是「最后一跳就是目标机」，而这份配置不体现那件事 ——
     // 它体现的是「走跳板也能部署完」，落点仍是 /srv/hops 下那份静态站点
@@ -108,18 +127,23 @@ export const SCENARIOS = [
  *
  * @param {Scenario} scenario 场景定义
  * @param {object} host hosts.target 那一段（真机是 ssh 串，本机检查是 local）
+ * @param {object} [overrides] srcRoot / releaseRoot 的覆盖：docker 场景跑在集成脚本自己这台
+ *   机器上，两个根都是**宿主**路径；只有一处定义、别处靠覆盖，各写一份的下场是
+ *   「检查过的那份」与「真跑的那份」悄悄分叉
  * @returns 配置文件的内容
  */
-export function configFor(scenario, host) {
+export function configFor(scenario, host, overrides = {}) {
   // `**` 表「目录内容」，不写就是「目录本身」—— 两种写法在传输层差一层目录名
-  const root = scenario.srcMode === 'contents' ? `/work/src/${scenario.src}/**` : `/work/src/${scenario.src}`
+  const srcBase = overrides.srcRoot ?? '/work/src'
+  const pattern = scenario.srcMode === 'contents' ? `${scenario.src}/**` : scenario.src
+  const root = `${srcBase}/${pattern}`
   return {
     hosts: { target: host },
     projects: {
       [scenario.project]: {
         hosts: ['target'],
         source: { root },
-        release: { root: scenario.root, keep: 3 },
+        release: { root: overrides.releaseRoot ?? scenario.root, keep: 3 },
         target: scenario.target,
       },
     },
