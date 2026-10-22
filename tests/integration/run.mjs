@@ -669,7 +669,10 @@ async function scenarioDocker() {
   assert.equal(first.code, 0, `docker apply：${first.why}`)
   await expectServed('<h1>docker-v1</h1>')
 
-  await swapSource('docker', '<h1>docker-v2</h1>')
+  // 站点内容在 `docker/site/` 下（compose 挂的是 ./site），swap 的路径要跟着进子目录 ——
+  // 只换 `docker/index.html` 的话版本目录里多一个没人读的文件，容器照旧服务 v1，
+  // 而报错会写成「第二次部署没生效」，真因却在夹具上
+  await swapSource('docker/site', '<h1>docker-v2</h1>')
   const second = await dpHost(['apply', '--json', '--config', file])
   assert.equal(second.code, 0, `docker 第二次 apply：${second.why}`)
   await expectServed('<h1>docker-v2</h1>')
