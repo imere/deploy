@@ -215,6 +215,30 @@ describe('assertSafe · conf 档', () => {
  * 只测各档的独立行为，挡不住「把某档的规则悄悄收紧」—— 收紧后本档的命中测试
  * 照样全绿，只有跨档对照才会红。
  */
+/**
+ * hint 说的是「这个字符**在这个位置**会做什么」。
+ *
+ * 三句话分别对应三种落点，钉住它们是必要的：报错里只写「含被拒字符」时，
+ * 用户拿到的是「哪不行」而拿不到「为什么不让你这么写」，也就无从判断该改变量
+ * 还是改用法。
+ */
+describe('assertSafe · hint 按落点分三句', () => {
+  it('text 档：NUL 与控制字符破坏的是日志与传输边界', () => {
+    assert.match(rejects('a\u0000b', 'text').hint ?? '', /NUL 与控制字符会破坏日志与传输边界/)
+  })
+
+  it('conf 档：换行 / 回车会把一个值拆成两行', () => {
+    assert.match(rejects('a\nb', 'conf').hint ?? '', /换行会把一个值拆成两行/)
+    assert.match(rejects('a\rb', 'conf').hint ?? '', /换行会把一个值拆成两行/)
+  })
+
+  it('conf 档：非换行的控制字符只剩下「没有正当用途」这一句', () => {
+    assert.match(rejects('a\u0001b', 'conf').hint ?? '', /控制字符没有正当用途/)
+    // 反过来说：换行那一句**不该**出现在这里，否则等于把两种落点报成同一件事
+    assert.doesNotMatch(rejects('a\u0001b', 'conf').hint ?? '', /换行/)
+  })
+})
+
 describe('assertSafe · 同一个值在不同档的判定', () => {
   it('换行：text 放行，path / shell / conf 全拒', () => {
     allows('line1\nline2', 'text')
