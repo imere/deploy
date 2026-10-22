@@ -183,6 +183,15 @@ test('checkSourcePaths: 仅大小写不同 → 不敏感平台上冲突', () => 
   checkSourcePaths(['a.js', 'A.js'], 'linux')
 })
 
+test('checkSourcePaths: 不敏感平台上的「正常情况」不许误报', () => {
+  // 只有一条：大小写表还是空的，不能因为「表里没有」就当成冲突
+  checkSourcePaths(['dist/index.html'], 'win32')
+  // 逐字相同的两条：是重复条目而不是大小写冲突（真冲突是 a.js 与 A.js）
+  checkSourcePaths(['a.js', 'a.js'], 'win32')
+  // `=` 不是 Windows 非法字符：把它算进非法字符集，凡是带 `=` 的查询串文件名都会被拒
+  checkSourcePaths(['dist/a=b.js'], 'win32')
+})
+
 test('checkSourcePaths: 非法字符与长度', () => {
   assert.throws(
     () => checkSourcePaths(['dist/a|b.js'], 'win32'),

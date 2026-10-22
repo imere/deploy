@@ -301,15 +301,15 @@ export function resolveTargetKind(input: DetectInput, pick: TargetPick): DetectR
     )
   }
 
+  // 走到这里必然是「≥2 个候选里挑了一个」（1 个在上面就返回了），所以 reason **必须**
+  // 说清是被舍弃了谁 —— 只报「检测到 X」会让「源里还有一份 nginx.conf 没生效」这件事
+  // 完全没有痕迹，而那正是后来「conf 没换」最难查的一类原因
   const seen = ranked.map((c) => c.kind).join('、')
   const lead = chosen.evidence[0] ?? chosen.kind
   return {
     kind: chosen.kind,
     evidence: chosen.evidence,
     rejected: ranked.filter((c) => c !== chosen),
-    reason:
-      ranked.length === 1
-        ? `检测到 ${lead} → target.type=${chosen.kind}（可用 target.type 覆盖）`
-        : `检测到 ${seen} → 取 confidence 最高的 ${chosen.kind}（${lead}，可用 target.type 覆盖）`,
+    reason: `检测到 ${seen} → 取 confidence 最高的 ${chosen.kind}（${lead}，可用 target.type 覆盖）`,
   }
 }

@@ -178,6 +178,9 @@ test('1 命中：直接用它，reason 是能指导下一步的一行', () => {
   assert.deepEqual(r.evidence, ['docker-compose.yml'])
   assert.deepEqual(r.rejected, [])
   assert.match(r.reason, /检测到 docker-compose\.yml → target\.type=docker（可用 target\.type 覆盖）/)
+  // 单命中不该出现「取 confidence 最高的」：那句话属于多命中，出现在这里说明
+  // 两个分支的文案被写成了一份，而它们要回答的不是同一个问题
+  assert.doesNotMatch(r.reason, /取 confidence 最高的/)
 })
 
 test('1 命中但未实现：报错说清「看到了什么、还缺什么」，不静默降级成 static', () => {
@@ -214,7 +217,10 @@ test('多命中 + pick=auto：不同分取最高，并带上被舍弃的候选',
   const r = resolveTargetKind({ entries: ['index.html', 'nginx.conf', 'docker-compose.yml'] }, 'auto')
   assert.equal(r.kind, 'docker')
   assert.deepEqual(r.rejected.map((c) => c.kind).sort(), ['nginx', 'static'])
-  assert.match(r.reason, /docker-compose\.yml/)
+  // 多命中的 reason 要说清「是舍弃了谁才选到它」：只报证据会让「源里还有一份
+  // nginx.conf 没生效」完全没有痕迹
+  assert.match(r.reason, /检测到 .+ → 取 confidence 最高的 docker（docker-compose\.yml/)
+  assert.match(r.reason, /nginx/)
 })
 
 test('同分 → 报错（auto 下不靠顺序暗选）', () => {
