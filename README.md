@@ -2,8 +2,12 @@
 
 把目录或文件部署到 nginx / docker / 静态目录：目标可以在远端也可以在本机，传输方式自动协商，失败自动回滚。
 
-端到端已跑通。集成层由 `pnpm run integration` 承担：容器起靶机（sshd / nginx / systemd），
-真 ssh 进去部署，断言读的是机器而不是 dp 自己的报告（CI 每次都跑）。
+端到端已跑通。集成层由 `pnpm run integration` 承担：容器起靶机（sshd / nginx / systemd）
+真 ssh 进去部署，断言读的是机器而不是 dp 自己的报告（CI 每次都跑）。六个场景：
+static / nginx / process / systemd 在容器靶机上；docker 跑在**宿主**上（容器里塞一个
+dockerd 的结论是「环境允不允许」，不是「dp 对不对」，宿主有真 docker 与真 compose）；
+hops 是经一跳跳板的多跳，断言不只看落点 —— 还看跳板 sshd 里多出来的会话，因为直连
+同样能部署成功。
 
 ```bash
 dp deploy          # 自动识别项目类型、自动选传输方式、自动提权、自动验证，失败自动回滚
