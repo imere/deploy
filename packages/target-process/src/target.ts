@@ -1,4 +1,4 @@
-import { DpError, RELEASES_DIR_NAME, joinRemotePath, type Step, type Target, type TargetContext } from '@dp/ports'
+import { ERR, DpError, RELEASES_DIR_NAME, joinRemotePath, type Step, type Target, type TargetContext } from '@dp/ports'
 import { renderString, type RenderContext } from '@dp/template'
 import { ALIVE_SCRIPT, START_SCRIPT_NAME, STOP_SCRIPT_NAME, graceSecondsOf } from './script.js'
 import type { ProcessTargetConfig } from './types.js'
@@ -121,19 +121,19 @@ function render(value: string, ctx: RenderContext, field: string): string {
  */
 function normalizeRelative(value: string, field: string): string {
   if (value.startsWith('/') || /^[A-Za-z]:/.test(value)) {
-    throw new DpError('DP.PROC.COMMAND_INVALID', `${field} 是绝对路径：${value}`, {
+    throw new DpError(ERR.PROC.COMMAND_INVALID, `${field} 是绝对路径：${value}`, {
       path: `projects.*.target.process.${field}`,
       hint: '写相对路径（如 `.dp/process.pid`）。发布根由能力推导，进程不该关心它是哪一段绝对路径',
     })
   }
   if (value.includes('\\')) {
-    throw new DpError('DP.PROC.COMMAND_INVALID', `${field} 含反斜杠：${value}`, {
+    throw new DpError(ERR.PROC.COMMAND_INVALID, `${field} 含反斜杠：${value}`, {
       path: `projects.*.target.process.${field}`,
       hint: '反斜杠在 POSIX 路径里是合法字符，留着它「同一个文件」就有两种写法，判定与清理都会漏。改用 / 分隔',
     })
   }
   if (value.split('/').some((segment) => segment === '..')) {
-    throw new DpError('DP.PROC.COMMAND_INVALID', `${field} 含 .. 段：${value}`, {
+    throw new DpError(ERR.PROC.COMMAND_INVALID, `${field} 含 .. 段：${value}`, {
       path: `projects.*.target.process.${field}`,
       hint: '`..` 能写到发布根目录之外。把 pid / 日志放在发布根之内的固定位置',
     })
@@ -277,7 +277,7 @@ export const processTarget: Target<ProcessTargetConfig> = {
     const paths = processPaths(ctx, config)
     const previousId = ctx.previousReleaseId
     if (previousId === undefined || previousId === '') {
-      throw new DpError('DP.PROC.NO_PREVIOUS', '没有上一版可回滚', {
+      throw new DpError(ERR.PROC.NO_PREVIOUS, '没有上一版可回滚', {
         path: 'projects.*.target.process',
         hint: '首次部署没有历史版本，回滚无从谈起。要撤掉这次部署就手动停掉进程再删版本目录',
       })

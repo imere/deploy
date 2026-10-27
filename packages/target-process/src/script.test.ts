@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import {
   MANAGED_MARKER,
   graceSecondsOf,
@@ -82,7 +82,7 @@ describe('process 脚本 · 拒绝不合法的输入', () => {
       () => renderStartScript(makeInput({ command: 'api\nrm -rf /' })),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PROC.COMMAND_INVALID')
+        assert.equal(err.code, ERR.PROC.COMMAND_INVALID)
         assert.equal(err.path, 'projects.*.target.process.command')
         return true
       },
@@ -92,7 +92,7 @@ describe('process 脚本 · 拒绝不合法的输入', () => {
   it('参数含控制字符同样拒绝', () => {
     assert.throws(
       () => renderStartScript(makeInput({ args: ['--name\u0007x'] })),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.PROC.COMMAND_INVALID',
+      (err: unknown) => err instanceof DpError && err.code === ERR.PROC.COMMAND_INVALID,
     )
   })
 
@@ -101,7 +101,7 @@ describe('process 脚本 · 拒绝不合法的输入', () => {
       () => renderStartScript(makeInput({ env: { 'PORT; rm -rf /': '1' } })),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PROC.COMMAND_INVALID')
+        assert.equal(err.code, ERR.PROC.COMMAND_INVALID)
         assert.equal(err.path, 'projects.*.target.process.env')
         return true
       },
@@ -113,7 +113,7 @@ describe('process 脚本 · 拒绝不合法的输入', () => {
       () => renderStartScript(makeInput({ env: { NOTE: 'a\nb' } })),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PROC.COMMAND_INVALID')
+        assert.equal(err.code, ERR.PROC.COMMAND_INVALID)
         assert.equal(err.path, 'projects.*.target.process.env.NOTE')
         return true
       },
@@ -123,7 +123,7 @@ describe('process 脚本 · 拒绝不合法的输入', () => {
   it('信号名含控制字符 → 拒绝', () => {
     assert.throws(
       () => renderStopScript({ pidFile: '/x/.dp/p.pid', stopSignal: 'SIG\nTERM', stopTimeoutMs: 1000 }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.PROC.COMMAND_INVALID',
+      (err: unknown) => err instanceof DpError && err.code === ERR.PROC.COMMAND_INVALID,
     )
   })
 })

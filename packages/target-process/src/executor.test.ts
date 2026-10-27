@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  ERR,
   DpError,
   type ExecResult,
   type Facts,
@@ -83,7 +84,7 @@ class FakeRunner implements Runner {
 
   async readFile(path: string): Promise<string> {
     const value = this.files.get(path)
-    if (value === undefined) throw new DpError('DP.PATH.NOT_WRITABLE', `不存在：${path}`)
+    if (value === undefined) throw new DpError(ERR.PATH.NOT_WRITABLE, `不存在：${path}`)
     return value
   }
 
@@ -108,7 +109,7 @@ class FakeRunner implements Runner {
   }
 
   async symlink(): Promise<void> {
-    throw new DpError('DP.PATH.NOT_WRITABLE', '不支持软链')
+    throw new DpError(ERR.PATH.NOT_WRITABLE, '不支持软链')
   }
 
   async readlink(): Promise<string | null> {
@@ -227,7 +228,7 @@ describe('process 执行器 · activate', () => {
       () => activateProcess({ runner, ctx: makeCtx(), config: makeConfig() }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PROC.STOP_FAILED')
+        assert.equal(err.code, ERR.PROC.STOP_FAILED)
         assert.ok(isProcessExecFailure(err.cause))
         assert.equal(err.cause?.step, 'process.stop-current')
         assert.match(String(err.hint ?? ''), /没有启动新版本/)
@@ -248,7 +249,7 @@ describe('process 执行器 · activate', () => {
       () => activateProcess({ runner, ctx: makeCtx(), config: makeConfig() }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PROC.START_FAILED')
+        assert.equal(err.code, ERR.PROC.START_FAILED)
         assert.match(String(err.hint ?? ''), /空窗/)
         assert.ok(isProcessExecFailure(err.cause))
         assert.match(String(err.cause?.output ?? ''), /not found/, '子进程原话必须进错误信息')
@@ -261,7 +262,7 @@ describe('process 执行器 · activate', () => {
     const runner = new FakeRunner(linuxFacts({ host: 'fake' }))
     await assert.rejects(
       () => installProcess({ runner, ctx: makeCtx(), config: makeConfig({ command: 'api\nrm -rf /' }) }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.PROC.COMMAND_INVALID',
+      (err: unknown) => err instanceof DpError && err.code === ERR.PROC.COMMAND_INVALID,
     )
     assert.equal(runner.files.size, 0)
     assert.deepEqual(runner.calls, [])
@@ -283,7 +284,7 @@ describe('process 执行器 · verify', () => {
       () => verifyProcess({ runner, ctx: makeCtx(), config: makeConfig() }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PROC.NOT_RUNNING')
+        assert.equal(err.code, ERR.PROC.NOT_RUNNING)
         return true
       },
     )
@@ -297,7 +298,7 @@ describe('process 执行器 · verify', () => {
       () => verifyProcess({ runner, ctx: makeCtx(), config: makeConfig() }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PROC.NOT_RUNNING')
+        assert.equal(err.code, ERR.PROC.NOT_RUNNING)
         assert.match(String(err.message), /4242/)
         return true
       },
@@ -309,7 +310,7 @@ describe('process 执行器 · verify', () => {
     runner.files.set(PID_FILE, 'not-a-pid')
     await assert.rejects(
       () => verifyProcess({ runner, ctx: makeCtx(), config: makeConfig() }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.PROC.NOT_RUNNING',
+      (err: unknown) => err instanceof DpError && err.code === ERR.PROC.NOT_RUNNING,
     )
     assert.deepEqual(runner.calls, [], '不该拿一个不是 pid 的值去发信号')
   })
@@ -343,7 +344,7 @@ describe('process 执行器 · rollback', () => {
       () => rollbackProcess({ runner, ctx: makeCtx({ previousReleaseId: 'r1' }), config: makeConfig() }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PROC.NO_PREVIOUS')
+        assert.equal(err.code, ERR.PROC.NO_PREVIOUS)
         assert.ok(isProcessExecFailure(err.cause))
         assert.equal(err.cause?.step, 'process.start-previous')
         return true
@@ -363,7 +364,7 @@ describe('process 执行器 · rollback', () => {
       () => rollbackProcess({ runner, ctx: makeCtx({ previousReleaseId: 'r1' }), config: makeConfig() }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PROC.START_FAILED')
+        assert.equal(err.code, ERR.PROC.START_FAILED)
         assert.equal(isProcessExecFailure(err.cause) ? err.cause.step : '', 'process.start-previous')
         return true
       },
@@ -383,7 +384,7 @@ describe('process 执行器 · rollback', () => {
       () => rollbackProcess({ runner, ctx: makeCtx({ previousReleaseId: 'r1' }), config: makeConfig() }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PROC.NOT_RUNNING')
+        assert.equal(err.code, ERR.PROC.NOT_RUNNING)
         assert.match(String(err.hint ?? ''), /上一版的服务本来就是坏的/)
         return true
       },

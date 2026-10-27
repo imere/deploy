@@ -1,4 +1,4 @@
-import { DpError, MANAGED_MARKER } from '@dp/ports'
+import { ERR, DpError, MANAGED_MARKER } from '@dp/ports'
 
 export { MANAGED_MARKER }
 
@@ -114,7 +114,7 @@ export interface StartScriptInput {
 export function renderStartScript(input: StartScriptInput): string {
   const parts = [input.command, ...input.args].map((item): string => {
     if (CONTROL_CHARS.test(item)) {
-      throw new DpError('DP.PROC.COMMAND_INVALID', `启动命令含控制字符：${JSON.stringify(item).slice(0, 80)}`, {
+      throw new DpError(ERR.PROC.COMMAND_INVALID, `启动命令含控制字符：${JSON.stringify(item).slice(0, 80)}`, {
         path: 'projects.*.target.process.command',
         hint: '脚本是逐行解释的，值里的换行会变成额外命令。去掉控制字符，或把它改成一个不带控制字符的包装脚本',
       })
@@ -126,13 +126,13 @@ export function renderStartScript(input: StartScriptInput): string {
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([key, value]): string => {
       if (!ENV_KEY.test(key)) {
-        throw new DpError('DP.PROC.COMMAND_INVALID', `环境变量名不合法：${JSON.stringify(key).slice(0, 80)}`, {
+        throw new DpError(ERR.PROC.COMMAND_INVALID, `环境变量名不合法：${JSON.stringify(key).slice(0, 80)}`, {
           path: 'projects.*.target.process.env',
           hint: '只接受 `[A-Za-z_][A-Za-z0-9_]*` 这种名字：脚本里只能写成 `export KEY=值`，别的形状写不出来',
         })
       }
       if (CONTROL_CHARS.test(value)) {
-        throw new DpError('DP.PROC.COMMAND_INVALID', `环境变量 ${key} 的值含控制字符`, {
+        throw new DpError(ERR.PROC.COMMAND_INVALID, `环境变量 ${key} 的值含控制字符`, {
           path: `projects.*.target.process.env.${key}`,
           hint: '值会被拼进 `export` 那一行，换行能让它后面多出一条命令',
         })
@@ -208,7 +208,7 @@ export function graceSecondsOf(stopTimeoutMs: number): number {
  */
 export function renderStopScript(input: StopScriptInput): string {
   if (CONTROL_CHARS.test(input.stopSignal)) {
-    throw new DpError('DP.PROC.COMMAND_INVALID', `停止信号含控制字符：${JSON.stringify(input.stopSignal).slice(0, 80)}`, {
+    throw new DpError(ERR.PROC.COMMAND_INVALID, `停止信号含控制字符：${JSON.stringify(input.stopSignal).slice(0, 80)}`, {
       path: 'projects.*.target.process.stopSignal',
       hint: '只接受形如 SIGTERM 的信号名',
     })

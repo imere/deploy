@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError, type TargetContext } from '@dp/ports'
+import { ERR, DpError, type TargetContext } from '@dp/ports'
 import { renderStopScript } from './script.js'
 import {
   aliveArgv,
@@ -48,7 +48,7 @@ describe('process target · 落点', () => {
         () => processPaths(makeCtx(), makeConfig({ pidFile: value })),
         (err: unknown) => {
           assert.ok(err instanceof DpError)
-          assert.equal(err.code, 'DP.PROC.COMMAND_INVALID')
+          assert.equal(err.code, ERR.PROC.COMMAND_INVALID)
           assert.equal(err.path, 'projects.*.target.process.pidFile')
           return true
         },
@@ -60,7 +60,7 @@ describe('process target · 落点', () => {
   it('反斜杠写法也拒：它在 POSIX 路径里是合法字符，会让同一个文件有两种写法', () => {
     assert.throws(
       () => processPaths(makeCtx(), makeConfig({ stdoutLog: '.dp\\out.log' })),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.PROC.COMMAND_INVALID',
+      (err: unknown) => err instanceof DpError && err.code === ERR.PROC.COMMAND_INVALID,
     )
   })
 
@@ -174,7 +174,7 @@ describe('process target · plan', () => {
       () => processTarget.planRollback(makeCtx(), makeConfig()),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PROC.NO_PREVIOUS')
+        assert.equal(err.code, ERR.PROC.NO_PREVIOUS)
         return true
       },
     )

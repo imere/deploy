@@ -1,4 +1,5 @@
 import {
+  ERR,
   DpError,
   describeExecFailure,
   excerptOutput,
@@ -238,7 +239,7 @@ class Session {
     const ran = new Set(this.steps.map((step) => step.id))
     const missing = planned.filter((id) => !ran.has(id))
     if (missing.length > 0) {
-      throw new DpError('DP.PROC.COMMAND_INVALID', `执行器漏掉了计划里的步骤：${missing.join(', ')}`, {
+      throw new DpError(ERR.PROC.COMMAND_INVALID, `执行器漏掉了计划里的步骤：${missing.join(', ')}`, {
         hint: '执行器与 target.ts 的步骤 id 不一致。这是代码错误，不是部署失败',
       })
     }
@@ -268,7 +269,7 @@ const ALIVE_STEP = 'process.alive'
 function stepAt(plan: readonly Step[], id: string): Step {
   const found = plan.find((step) => step.id === id)
   if (found !== undefined) return found
-  throw new DpError('DP.PROC.COMMAND_INVALID', `计划里没有步骤 ${id}`, {
+  throw new DpError(ERR.PROC.COMMAND_INVALID, `计划里没有步骤 ${id}`, {
     hint: '改 target.ts 的步骤时必须同步改执行器：少走一步在这里的表现是「部署看起来成功了」',
   })
 }
@@ -286,7 +287,7 @@ function argvOf(step: Step): readonly string[] {
   if (Array.isArray(argv) && argv.length > 0 && argv.every((item) => typeof item === 'string')) {
     return argv as readonly string[]
   }
-  throw new DpError('DP.PROC.COMMAND_INVALID', `${step.id} 的 detail.argv 缺失或不是非空字符串数组`, {
+  throw new DpError(ERR.PROC.COMMAND_INVALID, `${step.id} 的 detail.argv 缺失或不是非空字符串数组`, {
     hint: '执行器只按计划里发布的 argv 造命令。要改命令就改 target.ts 的 plan，不要在执行器里另写一份',
   })
 }
@@ -409,7 +410,7 @@ async function stopCurrent(session: Session, step: Step): Promise<boolean> {
   }
   const stopped = await session.exec(argvOf(step), session.timeoutMs + STOP_SLACK_MS)
   if (stopped.code !== 0) {
-    return session.fail(step, 'DP.PROC.STOP_FAILED', `停止旧进程失败（退出码 ${stopped.code}）`, {
+    return session.fail(step, ERR.PROC.STOP_FAILED, `停止旧进程失败（退出码 ${stopped.code}）`, {
       output: outputOf(stopped),
       hint:
         '**没有启动新版本** —— 旧进程还占着端口，再起一个只会让它俩打架。' +
@@ -448,7 +449,7 @@ export async function activateProcess(input: ProcessExecInput): Promise<ProcessE
   } else {
     const started = await session.exec(argvOf(startStep))
     if (started.code !== 0) {
-      return session.fail(startStep, 'DP.PROC.START_FAILED', `启动新进程失败（退出码 ${started.code}）`, {
+      return session.fail(startStep, ERR.PROC.START_FAILED, `启动新进程失败（退出码 ${started.code}）`, {
         output: outputOf(started),
         hint:
           '旧进程已经停了，新进程又没起来 —— **服务现在是空窗的**，不是「还在跑旧的」。' +
@@ -482,7 +483,7 @@ export async function verifyProcess(input: ProcessExecInput): Promise<ProcessExe
   session.begin(step)
   const pid = await readPidOf(session)
   if (pid === null) {
-    return session.fail(step, 'DP.PROC.NOT_RUNNING', `pidfile 不存在或内容不是 pid：${session.paths.pidFile}`, {
+    return session.fail(step, ERR.PROC.NOT_RUNNING, `pidfile 不存在或内容不是 pid：${session.paths.pidFile}`, {
       hint:
         '进程没有把自己的 pid 写下来，通常是启动时就退了，或 pidfile 被清过。' +
         '看 stdoutLog 指向的文件拿退出原因',
@@ -490,7 +491,7 @@ export async function verifyProcess(input: ProcessExecInput): Promise<ProcessExe
   }
   const result = await session.exec(aliveArgv(pid))
   if (result.code !== 0) {
-    return session.fail(step, 'DP.PROC.NOT_RUNNING', `pid ${pid} 已不存在（进程自己退了）`, {
+    return session.fail(step, ERR.PROC.NOT_RUNNING, `pid ${pid} 已不存在（进程自己退了）`, {
       output: outputOf(result),
       hint:
         'pid 还在 pidfile 里但进程没了 —— 说明它启动后自己退出了，不是被 dp 杀的。' +
@@ -525,7 +526,7 @@ export async function rollbackProcess(input: ProcessExecInput): Promise<ProcessE
   const previousArgv = argvOf(startStep)
   // 上一版目录可能被 prune 过：不实测就起，报出来的是「启动失败」，而真因是它没有可退的目标
   if (!(await scriptExists(session, previousArgv))) {
-    return session.fail(startStep, 'DP.PROC.NO_PREVIOUS', `上一版的启动脚本不在：${previousArgv[1]}`, {
+    return session.fail(startStep, ERR.PROC.NO_PREVIOUS, `上一版的启动脚本不在：${previousArgv[1]}`, {
       hint:
         '回滚要跑的是上一版目录里那份脚本（那是当时真正部署出去的东西），它不在就没得退 —— ' +
         '通常是版本被 prune 了，或这是一次全新的部署。' +
@@ -537,7 +538,7 @@ export async function rollbackProcess(input: ProcessExecInput): Promise<ProcessE
   } else {
     const started = await session.exec(previousArgv)
     if (started.code !== 0) {
-      return session.fail(startStep, 'DP.PROC.START_FAILED', `按上一版脚本启动失败（退出码 ${started.code}）`, {
+      return session.fail(startStep, ERR.PROC.START_FAILED, `按上一版脚本启动失败（退出码 ${started.code}）`, {
         output: outputOf(started),
         hint:
           '旧进程已停、上一版没起来 —— **服务是空窗的**。' +
@@ -556,7 +557,7 @@ export async function rollbackProcess(input: ProcessExecInput): Promise<ProcessE
     const pid = await readPidOf(session)
     const checked = pid === null ? { code: 1, stdout: '', stderr: '' } : await session.exec(aliveArgv(pid))
     if (pid === null || checked.code !== 0) {
-      return session.fail(verifyStep, 'DP.PROC.NOT_RUNNING', `回滚后进程不存在（pid ${pid ?? '未知'}）`, {
+      return session.fail(verifyStep, ERR.PROC.NOT_RUNNING, `回滚后进程不存在（pid ${pid ?? '未知'}）`, {
         ...(pid === null ? {} : { output: outputOf(checked) }),
         hint:
           '回滚的停与起都跑完了，只是新起的进程没活下来 —— 也就是**上一版的服务本来就是坏的**。' +
