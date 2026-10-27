@@ -1,4 +1,4 @@
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { assertSafe, renderString, type RenderContext, type Usage } from '@dp/template'
 import { MANAGED_MARKER } from './ownership.js'
 import type { Location, ReverseProxy, ServerBlock } from './types.js'
@@ -24,7 +24,7 @@ function child(base: string | undefined, suffix: string): string | undefined {
 }
 
 function confInvalid(message: string, path: string | undefined, hint: string): DpError {
-  return new DpError('DP.NGX.CONF_INVALID', message, {
+  return new DpError(ERR.NGX.CONF_INVALID, message, {
     ...(path !== undefined ? { path } : {}),
     hint,
   })
@@ -32,7 +32,7 @@ function confInvalid(message: string, path: string | undefined, hint: string): D
 
 /** 模板层抛的是 DP.TPL.UNSAFE_VALUE；渲染值不合法归到 DP.NGX.UNSAFE_VALUE，两码的处置方式不同 */
 function unsafe(source: DpError, path: string | undefined): DpError {
-  return new DpError('DP.NGX.UNSAFE_VALUE', source.message, {
+  return new DpError(ERR.NGX.UNSAFE_VALUE, source.message, {
     ...(path !== undefined ? { path } : {}),
     hint:
       source.hint ??
@@ -59,7 +59,7 @@ function value(
     rendered = renderString(raw, ctx, { usage, ...(path !== undefined ? { path } : {}) })
   } catch (err) {
     if (err instanceof DpError) {
-      if (err.code === 'DP.TPL.UNSAFE_VALUE') throw unsafe(err, path)
+      if (err.code === ERR.TPL.UNSAFE_VALUE) throw unsafe(err, path)
       throw withPath(err, path)
     }
     throw err
@@ -69,7 +69,7 @@ function value(
   try {
     assertSafe(rendered, usage, path)
   } catch (err) {
-    if (err instanceof DpError && err.code === 'DP.TPL.UNSAFE_VALUE') throw unsafe(err, path)
+    if (err instanceof DpError && err.code === ERR.TPL.UNSAFE_VALUE) throw unsafe(err, path)
     throw err
   }
   return rendered
@@ -154,7 +154,7 @@ function renderTimeouts(proxy: ReverseProxy, out: (line: string) => void): void 
 
 function renderSeconds(value_: number, field: string): string {
   if (!Number.isInteger(value_) || value_ < 0 || value_ > 86400) {
-    throw new DpError('DP.NGX.CONF_INVALID', `timeouts.${field} 不是可用的秒数：${value_}`, {
+    throw new DpError(ERR.NGX.CONF_INVALID, `timeouts.${field} 不是可用的秒数：${value_}`, {
       hint: '取 0 ~ 86400 的整数。0 会让 nginx 立刻返回 504，等于把后端判死；超过一天基本等同于没配',
     })
   }

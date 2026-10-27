@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import type { RenderContext } from '@dp/template'
 import { renderConf, renderShadowMainConf } from './render.js'
 import type { Location, ServerBlock } from './types.js'
@@ -119,7 +119,7 @@ describe('renderConf', () => {
 
   it('省略 serverName → _ ；显式空数组 → 拒绝（静默变 _ 会盖掉别的 vhost）', () => {
     assert.match(render({ root: '/srv' }), /server_name _;/)
-    const err = throws({ serverName: [], root: '/srv' }, 'DP.NGX.CONF_INVALID')
+    const err = throws({ serverName: [], root: '/srv' }, ERR.NGX.CONF_INVALID)
     assert.match(err.message, /空数组/)
     assert.match(err.hint ?? '', /catch-all/)
   })
@@ -129,7 +129,7 @@ describe('renderConf', () => {
   })
 
   it('rejects 反代末尾斜杠，并在 hint 里说明两种写法的语义', () => {
-    const err = throws({ locations: [{ path: '/api/', proxy: { upstream: 'http://127.0.0.1:8080/' } }] }, 'DP.NGX.CONF_INVALID')
+    const err = throws({ locations: [{ path: '/api/', proxy: { upstream: 'http://127.0.0.1:8080/' } }] }, ERR.NGX.CONF_INVALID)
     assert.match(err.message, /末尾带斜杠/)
     assert.match(err.hint ?? '', /剥掉 location 前缀/)
   })
@@ -138,7 +138,7 @@ describe('renderConf', () => {
     for (const bad of ['127.0.0.1:8080', 'htp://127.0.0.1:8080', 'ws://127.0.0.1:8080', 'http://']) {
       assert.throws(
         () => render({ locations: [{ path: '/api/', proxy: { upstream: bad } }] }),
-        (e: unknown) => e instanceof DpError && e.code === 'DP.NGX.CONF_INVALID',
+        (e: unknown) => e instanceof DpError && e.code === ERR.NGX.CONF_INVALID,
         `upstream ${bad} 必须被拒`,
       )
     }
@@ -148,7 +148,7 @@ describe('renderConf', () => {
     for (const bad of ['api/', '~^/api$ ']) {
       assert.throws(
         () => render({ locations: [{ path: bad, extra: ['return 204;'] }] }),
-        (e: unknown) => e instanceof DpError && e.code === 'DP.NGX.CONF_INVALID',
+        (e: unknown) => e instanceof DpError && e.code === ERR.NGX.CONF_INVALID,
         `location ${bad} 必须被拒`,
       )
     }
@@ -163,7 +163,7 @@ describe('renderConf', () => {
       path: '/api/',
       proxy: { upstream: 'http://127.0.0.1:8080\n  add_header X-Injected 1;' },
     }
-    const viaLiteral = throws({ locations: [injected] }, 'DP.NGX.UNSAFE_VALUE')
+    const viaLiteral = throws({ locations: [injected] }, ERR.NGX.UNSAFE_VALUE)
     assert.match(viaLiteral.message, /<LF>/)
     // 同一份攻击从环境变量来，模板层自己就挡；两条路都要拦住
     const viaEnv = throwsCode(
@@ -172,30 +172,30 @@ describe('renderConf', () => {
           { locations: [{ path: '/', proxy: { upstream: '${env.UPSTREAM}' } }] },
           { ...CTX, envVars: { UPSTREAM: 'http://127.0.0.1:8080\n  include /tmp/evil.conf;' } },
         ),
-      'DP.NGX.UNSAFE_VALUE',
+      ERR.NGX.UNSAFE_VALUE,
     )
     assert.match(viaEnv.message, /<LF>/)
     assert.throws(
       () => render({ serverName: ['a.com\n  add_header X-Injected 1;'], root: '/srv' }),
-      (e: unknown) => e instanceof DpError && e.code === 'DP.NGX.UNSAFE_VALUE',
+      (e: unknown) => e instanceof DpError && e.code === ERR.NGX.UNSAFE_VALUE,
     )
   })
 
   it('rejects 值里的 conf 语法边界（; { }）', () => {
     assert.throws(
       () => render({ serverName: ['a.com; deny all;'], root: '/srv' }),
-      (e: unknown) => e instanceof DpError && e.code === 'DP.NGX.CONF_INVALID',
+      (e: unknown) => e instanceof DpError && e.code === ERR.NGX.CONF_INVALID,
     )
   })
 
   it('rejects 空 location / 无内容来源的 server —— 它们只会安静地 404', () => {
     assert.throws(
       () => render({ locations: [{ path: '/admin/' }] }),
-      (e: unknown) => e instanceof DpError && e.code === 'DP.NGX.CONF_INVALID',
+      (e: unknown) => e instanceof DpError && e.code === ERR.NGX.CONF_INVALID,
     )
     assert.throws(
       () => render({ serverName: ['a.com'] }),
-      (e: unknown) => e instanceof DpError && e.code === 'DP.NGX.CONF_INVALID',
+      (e: unknown) => e instanceof DpError && e.code === ERR.NGX.CONF_INVALID,
     )
   })
 
@@ -206,7 +206,7 @@ describe('renderConf', () => {
     )
     assert.throws(
       () => render({ locations: [{ path: '/', extra: ['return 204;'] }, { path: '/', extra: ['return 205;'] }] }),
-      (e: unknown) => e instanceof DpError && e.code === 'DP.NGX.CONF_INVALID',
+      (e: unknown) => e instanceof DpError && e.code === ERR.NGX.CONF_INVALID,
     )
   })
 
@@ -230,7 +230,7 @@ describe('renderConf', () => {
     for (const bad of ['/srv; root /etc', '/srv{', '/srv}']) {
       assert.throws(
         () => render({ root: bad }),
-        (e: unknown) => e instanceof DpError && e.code === 'DP.NGX.CONF_INVALID',
+        (e: unknown) => e instanceof DpError && e.code === ERR.NGX.CONF_INVALID,
         `应拒绝 ${bad}`,
       )
     }
@@ -239,7 +239,7 @@ describe('renderConf', () => {
   it('location 里的 root 同样拒绝边界字符', () => {
     assert.throws(
       () => render({ root: '/srv', locations: [{ path: '/', root: '/srv; root /etc' }] }),
-      (e: unknown) => e instanceof DpError && e.code === 'DP.NGX.CONF_INVALID',
+      (e: unknown) => e instanceof DpError && e.code === ERR.NGX.CONF_INVALID,
     )
   })
 
@@ -247,7 +247,7 @@ describe('renderConf', () => {
     for (const bad of ['index.html;root', 'index.html{', 'index.html}']) {
       assert.throws(
         () => render({ root: '/srv', index: [bad] }),
-        (e: unknown) => e instanceof DpError && e.code === 'DP.NGX.CONF_INVALID',
+        (e: unknown) => e instanceof DpError && e.code === ERR.NGX.CONF_INVALID,
         `应拒绝 ${bad}`,
       )
     }
@@ -282,7 +282,7 @@ http {
   it('include 路径含结构字符就拒绝（列目录拿到畸形文件名时）', () => {
     assert.throws(
       () => renderShadowMainConf({ includes: ['/etc/nginx/conf.d/a b.conf'], candidate: '/x/c.conf' }),
-      (e: unknown) => e instanceof DpError && e.code === 'DP.NGX.CONF_INVALID',
+      (e: unknown) => e instanceof DpError && e.code === ERR.NGX.CONF_INVALID,
     )
   })
 })

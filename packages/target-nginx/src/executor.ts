@@ -1,4 +1,5 @@
 import {
+  ERR,
   DpError,
   describeExecFailure,
   excerptOutput,
@@ -142,7 +143,7 @@ function nginxOutput(result: ExecResult): string {
 function assertAbsoluteRemotePath(kind: string, path: string, configPath: string): void {
   const escaped = path.split('/').some((segment) => segment === '..')
   if (path.startsWith('/') && !escaped) return
-  throw new DpError('DP.NGX.CONF_INVALID', `${kind} 不是可信的目标机绝对路径：${path}`, {
+  throw new DpError(ERR.NGX.CONF_INVALID, `${kind} 不是可信的目标机绝对路径：${path}`, {
     path: configPath,
     hint: '目标机路径由上层从 layout 推导后注入，必须以 / 开头且不含 `..`。相对路径会随进程工作目录漂移，`..` 能写到 confd 之外',
   })
@@ -156,7 +157,7 @@ function isStringArray(value: unknown): value is readonly string[] {
 function argvOf(step: Step): readonly string[] {
   const argv = step.detail?.['argv']
   if (!isStringArray(argv) || argv.length === 0) {
-    throw new DpError('DP.NGX.CONF_INVALID', `${step.id} 的 detail.argv 缺失或不是非空字符串数组`, {
+    throw new DpError(ERR.NGX.CONF_INVALID, `${step.id} 的 detail.argv 缺失或不是非空字符串数组`, {
       hint: '执行器只按计划里发布的 argv 造命令。要改命令就改 target.ts 的 plan，不要在执行器里另写一份',
     })
   }
@@ -167,7 +168,7 @@ function stepAt(plan: readonly Step[], id: string): Step {
   const found = plan.find((step) => step.id === id)
   if (found !== undefined) return found
   // 计划与执行器不同步是代码错误，不是部署失败。说清楚是哪一步，
-  throw new DpError('DP.NGX.CONF_INVALID', `计划里没有步骤 ${id}`, {
+  throw new DpError(ERR.NGX.CONF_INVALID, `计划里没有步骤 ${id}`, {
     hint: '改 target.ts 的步骤时必须同步改执行器：少走一步在这里的表现是「部署看起来成功了」',
   })
 }
@@ -298,7 +299,7 @@ class Session {
     const ran = new Set(this.steps.map((step) => step.id))
     const missing = planned.filter((id) => !ran.has(id))
     if (missing.length > 0) {
-      throw new DpError('DP.NGX.CONF_INVALID', `执行器漏掉了计划里的步骤：${missing.join(', ')}`, {
+      throw new DpError(ERR.NGX.CONF_INVALID, `执行器漏掉了计划里的步骤：${missing.join(', ')}`, {
         hint: '执行器与 target.ts 的步骤 id 不一致。这是代码错误，不是部署失败',
       })
     }
@@ -447,7 +448,7 @@ export async function installNginx(input: NginxExecInput): Promise<NginxExecResu
   session.begin(checkStep)
   const check = await session.exec(argvOf(checkStep))
   if (check.code !== 0) {
-    return session.fail(checkStep, 'DP.NGX.TEST_FAILED', `候选 conf 过不了 nginx -t（退出码 ${check.code}）`, {
+    return session.fail(checkStep, ERR.NGX.TEST_FAILED, `候选 conf 过不了 nginx -t（退出码 ${check.code}）`, {
       output: nginxOutput(check),
       hint: (report) =>
         `${compensationSuffix(report)}候选没有写进 ${L.file}，confd 里仍是部署前的内容，无需手工回滚。` +
@@ -530,7 +531,7 @@ export async function activateNginx(input: NginxExecInput): Promise<NginxExecRes
   } else {
     const live = await session.exec(liveArgv)
     if (live.code !== 0) {
-      return session.fail(checkStep, 'DP.NGX.TEST_FAILED', `换上去之后整棵 include 树过不了 nginx -t（退出码 ${live.code}）`, {
+      return session.fail(checkStep, ERR.NGX.TEST_FAILED, `换上去之后整棵 include 树过不了 nginx -t（退出码 ${live.code}）`, {
         output: nginxOutput(live),
         hint: (report) =>
           `${compensationSuffix(report)}` +
@@ -557,7 +558,7 @@ export async function activateNginx(input: NginxExecInput): Promise<NginxExecRes
   } else {
     const reloaded = await session.exec(argvOf(reloadStep))
     if (reloaded.code !== 0) {
-      return session.fail(reloadStep, 'DP.NGX.RELOAD_FAILED', `reload 失败（退出码 ${reloaded.code}）`, {
+      return session.fail(reloadStep, ERR.NGX.RELOAD_FAILED, `reload 失败（退出码 ${reloaded.code}）`, {
         output: nginxOutput(reloaded),
         hint:
           `${L.file} 已经在盘上并且通过了 nginx -t，**不需要回滚**：nginx 现在跑的还是替换前那份配置。` +
@@ -592,7 +593,7 @@ export async function verifyNginx(input: NginxExecInput): Promise<NginxExecResul
   const actual = await readConfIfExists(session)
 
   if (actual === null) {
-    return session.fail(checkStep, 'DP.VERIFY.FAILED', `${L.file} 不存在`, {
+    return session.fail(checkStep, ERR.VERIFY.FAILED, `${L.file} 不存在`, {
       hint: 'confd 里没有本次该有的那份 conf。重新跑一次 apply 会写上去；如果这台机器本来就不该有它，检查 confd 是不是被清过',
     })
   }
@@ -630,7 +631,7 @@ export async function rollbackNginx(input: NginxExecInput): Promise<NginxExecRes
   const restoreStep = stepAt(plan, 'nginx.restore-backup')
   session.begin(restoreStep)
   if ((await session.runner.stat(L.backup)) === null) {
-    return session.fail(restoreStep, 'DP.NGX.NO_PREVIOUS', `没有可还原的备份：${L.backup} 不存在`, {
+    return session.fail(restoreStep, ERR.NGX.NO_PREVIOUS, `没有可还原的备份：${L.backup} 不存在`, {
       hint:
         '首次部署没有上一份 conf 可回滚，本包不会返回「回滚成功」这种假结果。' +
         '确实要撤掉这次部署的话，手动删除该 conf 后 reload —— 备份只在上一次替换时才产生',
@@ -643,7 +644,7 @@ export async function rollbackNginx(input: NginxExecInput): Promise<NginxExecRes
   session.begin(checkStep)
   const check = await session.exec(argvOf(checkStep))
   if (check.code !== 0) {
-    return session.fail(checkStep, 'DP.NGX.TEST_FAILED', `还原之后整棵 include 树过不了 nginx -t（退出码 ${check.code}）`, {
+    return session.fail(checkStep, ERR.NGX.TEST_FAILED, `还原之后整棵 include 树过不了 nginx -t（退出码 ${check.code}）`, {
       output: nginxOutput(check),
       hint:
         `注意备份已经被 rename 掉，没有第二份可退：${L.backup} 不再存在。` +
@@ -664,7 +665,7 @@ export async function rollbackNginx(input: NginxExecInput): Promise<NginxExecRes
   } else {
     const reloaded = await session.exec(argvOf(reloadStep))
     if (reloaded.code !== 0) {
-      return session.fail(reloadStep, 'DP.NGX.RELOAD_FAILED', `还原已落盘但 reload 失败（退出码 ${reloaded.code}）`, {
+      return session.fail(reloadStep, ERR.NGX.RELOAD_FAILED, `还原已落盘但 reload 失败（退出码 ${reloaded.code}）`, {
         output: nginxOutput(reloaded),
         hint: `${L.file} 已还原成上一份并通过了 nginx -t，只是 nginx 还没加载它。修好重载机制后手动重跑一次同样的 reload 命令即可；不需要再动文件`,
       })

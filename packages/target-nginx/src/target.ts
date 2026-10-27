@@ -1,4 +1,4 @@
-import { DpError, joinRemotePath, type Step, type Target, type TargetContext } from '@dp/ports'
+import { ERR, DpError, joinRemotePath, type Step, type Target, type TargetContext } from '@dp/ports'
 import { renderString } from '@dp/template'
 import { renderConf } from './render.js'
 import type { NginxTargetConfig } from './types.js'
@@ -51,14 +51,14 @@ function resolveFilename(ctx: TargetContext, config: NginxTargetConfig): string 
       path: 'projects.*.target.nginx.filename',
     }).trim()
     if (rendered === '') {
-      throw new DpError('DP.NGX.CONF_INVALID', 'filename 是空串', {
+      throw new DpError(ERR.NGX.CONF_INVALID, 'filename 是空串', {
         path: 'projects.*.target.nginx.filename',
         hint: '删掉这个字段会用 `<项目名>.conf`，或写成带变量的名字如 `${project}.conf`',
       })
     }
     // 它是 confd 里的**一个名字**，不是路径。带分隔符就能写到 confd 之外去，
     if (rendered.includes('/') || rendered.includes('\\') || rendered === '.' || rendered === '..') {
-      throw new DpError('DP.NGX.CONF_INVALID', `filename 不是单个文件名：${rendered}`, {
+      throw new DpError(ERR.NGX.CONF_INVALID, `filename 不是单个文件名：${rendered}`, {
         path: 'projects.*.target.nginx.filename',
         hint: '它会被拼到 confd 后面，带路径分隔符就意味着能写到 confd 之外。要写到别处请另开一个 target',
       })
@@ -67,7 +67,7 @@ function resolveFilename(ctx: TargetContext, config: NginxTargetConfig): string 
   }
   const project = config.render.project
   if (project === '') {
-    throw new DpError('DP.NGX.CONF_INVALID', '未配置 filename，且上下文里没有 project 可用来推导', {
+    throw new DpError(ERR.NGX.CONF_INVALID, '未配置 filename，且上下文里没有 project 可用来推导', {
       path: 'projects.*.target.nginx.filename',
       hint: '显式写 filename，或让调用方把 project 放进渲染上下文（默认文件名是 `<项目名>.conf`）',
     })
@@ -82,20 +82,20 @@ const SHELL_META = /[ \t;|&$><`'"\n\r(){}[\]\\*?!#~]/
 
 function assertReloadArgv(argv: readonly string[]): readonly string[] {
   if (argv.length === 0) {
-    throw new DpError('DP.NGX.RELOAD_CMD_INVALID', 'reload 是空数组', {
+    throw new DpError(ERR.NGX.RELOAD_CMD_INVALID, 'reload 是空数组', {
       path: 'projects.*.target.nginx.reload',
       hint: '写成 argv 数组，如 `["nginx","-s","reload"]` 或 `["systemctl","reload","nginx"]`；确实不需要 reload 就写 `false`',
     })
   }
   for (const arg of argv) {
     if (arg === '') {
-      throw new DpError('DP.NGX.RELOAD_CMD_INVALID', 'reload 的参数里有空串', {
+      throw new DpError(ERR.NGX.RELOAD_CMD_INVALID, 'reload 的参数里有空串', {
         path: 'projects.*.target.nginx.reload',
         hint: '删掉空串。空参数会让目标机的 execve 直接失败，且失败原因与真正的问题无关',
       })
     }
     if (SHELL_META.test(arg)) {
-      throw new DpError('DP.NGX.RELOAD_CMD_INVALID', `reload 参数含 shell 元字符：${arg}`, {
+      throw new DpError(ERR.NGX.RELOAD_CMD_INVALID, `reload 参数含 shell 元字符：${arg}`, {
         path: 'projects.*.target.nginx.reload',
         hint: '本仓从不经过 shell 拼命令（Runner 只有 exec(argv[])），这些字符会被原样当作参数传给程序而不是被解释 —— 照传的结果与写它的人期待的完全不同。写成 argv 数组，逐个元素只放程序名、选项和值',
       })
@@ -238,7 +238,7 @@ export const nginxTarget: Target<NginxTargetConfig> = {
    */
   planRollback(ctx, config): readonly Step[] {
     if (ctx.previousReleaseId === undefined) {
-      throw new DpError('DP.NGX.NO_PREVIOUS', '没有上一版 conf 可还原', {
+      throw new DpError(ERR.NGX.NO_PREVIOUS, '没有上一版 conf 可还原', {
         path: 'projects.*.target.nginx',
         hint: '首次部署没有可回退的版本。确认要撤销的话，手动删除该 conf 后 reload —— 本包不返回「回滚成功」这种假结果',
       })

@@ -12,6 +12,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  ERR,
   DpError,
   type ExecOptions,
   type ExecResult,
@@ -204,14 +205,14 @@ class MemoryRunner implements Runner {
     // 真 fs.writeFile 不建父目录：忘了 mkdir 影子目录会当场失败，不会静默成功
     const idx = path.lastIndexOf('/')
     if (this.tree.get(path.slice(0, idx)) === undefined) {
-      throw new DpError('DP.PATH.NOT_WRITABLE', `ENOENT：父目录不存在 ${path.slice(0, idx)}`)
+      throw new DpError(ERR.PATH.NOT_WRITABLE, `ENOENT：父目录不存在 ${path.slice(0, idx)}`)
     }
     this.tree.set(path, { kind: 'file', content: typeof data === 'string' ? data : new TextDecoder().decode(data) })
   }
 
   async readFile(path: string): Promise<string> {
     const n = this.tree.get(path)
-    if (n === undefined) throw new DpError('DP.PATH.NOT_WRITABLE', `不存在：${path}`)
+    if (n === undefined) throw new DpError(ERR.PATH.NOT_WRITABLE, `不存在：${path}`)
     return n.content ?? ''
   }
 
@@ -227,10 +228,10 @@ class MemoryRunner implements Runner {
 
   async rename(from: string, to: string): Promise<void> {
     if (this.straddles(from, to)) {
-      throw new DpError('DP.PATH.NOT_WRITABLE', `EXDEV：${from} → ${to} 跨文件系统`)
+      throw new DpError(ERR.PATH.NOT_WRITABLE, `EXDEV：${from} → ${to} 跨文件系统`)
     }
     if (this.tree.get(from) === undefined) {
-      throw new DpError('DP.PATH.NOT_WRITABLE', `不存在：${from}`)
+      throw new DpError(ERR.PATH.NOT_WRITABLE, `不存在：${from}`)
     }
     await this.remove(to)
     const nodes = [...this.tree.entries()].filter(([k]) => k === from || k.startsWith(`${from}/`))
@@ -241,7 +242,7 @@ class MemoryRunner implements Runner {
   }
 
   async symlink(): Promise<void> {
-    throw new DpError('DP.PATH.NOT_WRITABLE', '内存 Runner 不支持软链')
+    throw new DpError(ERR.PATH.NOT_WRITABLE, '内存 Runner 不支持软链')
   }
 
   async readlink(path: string): Promise<string | null> {
@@ -329,7 +330,7 @@ describe('installNginx', () => {
 
     const error = await caughtAsync(installNginx(makeInput(runner)))
 
-    assert.equal(error.code, 'DP.NGX.NOT_MANAGED')
+    assert.equal(error.code, ERR.NGX.NOT_MANAGED)
     assert.ok(error.hint !== undefined && error.hint.length > 0, '错误必须带 hint')
     // 判定排在任何 mkdir/writeFile 之前：影子目录默认就在 confd 之下，
     // 判定放在写候选之后就等于「已经动过 confd 才说这个文件不该动」
@@ -362,7 +363,7 @@ describe('installNginx', () => {
 
     const error = await caughtAsync(installNginx(makeInput(runner)))
 
-    assert.equal(error.code, 'DP.NGX.TEST_FAILED')
+    assert.equal(error.code, ERR.NGX.TEST_FAILED)
     // 只报「校验失败」等于让用户自己上机器重跑一遍才知道原因
     assert.match(String(error.cause ? JSON.stringify(error.cause) : ''), /unknown directive/)
     assert.match(error.message, /nginx/)
@@ -454,7 +455,7 @@ describe('installNginx', () => {
 
     const error = await caughtAsync(installNginx(makeInput(runner, { dryRun: true })))
 
-    assert.equal(error.code, 'DP.NGX.NOT_MANAGED')
+    assert.equal(error.code, ERR.NGX.NOT_MANAGED)
     assert.deepEqual(runner.snapshot(CONFD), before)
   })
 })
@@ -526,7 +527,7 @@ describe('activateNginx', () => {
 
     const error = await caughtAsync(activateNginx(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
 
-    assert.equal(error.code, 'DP.NGX.TEST_FAILED')
+    assert.equal(error.code, ERR.NGX.TEST_FAILED)
     assert.equal(await runner.readFile(TARGET), old, 'conf 没有被还原')
     // activate 本身没有影子 -t：复验 1 次 + 还原后确认回到原状 1 次
     assert.deepEqual(runner.argvs(), [
@@ -549,7 +550,7 @@ describe('activateNginx', () => {
 
     const error = await caughtAsync(activateNginx(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
 
-    assert.equal(error.code, 'DP.NGX.RELOAD_FAILED')
+    assert.equal(error.code, ERR.NGX.RELOAD_FAILED)
     assert.equal(await runner.readFile(TARGET), RENDERED, '好文件被换回旧的了')
     assertExecInvariants(runner)
   })
@@ -631,7 +632,7 @@ describe('verifyNginx', () => {
 
     const error = await caughtAsync(verifyNginx(makeInput(runner)))
 
-    assert.equal(error.code, 'DP.VERIFY.FAILED')
+    assert.equal(error.code, ERR.VERIFY.FAILED)
   })
 })
 
@@ -659,7 +660,7 @@ describe('rollbackNginx', () => {
 
     const error = await caughtAsync(rollbackNginx(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
 
-    assert.equal(error.code, 'DP.NGX.NO_PREVIOUS')
+    assert.equal(error.code, ERR.NGX.NO_PREVIOUS)
     assert.deepEqual(runner.snapshot(CONFD), before)
     assert.deepEqual(runner.argvs(), [])
   })
@@ -672,7 +673,7 @@ describe('rollbackNginx', () => {
 
     const error = await caughtAsync(rollbackNginx(makeInput(runner)))
 
-    assert.equal(error.code, 'DP.NGX.NO_PREVIOUS')
+    assert.equal(error.code, ERR.NGX.NO_PREVIOUS)
     assert.deepEqual(runner.argvs(), [])
   })
 })

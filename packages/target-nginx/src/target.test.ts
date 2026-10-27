@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError, type Step, type TargetContext } from '@dp/ports'
+import { ERR, DpError, type Step, type TargetContext } from '@dp/ports'
 import { nginxTarget } from './target.js'
 import type { NginxTargetConfig } from './types.js'
 
@@ -92,7 +92,7 @@ describe('nginxTarget', () => {
         filename: '${env}/evil.conf',
         render: { ...CONFIG.render, env: 'a/b' },
       }),
-      (e: unknown) => e instanceof DpError && e.code === 'DP.NGX.CONF_INVALID',
+      (e: unknown) => e instanceof DpError && e.code === ERR.NGX.CONF_INVALID,
     )
   })
 
@@ -100,7 +100,7 @@ describe('nginxTarget', () => {
     for (const bad of ['../evil.conf', 'sub/site.conf', '..', '']) {
       assert.throws(
         () => nginxTarget.planInstall(CTX, { ...CONFIG, filename: bad }),
-        (e: unknown) => e instanceof DpError && e.code === 'DP.NGX.CONF_INVALID',
+        (e: unknown) => e instanceof DpError && e.code === ERR.NGX.CONF_INVALID,
         `filename=${JSON.stringify(bad)} 必须被拒`,
       )
     }
@@ -142,7 +142,7 @@ describe('nginxTarget', () => {
     for (const bad of [['nginx', '-s', 'reload; rm -rf /'], ['sh', '-c', 'nginx -s reload'], ['nginx', '-s', 'reload && reboot'], ['']]) {
       assert.throws(
         () => nginxTarget.planActivate(CTX, { ...CONFIG, reload: bad }),
-        (e: unknown) => e instanceof DpError && e.code === 'DP.NGX.RELOAD_CMD_INVALID',
+        (e: unknown) => e instanceof DpError && e.code === ERR.NGX.RELOAD_CMD_INVALID,
         `reload=${JSON.stringify(bad)} 必须被拒`,
       )
     }
@@ -161,7 +161,7 @@ describe('nginxTarget', () => {
       throw new Error('期望抛错')
     } catch (err) {
       assert.ok(err instanceof DpError)
-      assert.equal(err.code, 'DP.NGX.NO_PREVIOUS')
+      assert.equal(err.code, ERR.NGX.NO_PREVIOUS)
       assert.ok((err.hint ?? '') !== '')
     }
   })
@@ -169,7 +169,7 @@ describe('nginxTarget', () => {
   it('渲染出错在 plan 期就抛，不产出步骤（否则会拿着一份渲染失败的配置上机器）', () => {
     assert.throws(
       () => nginxTarget.planInstall(CTX, { ...CONFIG, server: { root: '/srv', locations: [{ path: 'api/', extra: ['return 204;'] }] } }),
-      (e: unknown) => e instanceof DpError && e.code === 'DP.NGX.CONF_INVALID',
+      (e: unknown) => e instanceof DpError && e.code === ERR.NGX.CONF_INVALID,
     )
   })
 

@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { assertOverwritable, decideOverwrite, isManaged, MANAGED_MARKER } from './ownership.js'
 
 describe('decideOverwrite', () => {
@@ -67,7 +67,7 @@ describe('assertOverwritable', () => {
       throw new Error('期望抛错')
     } catch (err) {
       assert.ok(err instanceof DpError)
-      assert.equal(err.code, 'DP.NGX.NOT_MANAGED')
+      assert.equal(err.code, ERR.NGX.NOT_MANAGED)
       assert.equal(err.path, 'projects.web.target.nginx.filename')
       assert.match(err.hint ?? '', /force: true/)
       assert.match(err.hint ?? '', /managed by dp/)

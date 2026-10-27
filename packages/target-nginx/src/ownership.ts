@@ -1,4 +1,4 @@
-import { DpError, isManaged } from '@dp/ports'
+import { ERR, DpError, isManaged } from '@dp/ports'
 
 export { isManaged, MANAGED_MARKER } from '@dp/ports'
 
@@ -59,7 +59,7 @@ const PRESERVE_HINT =
 export function assertOverwritable(existing: string | null, options?: OverwriteOptions): OverwriteDecision {
   const decision = decideOverwrite(existing, options)
   if (decision.action !== 'abort') return decision
-  throw new DpError('DP.NGX.NOT_MANAGED', decision.reason, {
+  throw new DpError(ERR.NGX.NOT_MANAGED, decision.reason, {
     ...(options?.path !== undefined ? { path: options.path } : {}),
     hint: PRESERVE_HINT,
   })
