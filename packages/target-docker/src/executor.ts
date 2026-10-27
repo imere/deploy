@@ -1,4 +1,5 @@
 import {
+  ERR,
   DpError,
   excerptOutput,
   type DpErrorCode,
@@ -118,7 +119,7 @@ function argvText(argv: readonly string[]): string {
 
 /** 计划与执行器不同步 = 代码错误，不是部署失败。说清是哪一步，别让它伪装成一次部署事故 */
 function mismatch(stepId: string, what: string): DpError {
-  return new DpError('DP.DOCKER.PLAN_MISMATCH', `${stepId} 的 ${what} 与执行器对不上`, {
+  return new DpError(ERR.DOCKER.PLAN_MISMATCH, `${stepId} 的 ${what} 与执行器对不上`, {
     path: 'projects.*.target.docker',
     hint: '执行器只按 target.ts 发布的 detail 造命令。改 plan 的步骤 id 或 detail 字段时必须同步改 executor.ts',
   })
@@ -169,7 +170,7 @@ function stepAt(plan: readonly Step[], id: string): Step {
   if (found !== undefined) return found
   // 少走一步在这里的表现是「部署看起来成功了」，所以宁可当场炸
   return (() => {
-    throw new DpError('DP.DOCKER.PLAN_MISMATCH', `计划里没有步骤 ${id}`, {
+    throw new DpError(ERR.DOCKER.PLAN_MISMATCH, `计划里没有步骤 ${id}`, {
       path: 'projects.*.target.docker',
       hint: '改 target.ts 的步骤时必须同步改执行器',
     })
@@ -302,7 +303,7 @@ class Session {
     const ran = new Set(this.steps.map((step) => step.id))
     const missing = planned.filter((id) => !ran.has(id))
     if (missing.length > 0) {
-      throw new DpError('DP.DOCKER.PLAN_MISMATCH', `执行器漏掉了计划里的步骤：${missing.join('、')}`, {
+      throw new DpError(ERR.DOCKER.PLAN_MISMATCH, `执行器漏掉了计划里的步骤：${missing.join('、')}`, {
         path: 'projects.*.target.docker',
         hint: '执行器与 target.ts 的步骤 id 不一致。这是代码错误，不是部署失败',
       })
@@ -350,7 +351,7 @@ export async function installDocker(input: DockerExecInput): Promise<DockerExecR
     }
     if (missing.length > 0) {
       // 一次列全：只报第一个会让用户改一个、重跑、再撞第二个
-      return session.fail(step, 'DP.DOCKER.FILE_MISSING', `目标机上没有这些文件：${missing.join('、')}`, {
+      return session.fail(step, ERR.DOCKER.FILE_MISSING, `目标机上没有这些文件：${missing.join('、')}`, {
         hint:
           'compose 文件是随 release 上传的，本包不搬文件。把它纳入 source.root，' +
           '或检查 source.include/exclude 是不是把它排掉了；路径写成相对 release 目录的形式' +
@@ -408,7 +409,7 @@ export async function activateDocker(input: DockerExecInput): Promise<DockerExec
       if (pulled.code !== 0) {
         return session.fail(
           pullStep,
-          'DP.DOCKER.PULL_FAILED',
+          ERR.DOCKER.PULL_FAILED,
           session.ctx.previousReleaseId === undefined
             ? `拉取镜像失败（退出码 ${pulled.code}），本次没有起任何容器`
             : `拉取镜像失败（退出码 ${pulled.code}）：跑着的仍是上一版的容器，本次没有起新容器`,
@@ -439,7 +440,7 @@ export async function activateDocker(input: DockerExecInput): Promise<DockerExec
   } else {
     const up = await session.exec(upStep)
     if (up.code !== 0) {
-      return session.fail(upStep, 'DP.ACTIVATE.START_FAILED', `起服务失败（退出码 ${up.code}）`, {
+      return session.fail(upStep, ERR.ACTIVATE.START_FAILED, `起服务失败（退出码 ${up.code}）`, {
         output: dockerOutput(up),
         // 下面是 heal 之前的状态判断：up 失败时容器可能根本没换，也可能换了一半
         hint:
@@ -464,7 +465,7 @@ async function readPs(session: Session, step: Step): Promise<ReturnType<typeof p
   const result = await session.exec(step)
   if (result.code !== 0) {
     // 命令本身没跑成功，stdout 读不出任何东西 —— 按「验收失败」abort，绝不因为
-    return session.fail(step, 'DP.DOCKER.PS_PARSE_FAILED', `读 compose 状态失败（退出码 ${result.code}），本次没有任何服务被验证过`, {
+    return session.fail(step, ERR.DOCKER.PS_PARSE_FAILED, `读 compose 状态失败（退出码 ${result.code}），本次没有任何服务被验证过`, {
       output: dockerOutput(result),
       hint:
         'compose ps 自己没跑成功，所以读不出任何服务状态 —— 这不等于健康。' +
@@ -517,7 +518,7 @@ export async function verifyDocker(input: DockerExecInput): Promise<DockerExecRe
   if (!parsed.healthy) {
     return session.fail(
       failStep,
-      'DP.VERIFY.FAILED',
+      ERR.VERIFY.FAILED,
       `服务状态不达标：${parsed.reason ?? '读不出通过结论'}。实际状态：${servicesTable(parsed.services)}`,
       {
         hint:
@@ -564,7 +565,7 @@ export async function rollbackDocker(input: DockerExecInput): Promise<DockerExec
   } else {
     const up = await session.exec(upStep)
     if (up.code !== 0) {
-      return session.fail(upStep, 'DP.ACTIVATE.START_FAILED', `回滚启动失败（退出码 ${up.code}）`, {
+      return session.fail(upStep, ERR.ACTIVATE.START_FAILED, `回滚启动失败（退出码 ${up.code}）`, {
         output: dockerOutput(up),
         hint:
           '回滚就是用上一版的 compose 再 up 一次，它失败了说明**上一版自己就起不来** —— ' +
@@ -586,7 +587,7 @@ export async function rollbackDocker(input: DockerExecInput): Promise<DockerExec
   if (!parsed.healthy) {
     return session.fail(
       psStep,
-      'DP.VERIFY.FAILED',
+      ERR.VERIFY.FAILED,
       `回滚已经执行，但上一版也没起来：${parsed.reason ?? '读不出通过结论'}。实际状态：${servicesTable(parsed.services)}。现在需要人工介入`,
       {
         hint:

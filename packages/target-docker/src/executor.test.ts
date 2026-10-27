@@ -11,6 +11,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  ERR,
   DpError,
   type ExecOptions,
   type ExecResult,
@@ -206,7 +207,7 @@ describe('installDocker', () => {
 
     const error = await caughtAsync(installDocker(makeInput(runner, { config: config({ files: ['docker-compose.yml', 'docker-compose.prod.yml'] }) })))
 
-    assert.equal(error.code, 'DP.DOCKER.FILE_MISSING')
+    assert.equal(error.code, ERR.DOCKER.FILE_MISSING)
     // 只报第一个会让用户改一个、重跑、再撞第二个
     assert.match(error.message, /docker-compose\.yml/)
     assert.match(error.message, /docker-compose\.prod\.yml/)
@@ -226,7 +227,7 @@ describe('installDocker', () => {
 
     const error = await caughtAsync(installDocker(makeInput(runner)))
 
-    assert.equal(error.code, 'DP.DOCKER.FILE_MISSING')
+    assert.equal(error.code, ERR.DOCKER.FILE_MISSING)
     assert.match(error.message, /是个目录/)
     assert.match(error.message, /docker-compose\.yml/)
     assert.deepEqual(runner.argvs(), [])
@@ -237,7 +238,7 @@ describe('installDocker', () => {
 
     const error = await caughtAsync(installDocker(makeInput(runner, { config: config({ envFile: '.env.prod' }) })))
 
-    assert.equal(error.code, 'DP.DOCKER.FILE_MISSING')
+    assert.equal(error.code, ERR.DOCKER.FILE_MISSING)
     assert.match(error.message, /\.env\.prod/)
     assert.equal(error.message.includes(COMPOSE), false, 'compose 文件是在的，不该被点名')
     // 步骤本身也要走：compose 文件那步确实过了
@@ -319,7 +320,7 @@ describe('activateDocker', () => {
 
     const error = await caughtAsync(activateDocker(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
 
-    assert.equal(error.code, 'DP.ACTIVATE.START_FAILED')
+    assert.equal(error.code, ERR.ACTIVATE.START_FAILED)
     // 只报「启动失败」等于让用户自己上机器重跑一遍才知道原因
     const failure = failureOf(error)
     assert.match(failure.output ?? '', /port is already allocated/)
@@ -357,7 +358,7 @@ describe('activateDocker', () => {
 
     const error = await caughtAsync(activateDocker(makeInput(runner)))
 
-    assert.equal(error.code, 'DP.ACTIVATE.START_FAILED')
+    assert.equal(error.code, ERR.ACTIVATE.START_FAILED)
     const healing = failureOf(error).healing.join('\n')
     assert.equal(healing.includes('dp rollback'), false, '没有上一版，给回滚是骗人')
     // 元素级：路径里有空格时 join 出来的字符串没法区分「一个元素」与「两个元素」
@@ -371,7 +372,7 @@ describe('activateDocker', () => {
 
     const error = await caughtAsync(activateDocker(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
 
-    assert.equal(error.code, 'DP.DOCKER.PULL_FAILED')
+    assert.equal(error.code, ERR.DOCKER.PULL_FAILED)
     assert.match(error.message, /上一版/)
     assert.match(error.message, /没有起新容器/)
     const failure = failureOf(error)
@@ -422,7 +423,7 @@ describe('verifyDocker', () => {
 
     const error = await caughtAsync(verifyDocker(makeInput(runner)))
 
-    assert.equal(error.code, 'DP.VERIFY.FAILED')
+    assert.equal(error.code, ERR.VERIFY.FAILED)
     assert.match(error.message, /api/)
     assert.match(error.message, /unhealthy/)
     const failure = failureOf(error)
@@ -438,7 +439,7 @@ describe('verifyDocker', () => {
     const error = await caughtAsync(verifyDocker(makeInput(runner)))
 
     // 包成 VERIFY.FAILED 就丢了「远端 compose 可能根本不可用」这条线索
-    assert.equal(error.code, 'DP.DOCKER.PS_PARSE_FAILED')
+    assert.equal(error.code, ERR.DOCKER.PS_PARSE_FAILED)
     const failure = failureOf(error)
     assert.equal(failure.step, 'docker.ps')
     // 挂上 phase / step 的同时，把读不懂的那份输出原样带出来
@@ -451,7 +452,7 @@ describe('verifyDocker', () => {
 
     const error = await caughtAsync(verifyDocker(makeInput(runner)))
 
-    assert.equal(error.code, 'DP.DOCKER.PS_PARSE_FAILED')
+    assert.equal(error.code, ERR.DOCKER.PS_PARSE_FAILED)
     assert.match(error.message, /没有任何服务被验证过/)
     assert.deepEqual(runner.argvs(), [PS_ARGV])
   })
@@ -478,7 +479,7 @@ describe('verifyDocker', () => {
     const error = await caughtAsync(verifyDocker(makeInput(runner, { config: { ...CONFIG, healthcheck: { expectStates: ['running'] } } })))
 
     // 把判定省掉等于把健康检查做成永远绿的灯
-    assert.equal(error.code, 'DP.VERIFY.FAILED')
+    assert.equal(error.code, ERR.VERIFY.FAILED)
     const failure = failureOf(error)
     assert.equal(failure.step, 'docker.ps', '没有断言步骤时，判定落在 ps 那一步上')
   })
@@ -492,7 +493,7 @@ describe('verifyDocker', () => {
 
     const error = await caughtAsync(verifyDocker(makeInput(runner, { config: { ...CONFIG, healthcheck: { services: ['db'] } } })))
 
-    assert.equal(error.code, 'DP.VERIFY.FAILED')
+    assert.equal(error.code, ERR.VERIFY.FAILED)
     assert.match(error.message, /db/)
   })
 
@@ -502,7 +503,7 @@ describe('verifyDocker', () => {
 
     const error = await caughtAsync(verifyDocker(makeInput(runner, { config: { ...CONFIG, healthcheck: { services: ['api', 'nope'] } } })))
 
-    assert.equal(error.code, 'DP.VERIFY.FAILED')
+    assert.equal(error.code, ERR.VERIFY.FAILED)
     assert.match(error.message, /nope/)
   })
 
@@ -549,7 +550,7 @@ describe('rollbackDocker', () => {
 
     const error = await caughtAsync(rollbackDocker(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
 
-    assert.equal(error.code, 'DP.ACTIVATE.START_FAILED')
+    assert.equal(error.code, ERR.ACTIVATE.START_FAILED)
     const failure = failureOf(error)
     assert.equal(failure.step, 'docker.rollback-up')
     assert.match(failure.output ?? '', /manifest unknown/)
@@ -564,7 +565,7 @@ describe('rollbackDocker', () => {
 
     const error = await caughtAsync(rollbackDocker(makeInput(runner, { ctx: makeCtx({ previousReleaseId: 'r-0' }) })))
 
-    assert.equal(error.code, 'DP.VERIFY.FAILED')
+    assert.equal(error.code, ERR.VERIFY.FAILED)
     assert.match(error.message, /回滚已经执行/)
     assert.match(error.message, /人工介入/)
     const failure = failureOf(error)
@@ -580,7 +581,7 @@ describe('rollbackDocker', () => {
 
     const error = await caughtAsync(rollbackDocker(makeInput(runner)))
 
-    assert.equal(error.code, 'DP.DOCKER.NO_PREVIOUS')
+    assert.equal(error.code, ERR.DOCKER.NO_PREVIOUS)
     assert.deepEqual(runner.argvs(), [])
   })
 

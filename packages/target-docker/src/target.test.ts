@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError, type Step, type TargetContext } from '@dp/ports'
+import { ERR, DpError, type Step, type TargetContext } from '@dp/ports'
 import { dockerTarget } from './target.js'
 import type { DockerTargetConfig } from './types.js'
 
@@ -133,7 +133,7 @@ describe('planVerify', () => {
 
 describe('planRollback', () => {
   it('无上一版 → DP.DOCKER.NO_PREVIOUS，不返回假成功', () => {
-    assert.equal(code(() => dockerTarget.planRollback(CTX, config())), 'DP.DOCKER.NO_PREVIOUS')
+    assert.equal(code(() => dockerTarget.planRollback(CTX, config())), ERR.DOCKER.NO_PREVIOUS)
   })
 
   it('有上一版 → 用上一版目录的 compose 重新 up 并复验', () => {
@@ -162,7 +162,7 @@ describe('四个 plan 共用同一套校验', () => {
       () => dockerTarget.planVerify(CTX, bad),
       () => dockerTarget.planRollback({ ...CTX, previousReleaseId: 'r-0' }, bad),
     ]) {
-      assert.equal(code(plan), 'DP.DOCKER.PROJECT_NAME_INVALID')
+      assert.equal(code(plan), ERR.DOCKER.PROJECT_NAME_INVALID)
     }
   })
 
@@ -174,7 +174,7 @@ describe('四个 plan 共用同一套校验', () => {
       () => dockerTarget.planVerify(CTX, wrong),
       () => dockerTarget.planRollback({ ...CTX, previousReleaseId: 'r-0' }, wrong),
     ]) {
-      assert.equal(code(plan), 'DP.DOCKER.MODE_UNSUPPORTED')
+      assert.equal(code(plan), ERR.DOCKER.MODE_UNSUPPORTED)
     }
   })
 })

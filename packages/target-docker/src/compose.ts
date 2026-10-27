@@ -1,4 +1,4 @@
-import { DpError, RELEASES_DIR_NAME, joinRemotePath, type TargetContext } from '@dp/ports'
+import { ERR, DpError, RELEASES_DIR_NAME, joinRemotePath, type TargetContext } from '@dp/ports'
 import { renderString } from '@dp/template'
 import type { DockerCompose, DockerMode, DockerTargetConfig } from './types.js'
 
@@ -30,21 +30,21 @@ const PROJECT_NAME = /^[a-z0-9][a-z0-9_-]*$/
  */
 export function assertProjectName(value: string, path: string): string {
   if (value === '') {
-    throw new DpError('DP.DOCKER.PROJECT_NAME_INVALID', 'projectName 是空串', {
+    throw new DpError(ERR.DOCKER.PROJECT_NAME_INVALID, 'projectName 是空串', {
       path,
       hint: '它是 compose 的 `-p` 值，也是容器名与网络名的前缀，不能为空。写一个项目名，如 `api`',
     })
   }
   // 分两段报错：字符集不过的原因不同，改法也不同。合成一句等于让用户自己逆推规则
   if (value.startsWith('-')) {
-    throw new DpError('DP.DOCKER.PROJECT_NAME_INVALID', `projectName 以 - 开头：${value}`, {
+    throw new DpError(ERR.DOCKER.PROJECT_NAME_INVALID, `projectName 以 - 开头：${value}`, {
       path,
       hint: 'compose 会把 `-p` 后面的值当参数解析，以 - 开头会被当成选项而不是项目名。改成 `app-<name>` 这样的形式',
     })
   }
   if (!PROJECT_NAME.test(value)) {
     const bad = [...value].find((ch) => !/[a-z0-9_-]/.test(ch))
-    throw new DpError('DP.DOCKER.PROJECT_NAME_INVALID', `projectName 含非法字符 ${bad === undefined ? '?' : bad}：${value}`, {
+    throw new DpError(ERR.DOCKER.PROJECT_NAME_INVALID, `projectName 含非法字符 ${bad === undefined ? '?' : bad}：${value}`, {
       path,
       hint:
         '只允许小写字母、数字、`_` 与 `-`，且必须以小写字母或数字开头 —— compose 用它拼容器名与网络名，' +
@@ -59,32 +59,32 @@ export function assertProjectName(value: string, path: string): string {
  */
 function assertRelative(value: string, path: string, what: string): string {
   if (value === '') {
-    throw new DpError('DP.DOCKER.COMPOSE_FILE_INVALID', `${what} 是空串`, {
+    throw new DpError(ERR.DOCKER.COMPOSE_FILE_INVALID, `${what} 是空串`, {
       path,
       hint: '空路径拼进 `-f` 后面会得到「找不到 compose 文件」，而真正的问题是这个配置项没填',
     })
   }
   if (value.startsWith('/') || /^[A-Za-z]:/.test(value)) {
-    throw new DpError('DP.DOCKER.COMPOSE_FILE_INVALID', `${what} 是绝对路径：${value}`, {
+    throw new DpError(ERR.DOCKER.COMPOSE_FILE_INVALID, `${what} 是绝对路径：${value}`, {
       path,
       hint: 'compose 文件随 release 上传，路径必须相对 release 目录。写成 `docker-compose.yml` 这样的相对路径',
     })
   }
   if (value.includes('\\')) {
-    throw new DpError('DP.DOCKER.COMPOSE_FILE_INVALID', `${what} 含反斜杠：${value}`, {
+    throw new DpError(ERR.DOCKER.COMPOSE_FILE_INVALID, `${what} 含反斜杠：${value}`, {
       path,
       hint: '路径统一用 `/`。反斜杠在目标机上会被当成普通字符，于是「写对的文件名」在远端找不到',
     })
   }
   const segments = value.split('/')
   if (segments.includes('..')) {
-    throw new DpError('DP.DOCKER.COMPOSE_FILE_INVALID', `${what} 含 .. 逃出 release 目录：${value}`, {
+    throw new DpError(ERR.DOCKER.COMPOSE_FILE_INVALID, `${what} 含 .. 逃出 release 目录：${value}`, {
       path,
       hint: 'compose 文件必须落在 release 目录之内。需要引用目录外的文件时把它纳入 source 一起上传',
     })
   }
   if (segments.some((s) => s === '')) {
-    throw new DpError('DP.DOCKER.COMPOSE_FILE_INVALID', `${what} 含空路径段：${value}`, {
+    throw new DpError(ERR.DOCKER.COMPOSE_FILE_INVALID, `${what} 含空路径段：${value}`, {
       path,
       hint: '路径里出现连续的 `/` 或以 `/` 结尾。它多半是拼接出来的，中间少了一段',
     })
@@ -109,7 +109,7 @@ function pathValue(raw: string, config: DockerTargetConfig, path: string, what: 
  */
 export function assertMode(mode: DockerMode, path: string): void {
   if (mode === 'remote-cli') return
-  throw new DpError('DP.DOCKER.MODE_UNSUPPORTED', `mode=${String(mode)} 尚未实现`, {
+  throw new DpError(ERR.DOCKER.MODE_UNSUPPORTED, `mode=${String(mode)} 尚未实现`, {
     path,
     hint:
       '本轮只实现 `remote-cli`（compose 文件随 release 上传、远端 docker compose up）。' +
@@ -151,7 +151,7 @@ export function resolveCompose(ctx: TargetContext, config: DockerTargetConfig, c
   const c: DockerCompose = config.compose
   const filesPath = `${configPath}.compose.files`
   if (c.files.length === 0) {
-    throw new DpError('DP.DOCKER.COMPOSE_FILES_EMPTY', 'compose.files 是空数组', {
+    throw new DpError(ERR.DOCKER.COMPOSE_FILES_EMPTY, 'compose.files 是空数组', {
       path: filesPath,
       // 关键在 hint 里说清后果：不带 -f 的 docker compose up 会去当前工作目录找文件
       hint:
@@ -166,7 +166,7 @@ export function resolveCompose(ctx: TargetContext, config: DockerTargetConfig, c
     const file = pathValue(raw, config, `${filesPath}[${i}]`, 'compose 文件')
     if (seen.has(file)) {
       // 去重是替用户做决定：重复的 `-f` 会让后面的覆盖前面的，且生效顺序敏感
-      throw new DpError('DP.DOCKER.COMPOSE_FILE_DUPLICATED', `compose 文件重复：${file}`, {
+      throw new DpError(ERR.DOCKER.COMPOSE_FILE_DUPLICATED, `compose 文件重复：${file}`, {
         path: `${filesPath}[${i}]`,
         hint: '同一个文件给两次 `-f` 时后面的覆盖前面的，生效顺序完全取决于数组顺序。删掉重复的那一条',
       })
@@ -298,7 +298,7 @@ export function parseComposePs(
   const raw = stdout.trim()
   if (raw === '') {
     // docker compose 没装 / 项目没起来时 stdout 就是空的。空 ≠ 绿灯
-    throw new DpError('DP.DOCKER.PS_PARSE_FAILED', '`docker compose ps --format json` 的 stdout 是空的', {
+    throw new DpError(ERR.DOCKER.PS_PARSE_FAILED, '`docker compose ps --format json` 的 stdout 是空的', {
       path: 'projects.*.target.docker.compose',
       hint:
         '空输出通常意味着远端没有 `docker compose` 子命令，或该项目一个容器都没有。' +
@@ -312,7 +312,7 @@ export function parseComposePs(
     try {
       parsed = JSON.parse(raw)
     } catch (err) {
-      throw new DpError('DP.DOCKER.PS_PARSE_FAILED', 'ps 输出不是合法的 JSON 数组', {
+      throw new DpError(ERR.DOCKER.PS_PARSE_FAILED, 'ps 输出不是合法的 JSON 数组', {
         path: 'projects.*.target.docker.compose',
         hint: '多半是 `docker compose` 不存在时把用法打到了 stdout。确认远端 compose 可用后重试',
         cause: err,
@@ -327,7 +327,7 @@ export function parseComposePs(
       try {
         return JSON.parse(line) as unknown
       } catch (err) {
-        throw new DpError('DP.DOCKER.PS_PARSE_FAILED', `ps 输出第 ${i + 1} 行不是合法 JSON`, {
+        throw new DpError(ERR.DOCKER.PS_PARSE_FAILED, `ps 输出第 ${i + 1} 行不是合法 JSON`, {
           path: 'projects.*.target.docker.compose',
           hint: 'NDJSON 形态要求每行是一个独立对象。整体报错而不是跳过坏行：跳过就等于少验一个服务',
           cause: err,
@@ -339,7 +339,7 @@ export function parseComposePs(
   const services: ComposePsEntry[] = []
   for (const [i, row] of rows.entries()) {
     if (row === null || typeof row !== 'object' || Array.isArray(row)) {
-      throw new DpError('DP.DOCKER.PS_PARSE_FAILED', `ps 输出第 ${i + 1} 项不是对象`, {
+      throw new DpError(ERR.DOCKER.PS_PARSE_FAILED, `ps 输出第 ${i + 1} 项不是对象`, {
         path: 'projects.*.target.docker.compose',
         hint: '这既不是数组形态也不是 NDJSON 形态。不按「空」处理，否则等于永远判通过',
       })

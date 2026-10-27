@@ -1,4 +1,4 @@
-import { DpError, type Step, type Target, type TargetContext } from '@dp/ports'
+import { ERR, DpError, type Step, type Target, type TargetContext } from '@dp/ports'
 import { pullArgv, psArgv, releaseDir, resolveCompose, upArgv, type ResolvedCompose } from './compose.js'
 import type { DockerTargetConfig } from './types.js'
 
@@ -125,7 +125,7 @@ export const dockerTarget: Target<DockerTargetConfig> = {
    */
   planRollback(ctx, config): readonly Step[] {
     if (ctx.previousReleaseId === undefined) {
-      throw new DpError('DP.DOCKER.NO_PREVIOUS', '没有上一版 compose 可回滚', {
+      throw new DpError(ERR.DOCKER.NO_PREVIOUS, '没有上一版 compose 可回滚', {
         path: CONFIG_PATH,
         hint:
           '首次部署没有可回退的版本。确认要撤销的话，手工执行 `docker compose ... down` —— ' +

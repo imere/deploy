@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError, type TargetContext } from '@dp/ports'
+import { ERR, DpError, type TargetContext } from '@dp/ports'
 import { parseComposePs, psArgv, pullArgv, resolveCompose, upArgv } from './compose.js'
 import type { DockerTargetConfig } from './types.js'
 
@@ -98,7 +98,7 @@ describe('projectName 校验', () => {
     for (const [name, why] of cases) {
       assert.equal(
         code(() => resolveCompose(CTX, config({ projectName: name }))),
-        'DP.DOCKER.PROJECT_NAME_INVALID',
+        ERR.DOCKER.PROJECT_NAME_INVALID,
         `projectName ${why}（${JSON.stringify(name)}）没有被拒`,
       )
     }
@@ -127,7 +127,7 @@ describe('projectName 校验', () => {
 
 describe('files 校验', () => {
   it('空数组 → COMPOSE_FILES_EMPTY，hint 说清后果是「去当前目录找」', () => {
-    assert.equal(code(() => resolveCompose(CTX, config({ files: [] }))), 'DP.DOCKER.COMPOSE_FILES_EMPTY')
+    assert.equal(code(() => resolveCompose(CTX, config({ files: [] }))), ERR.DOCKER.COMPOSE_FILES_EMPTY)
     try {
       resolveCompose(CTX, config({ files: [] }))
     } catch (err) {
@@ -139,7 +139,7 @@ describe('files 校验', () => {
   it('重复文件 → COMPOSE_FILE_DUPLICATED（去重是替用户做决定）', () => {
     assert.equal(
       code(() => resolveCompose(CTX, config({ files: ['a.yml', 'b.yml', 'a.yml'] }))),
-      'DP.DOCKER.COMPOSE_FILE_DUPLICATED',
+      ERR.DOCKER.COMPOSE_FILE_DUPLICATED,
     )
   })
 
@@ -148,7 +148,7 @@ describe('files 校验', () => {
     for (const f of bad) {
       assert.equal(
         code(() => resolveCompose(CTX, config({ files: [f] }))),
-        'DP.DOCKER.COMPOSE_FILE_INVALID',
+        ERR.DOCKER.COMPOSE_FILE_INVALID,
         `没有拒绝 ${JSON.stringify(f)}`,
       )
     }
@@ -157,7 +157,7 @@ describe('files 校验', () => {
   it('envFile 走同一套路径判定', () => {
     assert.equal(
       code(() => resolveCompose(CTX, config({ envFile: '../secrets.env' }))),
-      'DP.DOCKER.COMPOSE_FILE_INVALID',
+      ERR.DOCKER.COMPOSE_FILE_INVALID,
     )
   })
 
@@ -166,7 +166,7 @@ describe('files 校验', () => {
       ...config({ files: ['${env.NAME}.yml'] }),
       render: { project: 'api', env: 'prod', envVars: { NAME: 'a\nb' } },
     }
-    assert.equal(code(() => resolveCompose(CTX, withVar)), 'DP.TPL.UNSAFE_VALUE')
+    assert.equal(code(() => resolveCompose(CTX, withVar)), ERR.TPL.UNSAFE_VALUE)
   })
 })
 
@@ -174,9 +174,9 @@ describe('mode', () => {
   it('非 remote-cli 显式报错，不静默降级', () => {
     assert.equal(
       code(() => resolveCompose(CTX, { ...config(), mode: 'build-push' })),
-      'DP.DOCKER.MODE_UNSUPPORTED',
+      ERR.DOCKER.MODE_UNSUPPORTED,
     )
-    assert.equal(code(() => resolveCompose(CTX, { ...config(), mode: 'image-only' })), 'DP.DOCKER.MODE_UNSUPPORTED')
+    assert.equal(code(() => resolveCompose(CTX, { ...config(), mode: 'image-only' })), ERR.DOCKER.MODE_UNSUPPORTED)
   })
 })
 
@@ -226,7 +226,7 @@ describe('parseComposePs', () => {
   })
 
   it('空输出报错（compose 没装时 stdout 是空的），不是绿灯', () => {
-    assert.equal(code(() => parseComposePs('   \n')), 'DP.DOCKER.PS_PARSE_FAILED')
+    assert.equal(code(() => parseComposePs('   \n')), ERR.DOCKER.PS_PARSE_FAILED)
   })
 
   it('空数组：没有服务被验证 → 不通过，且 services 为空', () => {
@@ -237,7 +237,7 @@ describe('parseComposePs', () => {
 
   it('非法 JSON 报错，带 cause，且不按空处理', () => {
     const err = code(() => parseComposePs('[{"Service":'))
-    assert.equal(err, 'DP.DOCKER.PS_PARSE_FAILED')
+    assert.equal(err, ERR.DOCKER.PS_PARSE_FAILED)
   })
 
   it('单个 JSON 对象走 NDJSON 分支（单容器就是一行），不报错', () => {
@@ -249,12 +249,12 @@ describe('parseComposePs', () => {
   it('NDJSON 中有一行坏掉 → 整体报错，不跳过（跳过等于少验一个服务）', () => {
     assert.equal(
       code(() => parseComposePs(`{"Service":"a","State":"running"}\nnot json\n{"Service":"b","State":"running"}`)),
-      'DP.DOCKER.PS_PARSE_FAILED',
+      ERR.DOCKER.PS_PARSE_FAILED,
     )
   })
 
   it('数组里出现非对象元素 → 报错', () => {
-    assert.equal(code(() => parseComposePs('[1,2]')), 'DP.DOCKER.PS_PARSE_FAILED')
+    assert.equal(code(() => parseComposePs('[1,2]')), ERR.DOCKER.PS_PARSE_FAILED)
   })
 
   it('自定义 expectStates 只放行指定状态', () => {
