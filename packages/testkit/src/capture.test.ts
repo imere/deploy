@@ -1,10 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { caught, caughtAsync } from './capture.js'
 
 function dpThrowing(): never {
-  throw new DpError('DP.CONFIG.INVALID', '原始文案', { path: 'hosts.x', hint: '写成 user@host', cause: new Error('底层现场') })
+  throw new DpError(ERR.CONFIG.INVALID, '原始文案', { path: 'hosts.x', hint: '写成 user@host', cause: new Error('底层现场') })
 }
 
 function plainThrowing(): never {
@@ -13,7 +13,7 @@ function plainThrowing(): never {
 
 class UsageLike extends DpError {
   constructor(message: string) {
-    super('DP.CONFIG.INVALID', message)
+    super(ERR.CONFIG.INVALID, message)
     this.name = 'UsageLike'
   }
 }
@@ -25,7 +25,7 @@ function usageThrowing(): never {
 describe('caught · 同步', () => {
   it('返回 DpError，code/message/cause 链原样可断言', () => {
     const err = caught(dpThrowing)
-    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.code, ERR.CONFIG.INVALID)
     assert.equal(err.message, '原始文案')
     assert.equal(err.path, 'hosts.x')
     assert.equal(err.cause instanceof Error, true)
@@ -66,7 +66,7 @@ describe('caught · 同步', () => {
 describe('caughtAsync · 异步', () => {
   it('reject 被 capture 成 DpError，字段齐全', async () => {
     const err = await caughtAsync((async () => dpThrowing())())
-    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.code, ERR.CONFIG.INVALID)
     assert.equal(err.hint, '写成 user@host')
   })
 
@@ -83,7 +83,7 @@ describe('caughtAsync · 异步', () => {
 
   it('kind 校验在异步同样生效', async () => {
     await assert.rejects(
-      caughtAsync(Promise.reject(new DpError('DP.CONFIG.INVALID', '基类')), UsageLike),
+      caughtAsync(Promise.reject(new DpError(ERR.CONFIG.INVALID, '基类')), UsageLike),
       (err: unknown) => {
         assert.ok(err instanceof Error)
         assert.match(err.message, /UsageLike/)

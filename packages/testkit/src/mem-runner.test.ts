@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError, type ExecResult } from '@dp/ports'
+import { ERR, DpError, type ExecResult } from '@dp/ports'
 import { defaultFacts } from './facts.js'
 import { MemoryRunner, assertExecInvariants, currentReleaseId } from './mem-runner.js'
 
@@ -41,7 +41,7 @@ describe('MemoryRunner · 文件树', () => {
     const runner = new MemoryRunner(defaultFacts())
     await assert.rejects(runner.readFile('/srv/missing'), (err: unknown) => {
       assert.ok(err instanceof DpError)
-      assert.equal(err.code, 'DP.PATH.NOT_WRITABLE')
+      assert.equal(err.code, ERR.PATH.NOT_WRITABLE)
       assert.match(err.message, /\/srv\/missing/)
       return true
     })
@@ -51,7 +51,7 @@ describe('MemoryRunner · 文件树', () => {
     const off = new MemoryRunner(defaultFacts({ capabilities: { canSymlink: false } }))
     await assert.rejects(off.symlink('/srv/r1', '/srv/current'), (err: unknown) => {
       assert.ok(err instanceof DpError)
-      assert.equal(err.code, 'DP.PATH.NOT_WRITABLE')
+      assert.equal(err.code, ERR.PATH.NOT_WRITABLE)
       return true
     })
 
@@ -82,7 +82,7 @@ describe('MemoryRunner · 文件树', () => {
     const strict = new MemoryRunner(defaultFacts(), { requireParentDir: true })
     await assert.rejects(strict.writeFile('/srv/nodir/f.txt', 'x'), (err: unknown) => {
       assert.ok(err instanceof DpError)
-      assert.equal(err.code, 'DP.PATH.NOT_WRITABLE')
+      assert.equal(err.code, ERR.PATH.NOT_WRITABLE)
       return true
     })
   })

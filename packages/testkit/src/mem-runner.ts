@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import {
+  ERR,
   CURRENT_LINK_NAME,
   DpError,
   type ExecOptions,
@@ -125,7 +126,7 @@ export class MemoryRunner implements Runner {
     if (this.strictParent) {
       const parent = path.slice(0, path.lastIndexOf('/')) || '/'
       if (this.tree.get(parent) === undefined) {
-        throw new DpError('DP.PATH.NOT_WRITABLE', `ENOENT：父目录不存在 ${parent}`)
+        throw new DpError(ERR.PATH.NOT_WRITABLE, `ENOENT：父目录不存在 ${parent}`)
       }
     } else {
       // 宽松档隐式物化父目录链：static 的 entries 直写从不 mkdir staging（签名只给路径），
@@ -141,7 +142,7 @@ export class MemoryRunner implements Runner {
 
   async readFile(path: string): Promise<string> {
     const n = this.tree.get(path)
-    if (n === undefined) throw new DpError('DP.PATH.NOT_WRITABLE', `不存在：${path}`)
+    if (n === undefined) throw new DpError(ERR.PATH.NOT_WRITABLE, `不存在：${path}`)
     return n.content ?? ''
   }
 
@@ -157,7 +158,7 @@ export class MemoryRunner implements Runner {
 
   async rename(from: string, to: string): Promise<void> {
     if (this.tree.get(from) === undefined) {
-      throw new DpError('DP.PATH.NOT_WRITABLE', `不存在：${from}`)
+      throw new DpError(ERR.PATH.NOT_WRITABLE, `不存在：${from}`)
     }
     await this.remove(to)
     const nodes = [...this.tree.entries()].filter(([k]) => k === from || k.startsWith(`${from}/`))
@@ -169,7 +170,7 @@ export class MemoryRunner implements Runner {
 
   async symlink(target: string, linkPath: string): Promise<void> {
     if (!this.facts.capabilities.canSymlink) {
-      throw new DpError('DP.PATH.NOT_WRITABLE', '不支持软链')
+      throw new DpError(ERR.PATH.NOT_WRITABLE, '不支持软链')
     }
     this.tree.set(linkPath, { kind: 'link', target })
   }
