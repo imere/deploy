@@ -1,25 +1,25 @@
 import { promises as fs } from 'node:fs'
-import { DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
+import { ERR, DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
 import { run } from './exec.js'
 
 function toDpError(err: unknown, path: string): DpError {
   const code = (err as NodeJS.ErrnoException)?.code
   if (code === 'ENOENT') {
-    return new DpError('DP.PATH.NOT_WRITABLE', `路径不存在：${path}`, { cause: err })
+    return new DpError(ERR.PATH.NOT_WRITABLE, `路径不存在：${path}`, { cause: err })
   }
   if (code === 'EACCES' || code === 'EPERM' || code === 'EROFS') {
-    return new DpError('DP.PATH.NOT_WRITABLE', `无权访问：${path}`, {
+    return new DpError(ERR.PATH.NOT_WRITABLE, `无权访问：${path}`, {
       cause: err,
       hint: '检查权限 / 只读挂载 / SELinux 标签。我们绝不会替你 chown 系统目录也不改 ACL —— 授权必须由运维显式完成',
     })
   }
   if (code === 'ENOSPC') {
-    return new DpError('DP.PATH.NOT_WRITABLE', `磁盘已满：${path}`, {
+    return new DpError(ERR.PATH.NOT_WRITABLE, `磁盘已满：${path}`, {
       cause: err,
       hint: '清理空间后重试；目标程序如果依赖写临时文件，即使空间腾出也要重启它',
     })
   }
-  return new DpError('DP.PATH.NOT_WRITABLE', `${path}：${(err as Error).message}`, { cause: err })
+  return new DpError(ERR.PATH.NOT_WRITABLE, `${path}：${(err as Error).message}`, { cause: err })
 }
 
 /**
@@ -136,7 +136,7 @@ export function createLocalRunner(facts: Facts): Runner {
       try {
         await fs.symlink(target, linkPath, process.platform === 'win32' ? 'junction' : 'dir')
       } catch (err) {
-        throw new DpError('DP.PATH.NOT_WRITABLE', `无法创建软链 ${linkPath} → ${target}`, {
+        throw new DpError(ERR.PATH.NOT_WRITABLE, `无法创建软链 ${linkPath} → ${target}`, {
           cause: err,
           hint:
             process.platform === 'win32'

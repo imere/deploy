@@ -9,7 +9,7 @@ import { describe, it } from 'node:test'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { detectPrompt, resolveTool, run } from './exec.js'
 
 describe('exec · 命令查找', () => {
@@ -36,7 +36,7 @@ describe('exec · 基本执行', () => {
   it('可执行文件不存在时报出可指导下一步的错误', async () => {
     await assert.rejects(run(['nope-not-real'], { timeoutMs: 5000 }), (err: unknown) => {
       assert.ok(err instanceof DpError)
-      assert.equal(err.code, 'DP.CONFIG.INVALID')
+      assert.equal(err.code, ERR.CONFIG.INVALID)
       assert.ok(err.hint !== undefined && err.hint.length > 0)
       return true
     })
@@ -72,7 +72,7 @@ describe('exec · 永不交互', () => {
       run(['node', '-e', 'process.stdout.write("Password:")'], { timeoutMs: 10_000 }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.INTERACTIVE_PROMPT_DETECTED')
+        assert.equal(err.code, ERR.INTERACTIVE_PROMPT_DETECTED)
         assert.ok(err.hint?.includes('免密'))
         return true
       },
@@ -99,7 +99,7 @@ describe('exec · 永不无限等待', () => {
       run(['node', '-e', 'setInterval(() => {}, 1000)'], { timeoutMs: 400 }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.TIMEOUT.EXEC')
+        assert.equal(err.code, ERR.TIMEOUT.EXEC)
         return true
       },
     )

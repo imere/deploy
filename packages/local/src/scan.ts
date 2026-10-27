@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { basename, join, resolve as resolvePath, sep } from 'node:path'
-import { DpError, type SourceEntry } from '@dp/ports'
+import { ERR, DpError, type SourceEntry } from '@dp/ports'
 
 /**
  * 归一化后的源。两字段合起来才是完整语义，`mode` 不能事后补：root 决定从哪读，mode 决定产出的相对路径以谁开头，二者任意一个猜错，部署都会「成功」而内容放错了位置。
@@ -25,10 +25,10 @@ export interface SourceSpec {
 export function normalizeSourceSpec(pattern: string, cwd: string): SourceSpec {
   const trimmed = pattern.trim()
   if (trimmed === '') {
-    throw new DpError('DP.CONFIG.INVALID', 'source 不能为空', { path: 'projects.*.source' })
+    throw new DpError(ERR.CONFIG.INVALID, 'source 不能为空', { path: 'projects.*.source' })
   }
   if (/[\\/]$/.test(trimmed)) {
-    throw new DpError('DP.CONFIG.INVALID', `source 不能以路径分隔符结尾：${pattern}`, {
+    throw new DpError(ERR.CONFIG.INVALID, `source 不能以路径分隔符结尾：${pattern}`, {
       path: 'projects.*.source',
       hint: '写 "./dist" 表示目录本身，写 "./dist/**" 表示目录内容。尾斜杠两种解释都成立，我们不猜',
     })
@@ -54,7 +54,7 @@ export async function listSourceEntries(spec: SourceSpec): Promise<readonly Sour
   try {
     stat = await fs.stat(spec.root)
   } catch (err) {
-    throw new DpError('DP.CONFIG.INVALID', `source 不存在：${spec.root}`, {
+    throw new DpError(ERR.CONFIG.INVALID, `source 不存在：${spec.root}`, {
       cause: err,
       path: 'projects.*.source',
       hint: '先跑构建，或检查 cwd',
@@ -101,7 +101,7 @@ async function walk(
         if (target.isDirectory()) await walk(root, abs, mode, out)
         else out.push({ kind: 'file', relativePath: mapName, read: () => fs.readFile(abs) })
       } catch {
-        throw new DpError('DP.PATH.NOT_WRITABLE', `软链失效：${abs}`, {
+        throw new DpError(ERR.PATH.NOT_WRITABLE, `软链失效：${abs}`, {
           hint: '修好这个链接，或把它排除出 source',
         })
       }

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { accessSync, constants as fsConstants } from 'node:fs'
 import { delimiter, join, extname, resolve as resolvePath } from 'node:path'
-import { DpError, type ExecResult } from '@dp/ports'
+import { ERR, DpError, type ExecResult } from '@dp/ports'
 
 /**
  * `run()` 的执行选项。形状上与 ports 的 `ExecOptions` 兼容，外加一个输出上限。
@@ -109,7 +109,7 @@ function buildCmdArgv(exe: string, args: readonly string[]): string[] {
   for (const a of args) {
     if (UNSAFE_FOR_CMD.test(a)) {
       throw new DpError(
-        'DP.CONFIG.INVALID',
+        ERR.CONFIG.INVALID,
         `参数含 cmd.exe 会解释的字符，已拒绝执行：${JSON.stringify(a)}`,
         { hint: '去掉换行/引号/%/&|<>^ 等字符；或改用不需要 .cmd 包装的可执行文件' },
       )
@@ -138,13 +138,13 @@ export async function run(argv: readonly string[], options: RunOptions = {}): Pr
   const env = options.env ?? (process.env as Readonly<Record<string, string | undefined>>)
 
   if (argv.length === 0) {
-    throw new DpError('DP.CONFIG.INVALID', 'argv 为空', { hint: '至少给出可执行文件名' })
+    throw new DpError(ERR.CONFIG.INVALID, 'argv 为空', { hint: '至少给出可执行文件名' })
   }
 
   // 不用 ~/.bashrc 之类的东西推断 exe —— 直接解析 PATH
   const resolved = resolveTool(argv[0]!, env)
   if (resolved === null) {
-    throw new DpError('DP.CONFIG.INVALID', `找不到可执行文件：${argv[0]}`, {
+    throw new DpError(ERR.CONFIG.INVALID, `找不到可执行文件：${argv[0]}`, {
       hint: '检查 PATH，或在配置里给出绝对路径',
     })
   }
@@ -175,7 +175,7 @@ export async function run(argv: readonly string[], options: RunOptions = {}): Pr
       child.kill('SIGKILL')
       done(() =>
         promiseReject(
-          new DpError('DP.TIMEOUT.EXEC', `执行超时 ${timeoutMs}ms：${argv[0]}`, {
+          new DpError(ERR.TIMEOUT.EXEC, `执行超时 ${timeoutMs}ms：${argv[0]}`, {
             hint: '增大 timeout，或检查该命令是否在等待输入（若是，先配好免密）',
           }),
         ),
@@ -199,7 +199,7 @@ export async function run(argv: readonly string[], options: RunOptions = {}): Pr
         done(() =>
           promiseReject(
             new DpError(
-              'DP.INTERACTIVE_PROMPT_DETECTED',
+              ERR.INTERACTIVE_PROMPT_DETECTED,
               `检测到交互式提示 ${matched}，已终止：${argv[0]}`,
               {
                 hint: '配置免密 sudo / 密钥直登 / SSH_ASKPASS，或改用不需要交互的命令',
@@ -226,7 +226,7 @@ export async function run(argv: readonly string[], options: RunOptions = {}): Pr
     child.on('error', (err) => {
       done(() =>
         promiseReject(
-          new DpError('DP.CONFIG.INVALID', `无法启动 ${argv[0]}：${err.message}`, {
+          new DpError(ERR.CONFIG.INVALID, `无法启动 ${argv[0]}：${err.message}`, {
             cause: err,
             hint: '检查可执行文件是否存在、是否被安全软件拦截',
           }),
