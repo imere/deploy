@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError, type TargetContext } from '@dp/ports'
+import { ERR, DpError, type TargetContext } from '@dp/ports'
 import { currentReleaseId, defaultFacts, MemoryRunner } from '@dp/testkit'
 import { deploy, prune, rollback, staticTarget, verifyRelease, type StaticTargetConfig } from './index.js'
 
@@ -81,7 +81,7 @@ describe('static target · deploy', () => {
       }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.VERIFY.FAILED')
+        assert.equal(err.code, ERR.VERIFY.FAILED)
         return true
       },
     )
@@ -95,7 +95,7 @@ describe('static target · deploy', () => {
       deploy({ runner, ctx: makeCtx(), entries: [] }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SOURCE.EMPTY')
+        assert.equal(err.code, ERR.SOURCE.EMPTY)
         return true
       },
     )
@@ -131,7 +131,7 @@ describe('static target · deploy', () => {
       }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.LINK.UNAVAILABLE')
+        assert.equal(err.code, ERR.LINK.UNAVAILABLE)
         return true
       },
     )
@@ -204,7 +204,7 @@ describe('static target · transfer 钩子', () => {
       }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SOURCE.EMPTY')
+        assert.equal(err.code, ERR.SOURCE.EMPTY)
         return true
       },
     )

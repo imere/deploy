@@ -10,7 +10,7 @@ import { after, before, describe, it } from 'node:test'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import type { Facts, TargetContext } from '@dp/ports'
 import { defaultFacts } from '@dp/testkit'
 import { createLocalRunner, listSourceEntries, normalizeSourceSpec } from '@dp/local'
@@ -76,7 +76,7 @@ describe('端到端 · 本地发布', () => {
       () => normalizeSourceSpec('./dist/', sourceRoot),
       (e: unknown) => {
         assert.ok(e instanceof DpError, `不是 DpError：${String(e)}`)
-        assert.equal(e.code, 'DP.CONFIG.INVALID')
+        assert.equal(e.code, ERR.CONFIG.INVALID)
         assert.match(e.message, /不能以路径分隔符结尾/)
         return true
       },

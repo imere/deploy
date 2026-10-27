@@ -1,4 +1,5 @@
 import {
+  ERR,
   CURRENT_LINK_NAME,
   DpError,
   INCOMING_SUFFIX,
@@ -59,7 +60,7 @@ function layout(root: string): Layout {
 
 function hasDpErrorRunner(runner: Runner): void {
   if (runner.facts.host === '') {
-    throw new DpError('DP.CONFIG.INVALID', 'Runner 缺少 host', { path: 'hosts.*.host' })
+    throw new DpError(ERR.CONFIG.INVALID, 'Runner 缺少 host', { path: 'hosts.*.host' })
   }
 }
 
@@ -128,7 +129,7 @@ async function switchCurrent(
   } catch (err) {
     if (!runner.facts.capabilities.canSymlink) {
       if (strategy === 'symlink') {
-        throw new DpError('DP.LINK.UNAVAILABLE', '这台机器上建不了软链，而配置点名了 switch: symlink', {
+        throw new DpError(ERR.LINK.UNAVAILABLE, '这台机器上建不了软链，而配置点名了 switch: symlink', {
           path: 'projects.*.release.switchStrategy',
           hint: 'Windows 需要开发者模式或管理员权限；容器里可能是挂载选项。改成 switchStrategy: copy 接受非原子切换，或 auto 让 dp 自己退',
         })
@@ -285,7 +286,7 @@ export async function deploy(input: DeployInput): Promise<DeployResult> {
   if (filesWritten === 0) {
     // 发布一个空版本 = 把 "current" 指向空目录 = 线上直接变 404。
     await runner.remove(staging)
-    throw new DpError('DP.SOURCE.EMPTY', `source 里没有任何文件：${ctx.root}`, {
+    throw new DpError(ERR.SOURCE.EMPTY, `source 里没有任何文件：${ctx.root}`, {
       path: 'projects.*.source',
       hint: '多半是构建产物目录不对（注意 "./dist" 与 "./dist/**" 的区别）。本次未产生任何副作用',
     })
@@ -306,7 +307,7 @@ export async function deploy(input: DeployInput): Promise<DeployResult> {
     if (previous !== undefined) {
       await switchCurrent(runner, L.currentLink, L.releaseDir(previous), strategy, warnings)
     }
-    throw new DpError('DP.VERIFY.FAILED', `健康检查未通过：${check.reason}`, {
+    throw new DpError(ERR.VERIFY.FAILED, `健康检查未通过：${check.reason}`, {
       hint: `本次已回退到 ${previous ?? '（无上一版）'}，坏版本留在 ${L.releaseDir(ctx.releaseId)} 待查`,
     })
   }
@@ -376,7 +377,7 @@ export async function rollback(
     : ctx.previousReleaseId
 
   if (target === undefined) {
-    throw new DpError('DP.VERIFY.FAILED', '没有可回退的版本', {
+    throw new DpError(ERR.VERIFY.FAILED, '没有可回退的版本', {
       hint: '首次部署没有上一版；确认的话请手动删除 current 或重新部署',
     })
   }
