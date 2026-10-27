@@ -15,7 +15,7 @@ import { describe, it } from 'node:test'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
+import { ERR, DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
 import { assertExecInvariants, linuxFacts } from '@dp/testkit'
 import { main } from './index.js'
 import type { ApplyDeps } from './deps.js'
@@ -94,7 +94,7 @@ class FakeRunner implements Runner {
 
   async readFile(path: string): Promise<string> {
     const v = this.tree.get(path)
-    if (v === undefined) throw new DpError('DP.PATH.NOT_WRITABLE', `不存在：${path}`)
+    if (v === undefined) throw new DpError(ERR.PATH.NOT_WRITABLE, `不存在：${path}`)
     return v ?? ''
   }
 
@@ -409,7 +409,7 @@ describe('compose 文件没上传时', () => {
         assert.notEqual(code, 0)
         const result = resultOf(stdout)
         const error = result['error'] as Record<string, unknown>
-        assert.equal(error['code'], 'DP.DOCKER.FILE_MISSING')
+        assert.equal(error['code'], ERR.DOCKER.FILE_MISSING)
         // 提示要说清「文件没随 release 传上去」，而不是让用户去查 compose 的写法
         assert.match(String(error['hint']), /source\.root|source\.include|source\.exclude/)
 
@@ -450,7 +450,7 @@ describe('up 失败时的收场', () => {
         assert.ok(!docker.some((a) => a.endsWith(' down')), '不许自动 down')
         assert.ok(!docker.some((a) => a.endsWith(' down --build')))
         const error = result['error'] as Record<string, unknown>
-        assert.equal(error['code'], 'DP.ACTIVATE.START_FAILED')
+        assert.equal(error['code'], ERR.ACTIVATE.START_FAILED)
       },
       { docker: true },
     )
@@ -536,7 +536,7 @@ describe('dp verify', () => {
         const result = resultOf(stdout)
         assert.equal(result['ok'], false)
         const error = result['error'] as Record<string, unknown>
-        assert.equal(error['code'], 'DP.VERIFY.FAILED')
+        assert.equal(error['code'], ERR.VERIFY.FAILED)
         assert.match(String(error['message']), /api|exited/)
       },
       { docker: true },
@@ -562,7 +562,7 @@ describe('dp verify', () => {
         const { code, stdout } = await run('verify', ['--json'])
         assert.notEqual(code, 0, '读不出结论就不能放行')
         const error = resultOf(stdout)['error'] as Record<string, unknown>
-        assert.equal(error['code'], 'DP.DOCKER.PS_PARSE_FAILED')
+        assert.equal(error['code'], ERR.DOCKER.PS_PARSE_FAILED)
       },
       { docker: true },
     )
@@ -579,7 +579,7 @@ describe('dp rollback', () => {
         const result = resultOf(stdout)
         assert.equal(result['ok'], false)
         const error = result['error'] as Record<string, unknown>
-        assert.equal(error['code'], 'DP.VERIFY.FAILED')
+        assert.equal(error['code'], ERR.VERIFY.FAILED)
         // 指针不能动
         assert.equal(runner.peek('/srv/app/current'), '/srv/app/releases/r1')
       },

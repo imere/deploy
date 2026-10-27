@@ -11,7 +11,7 @@
  */
 import { makePlan } from '@dp/core'
 import { listSourceEntries, normalizeSourceSpec } from '@dp/local'
-import { DpError, type Step, type TargetContext } from '@dp/ports'
+import { ERR, DpError, type Step, type TargetContext } from '@dp/ports'
 import type { Config } from '@dp/schema'
 import { activateDocker, installDocker, verifyDocker, type DockerExecResult } from '@dp/target-docker'
 import { activateNginx, installNginx, type NginxExecResult } from '@dp/target-nginx'
@@ -158,7 +158,7 @@ async function applyOne(
     const spec = normalizeSourceSpec(target.projectConfig.source.root, context.cwd)
     const rawEntries = await listSourceEntries(spec)
     if (rawEntries.length === 0) {
-      throw new DpError('DP.SOURCE.EMPTY', `项目 ${project} 的 source 是空的：${spec.root}`, {
+      throw new DpError(ERR.SOURCE.EMPTY, `项目 ${project} 的 source 是空的：${spec.root}`, {
         path: `projects.${project}.source`,
         hint: '构建产物为空，或 include/exclude 把所有文件都排除了。注意 "./dist" 与 "./dist/**" 的区别',
       })
@@ -254,7 +254,7 @@ async function applyOne(
           )
         } catch (err) {
           const f = targetErrorFields(err)
-          if (f.code !== 'DP.DOCKER.FILE_MISSING') throw err
+          if (f.code !== ERR.DOCKER.FILE_MISSING) throw err
           dockerDryRunWarnings.push(
             `DP.DOCKER.FILE_MISSING（--dry-run 预期如此）：${f.message}。` +
               '--dry-run 不部署，所以这些文件现在还不在盘上；真跑 dp apply 时它们随 release 一起上传',
@@ -462,7 +462,7 @@ async function applyOne(
       // deploy() 在 DP.VERIFY.FAILED 上**已经**把 current 指回上一版了
       // （见 target-static 的 verify 分支），所以这里绝不能再 rollback 一次 ——
       // 那会连退两版，把本来还能用的版本也换掉。
-      const alreadyCompensated = err instanceof DpError && err.code === 'DP.VERIFY.FAILED'
+      const alreadyCompensated = err instanceof DpError && err.code === ERR.VERIFY.FAILED
       const warnings: string[] = []
       let rolledBack = alreadyCompensated
       let needsHealing = false

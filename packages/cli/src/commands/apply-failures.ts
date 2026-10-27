@@ -8,6 +8,7 @@ import { isSystemdExecFailure } from '@dp/target-systemd'
 import { exitCodeFor } from '../output.js'
 import { targetErrorFields } from '../target-resolve.js'
 
+import { WARN } from '@dp/ports'
 /**
  * needsHealing 时的告警文案。
  *
@@ -16,7 +17,7 @@ import { targetErrorFields } from '../target-resolve.js'
  */
 export function healingWarning(root: string, rbErr: unknown): string {
   return [
-    'DP.HEALING.REQUIRED: 环境处于部分回滚状态 —— 新版本已部分生效，回滚未能完成',
+    `${WARN.HEALING.REQUIRED}: 环境处于部分回滚状态 —— 新版本已部分生效，回滚未能完成`,
     `下一步：1) 人工查看 ${root}/releases 下的版本目录；`,
     `2) 把 ${root}/current 指回可用版本（Linux/macOS：ln -sfn <root>/releases/<版本> ${root}/current` +
       `；Windows 无软链权限时把 ${root}/current 目录内容替换为该版本）；`,

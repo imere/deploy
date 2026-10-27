@@ -1,5 +1,6 @@
 import { EXIT_CODE_ROWS } from './output.js'
 
+import { ERR } from '@dp/ports'
 /**
  * 一条命令的完整说明。**数据即帮助文本**：`dp help <cmd>` 全部由它拼出来。
  */
@@ -55,9 +56,9 @@ export const COMMANDS: readonly CommandDoc[] = [
     ],
     related: ['facts', 'schema', 'apply'],
     commonErrors: [
-      ['DP.CONFIG.INVALID', '配置文件不存在 / 有冲突 / 校验不过；报错里会给出具体路径'],
-      ['DP.PATH.NOT_WRITABLE', '没有可写的发布根；用 release.root 显式指定，或让运维授权候选之一'],
-      ['DP.SOURCE.EMPTY', 'source 枚举结果为空；先构建，或检查 include/exclude'],
+      [ERR.CONFIG.INVALID, '配置文件不存在 / 有冲突 / 校验不过；报错里会给出具体路径'],
+      [ERR.PATH.NOT_WRITABLE, '没有可写的发布根；用 release.root 显式指定，或让运维授权候选之一'],
+      [ERR.SOURCE.EMPTY, 'source 枚举结果为空；先构建，或检查 include/exclude'],
     ],
   },
   {
@@ -74,8 +75,8 @@ export const COMMANDS: readonly CommandDoc[] = [
     ],
     related: ['plan'],
     commonErrors: [
-      ['DP.SSH.TOOL_MISSING', '本地没有 ssh 可执行文件；装 OpenSSH 或改用本地目标'],
-      ['DP.SSH.HOST_KEY_UNKNOWN', '主机密钥不认识；先手工 ssh 一次确认指纹，或显式配 knownHosts'],
+      [ERR.SSH.TOOL_MISSING, '本地没有 ssh 可执行文件；装 OpenSSH 或改用本地目标'],
+      [ERR.SSH.HOST_KEY_UNKNOWN, '主机密钥不认识；先手工 ssh 一次确认指纹，或显式配 knownHosts'],
     ],
   },
   {
@@ -85,7 +86,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     flags: [['--out <file>', '写到文件；不给则打到 stdout']],
     examples: ['dp schema', 'dp schema --out ./deploy.schema.json'],
     related: ['plan'],
-    commonErrors: [['DP.PATH.NOT_WRITABLE', '--out 的目录不存在或不可写；先创建目录']],
+    commonErrors: [[ERR.PATH.NOT_WRITABLE, '--out 的目录不存在或不可写；先创建目录']],
   },
   {
     name: 'help',
@@ -114,9 +115,9 @@ export const COMMANDS: readonly CommandDoc[] = [
     ],
     related: ['plan', 'facts', 'rollback'],
     commonErrors: [
-      ['DP.SOURCE.EMPTY', 'source 枚举结果为空；先构建。注意 "./dist" 与 "./dist/**" 的区别'],
-      ['DP.PATH.NOT_WRITABLE', '发布根建不出来；用 release.root 显式指定一个可写目录'],
-      ['DP.VERIFY.FAILED', '健康检查未通过，**已自动回退**到上一版；坏版本留在 releases/<id> 待查。退出码 2'],
+      [ERR.SOURCE.EMPTY, 'source 枚举结果为空；先构建。注意 "./dist" 与 "./dist/**" 的区别'],
+      [ERR.PATH.NOT_WRITABLE, '发布根建不出来；用 release.root 显式指定一个可写目录'],
+      [ERR.VERIFY.FAILED, '健康检查未通过，**已自动回退**到上一版；坏版本留在 releases/<id> 待查。退出码 2'],
     ],
   },
   {
@@ -135,9 +136,9 @@ export const COMMANDS: readonly CommandDoc[] = [
     ],
     related: ['apply', 'plan', 'facts'],
     commonErrors: [
-      ['DP.CONFIG.INVALID', 'cwd 下没有 dist / build / out / public 任何一个目录（dp 不退到 "."，那会传上 node_modules）；先构建，或用 --config 显式写 source.root'],
-      ['DP.CONFIG.INVALID', '探测到 nginx：零配置不造 server 块（那等于编造你的意图）；用 --config 写 target.nginx，或把 nginx.conf exclude 出源'],
-      ['DP.CONFIG.INVALID', '配置里有多个环境却没给 --env；dp 不默认挑第一个 —— 那正是把预发发到生产的入口'],
+      [ERR.CONFIG.INVALID, 'cwd 下没有 dist / build / out / public 任何一个目录（dp 不退到 "."，那会传上 node_modules）；先构建，或用 --config 显式写 source.root'],
+      [ERR.CONFIG.INVALID, '探测到 nginx：零配置不造 server 块（那等于编造你的意图）；用 --config 写 target.nginx，或把 nginx.conf exclude 出源'],
+      [ERR.CONFIG.INVALID, '配置里有多个环境却没给 --env；dp 不默认挑第一个 —— 那正是把预发发到生产的入口'],
     ],
   },
   {
@@ -157,8 +158,8 @@ export const COMMANDS: readonly CommandDoc[] = [
     ],
     related: ['apply', 'status', 'verify'],
     commonErrors: [
-      ['DP.VERIFY.FAILED', '没有可回退的版本（首次部署 / 只有一个版本）；先跑 dp apply 部署出历史'],
-      ['DP.VERIFY.FAILED', '已切回但新 current 健康检查不过 → needsHealing=true、退出码 2，需要人工介入'],
+      [ERR.VERIFY.FAILED, '没有可回退的版本（首次部署 / 只有一个版本）；先跑 dp apply 部署出历史'],
+      [ERR.VERIFY.FAILED, '已切回但新 current 健康检查不过 → needsHealing=true、退出码 2，需要人工介入'],
     ],
   },
   {
@@ -178,8 +179,8 @@ export const COMMANDS: readonly CommandDoc[] = [
     ],
     related: ['status', 'apply', 'rollback'],
     commonErrors: [
-      ['DP.VERIFY.FAILED', '健康检查未通过；退出码 2。`--json` 的 error.code 才是可靠信号（退出码 2 也用于用法错）'],
-      ['DP.VERIFY.FAILED', '尚未部署过，没有可校验的 current；先跑 dp apply'],
+      [ERR.VERIFY.FAILED, '健康检查未通过；退出码 2。`--json` 的 error.code 才是可靠信号（退出码 2 也用于用法错）'],
+      [ERR.VERIFY.FAILED, '尚未部署过，没有可校验的 current；先跑 dp apply'],
     ],
   },
   {
@@ -199,8 +200,8 @@ export const COMMANDS: readonly CommandDoc[] = [
     ],
     related: ['verify', 'facts', 'rollback'],
     commonErrors: [
-      ['DP.SSH.CONNECT_FAILED', '连不上目标机；确认网络 / 凭据 / 端口，或改用 --host 本地'],
-      ['DP.PATH.NOT_WRITABLE', '发布根算不出来；用 release.root 显式指定，或让运维授权候选之一'],
+      [ERR.SSH.CONNECT_FAILED, '连不上目标机；确认网络 / 凭据 / 端口，或改用 --host 本地'],
+      [ERR.PATH.NOT_WRITABLE, '发布根算不出来；用 release.root 显式指定，或让运维授权候选之一'],
     ],
   },
 ]

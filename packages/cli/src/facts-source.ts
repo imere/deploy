@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { existsSync, promises as fs } from 'node:fs'
-import { DpError, type Facts, type Platform, type Runner, assertPortInRange, parseSshTarget } from '@dp/ports'
+import { ERR, DpError, type Facts, type Platform, type Runner, assertPortInRange, parseSshTarget } from '@dp/ports'
 import type { HostConfig } from '@dp/schema'
 import type { Logger } from '@dp/log'
 import { probeLocalFacts, probeWritable } from '@dp/local'
@@ -136,7 +136,7 @@ export function resolveSshEndpoint(host: HostConfig, path: string, targetAuth?: 
   const hops = host.hops !== undefined && host.hops.length > 0 ? host.hops : undefined
 
   if (host.ssh !== undefined && hops !== undefined) {
-    throw new DpError('DP.CONFIG.INVALID', 'ssh 与 hops 同时给了，二者只能选一个', {
+    throw new DpError(ERR.CONFIG.INVALID, 'ssh 与 hops 同时给了，二者只能选一个', {
       path: `${path}.ssh`,
       hint: '二选一：单跳写 ssh: user@host[:port]；多跳把整条链写进 hops（最后一跳就是目标机）',
     })
@@ -168,7 +168,7 @@ export function resolveSshEndpoint(host: HostConfig, path: string, targetAuth?: 
   }
 
   if (host.ssh === undefined) {
-    throw new DpError('DP.CONFIG.INVALID', `主机 ${path} 既没有 local: true，也没有 ssh 或 hops`, {
+    throw new DpError(ERR.CONFIG.INVALID, `主机 ${path} 既没有 local: true，也没有 ssh 或 hops`, {
       path,
       hint: '写 { "local": true } 指向本地，或写 { "ssh": "user@host:port" } 单跳，或写 { "hops": [...] } 多跳（最后一跳就是目标机）。三者都没有就无法确定目标',
     })
@@ -190,7 +190,7 @@ function hopAuthConfig(auth: NonNullable<NonNullable<HostConfig['hops']>[number]
     return { type: 'key', ...(auth.identityFile !== undefined ? { identityFile: auth.identityFile } : {}) }
   }
   if (auth.type === 'agent') return { type: 'agent' }
-  throw new DpError('DP.CONFIG.INVALID', '这一跳的 auth.type 不是 key / agent', {
+  throw new DpError(ERR.CONFIG.INVALID, '这一跳的 auth.type 不是 key / agent', {
     hint: '多跳只支持 key 与 agent：`-J` 无法逐跳喂密码，写错类型会让 ssh 去读 tty，在 CI 里就是一次永久挂起',
   })
 }
@@ -206,7 +206,7 @@ function resolvedHopPort(
   if (hop.port === undefined) return portInSsh
   assertPortInRange(hop.port, path)
   if (portInSsh !== undefined && portInSsh !== hop.port) {
-    throw new DpError('DP.CONFIG.INVALID', `这一跳给了两个互相矛盾的端口：ssh 串里是 ${portInSsh}，port 字段是 ${hop.port}`, {
+    throw new DpError(ERR.CONFIG.INVALID, `这一跳给了两个互相矛盾的端口：ssh 串里是 ${portInSsh}，port 字段是 ${hop.port}`, {
       path,
       hint: '留一个就行。静默取其中一个会连到另一台机器上，而那次连接往往还是成功的',
     })
@@ -359,7 +359,7 @@ export async function readFactsFile(path: string): Promise<Facts> {
   try {
     text = await fs.readFile(path, 'utf8')
   } catch (err) {
-    throw new DpError('DP.CONFIG.INVALID', `读 facts 文件失败：${path}`, {
+    throw new DpError(ERR.CONFIG.INVALID, `读 facts 文件失败：${path}`, {
       path: '--facts',
       hint: '先跑 `dp facts --json > facts.json` 生成它；注意主机名要与你现在选的 --host 一致',
       cause: err,
@@ -369,7 +369,7 @@ export async function readFactsFile(path: string): Promise<Facts> {
   try {
     raw = JSON.parse(text)
   } catch (err) {
-    throw new DpError('DP.CONFIG.INVALID', `facts 文件不是合法 JSON：${path}`, {
+    throw new DpError(ERR.CONFIG.INVALID, `facts 文件不是合法 JSON：${path}`, {
       path: '--facts',
       hint: '必须是 `dp facts --json` 的原样输出',
       cause: err,
@@ -382,19 +382,19 @@ export async function readFactsFile(path: string): Promise<Facts> {
 /** 只校验 makePlan 真正读到的字段。整份 Facts 逐字段校验是过度工程，且会让夹具难写。 */
 function assertFacts(value: unknown, path: string): Facts {
   if (value === null || typeof value !== 'object') {
-    throw new DpError('DP.CONFIG.INVALID', `facts 文件内容不是对象：${path}`, { path: '--facts' })
+    throw new DpError(ERR.CONFIG.INVALID, `facts 文件内容不是对象：${path}`, { path: '--facts' })
   }
   const v = value as Record<string, unknown>
   const missing = ['host', 'platform', 'arch', 'init', 'homedir', 'tmpdir'].filter((k) => v[k] === undefined)
   if (missing.length > 0) {
-    throw new DpError('DP.CONFIG.INVALID', `facts 文件缺少必填字段：${missing.join(' | ')}`, {
+    throw new DpError(ERR.CONFIG.INVALID, `facts 文件缺少必填字段：${missing.join(' | ')}`, {
       path: '--facts',
       hint: '重新用 `dp facts --json > facts.json` 生成',
     })
   }
   const caps = (v['capabilities'] ?? {}) as Record<string, unknown>
   if (typeof caps['canWrite'] !== 'object' || caps['canWrite'] === null) {
-    throw new DpError('DP.CONFIG.INVALID', 'facts 文件缺少 capabilities.canWrite', {
+    throw new DpError(ERR.CONFIG.INVALID, 'facts 文件缺少 capabilities.canWrite', {
       path: '--facts',
       hint: '发布根候选的可写性全靠它推导，缺了 plan 就无法确定发布目录',
     })

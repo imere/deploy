@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError, type Facts, type Runner } from '@dp/ports'
+import { ERR, DpError, type Facts, type Runner } from '@dp/ports'
 import type { DriverExecResult, ExecRequest, SshDriver } from '@dp/ssh'
 import { linuxFacts } from '@dp/testkit'
 import {
@@ -66,7 +66,7 @@ describe('facts-source · 纯解析', () => {
 
   it('parseSshTarget：端口越界 / 非数字 → 明确报错', () => {
     for (const bad of ['h:0', 'h:70000', 'h:abc']) {
-      assert.throws(() => parseSshTarget(bad, 'p'), { code: 'DP.CONFIG.INVALID' }, `应该拒绝 ${bad}`)
+      assert.throws(() => parseSshTarget(bad, 'p'), { code: ERR.CONFIG.INVALID }, `应该拒绝 ${bad}`)
     }
   })
 
@@ -131,7 +131,7 @@ describe('facts-source · hops 推导（纯）', () => {
 
   it('ssh 与 hops 都没有 → 报错，且文案把 hops 算作合法来源', () => {
     assert.throws(() => resolveSshEndpoint({ layout: 'auto', local: true }, 'hosts.web'), (e: DpError) => {
-      assert.equal(e.code, 'DP.CONFIG.INVALID')
+      assert.equal(e.code, ERR.CONFIG.INVALID)
       assert.ok(e.hint?.includes('hops'), `hint 必须提到 hops，否则配了跳板链的用户会以为自己没配：${e.hint}`)
       return true
     })
@@ -140,7 +140,7 @@ describe('facts-source · hops 推导（纯）', () => {
   it('ssh 与 hops 同时给 → 报错（配置层之外也要成立「二选一」）', () => {
     assert.throws(
       () => resolveSshEndpoint({ layout: 'auto', ssh: 'a@h1', hops: [{ ssh: 'b@h2', auth: key }] }, 'hosts.web'),
-      { code: 'DP.CONFIG.INVALID' },
+      { code: ERR.CONFIG.INVALID },
     )
   })
 
@@ -152,7 +152,7 @@ describe('facts-source · hops 推导（纯）', () => {
           'hosts.web',
         ),
       (e: DpError) => {
-        assert.equal(e.code, 'DP.CONFIG.INVALID')
+        assert.equal(e.code, ERR.CONFIG.INVALID)
         assert.equal(e.path, 'hosts.web.hops[1].port', 'path 必须指向出错的那一跳')
         return true
       },
@@ -160,7 +160,7 @@ describe('facts-source · hops 推导（纯）', () => {
   })
 
   it('hops 为空数组按「没给」处理，报错而不是当成一条空链', () => {
-    assert.throws(() => resolveSshEndpoint({ layout: 'auto', hops: [] }, 'hosts.web'), { code: 'DP.CONFIG.INVALID' })
+    assert.throws(() => resolveSshEndpoint({ layout: 'auto', hops: [] }, 'hosts.web'), { code: ERR.CONFIG.INVALID })
   })
 
   it('单跳 ssh 路径不变：不产出 hops', () => {

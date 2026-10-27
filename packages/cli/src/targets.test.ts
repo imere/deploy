@@ -6,6 +6,7 @@ import { selectTargets } from './targets.js'
 import { validateConfig } from './config-file.js'
 import type { Config } from '@dp/schema'
 
+import { ERR } from '@dp/ports'
 const base = validateConfig(
   {
     hosts: {
@@ -63,7 +64,7 @@ describe('targets · 歧义靠拒绝（铁律 2）', () => {
 
   it('projects 为空 → 配置错（不是用法错）', () => {
     const err = caught(() => selectTargets({ config: { projects: {} } as Config, host: 'local' }))
-    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.code, ERR.CONFIG.INVALID)
   })
 
   it('没有主机 → 配置错，并说明 hosts 该怎么写', () => {

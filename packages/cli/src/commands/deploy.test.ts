@@ -5,7 +5,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { deriveLayout, pickReleaseRoot } from '@dp/core'
-import { DpError, type Facts, type Platform } from '@dp/ports'
+import { ERR, DpError, type Facts, type Platform } from '@dp/ports'
 import { caught, caughtAsync } from '@dp/testkit'
 import { EXIT_CONFIG, EXIT_OK } from '../output.js'
 import { collectProjectFacts } from '../project-facts.js'
@@ -123,7 +123,7 @@ describe('collectProjectFacts · 源根与清单', () => {
       await writeSource(dir, { 'dist/index.html': 'x' })
       await fs.writeFile(join(dir, 'package.json'), '{ "scripts": { "build": }', 'utf8')
       const err = caught(() => collectProjectFacts(dir))
-      assert.equal(err.code, 'DP.CONFIG.INVALID')
+      assert.equal(err.code, ERR.CONFIG.INVALID)
       assert.ok(err.path?.endsWith('package.json#scripts'), `path 不对：${err.path}`)
       // 下一条路必须写出来：不然用户不知道修好还是删掉
       assert.match(err.hint ?? '', /target\.type/)
@@ -135,7 +135,7 @@ describe('collectProjectFacts · 源根与清单', () => {
       await writeSource(dir, { 'dist/.keep': '' })
       await writeManyFiles(join(dir, 'dist'), 2001)
       const err = caught(() => collectProjectFacts(dir))
-      assert.equal(err.code, 'DP.CONFIG.INVALID')
+      assert.equal(err.code, ERR.CONFIG.INVALID)
       assert.match(err.message, /2000/)
       assert.ok(err.path?.includes('source'), `path 不对：${err.path}`)
       assert.match(err.hint ?? '', /include|exclude/)
@@ -169,7 +169,7 @@ describe('collectProjectFacts · 源根与清单', () => {
     assert.ok(noName.length > 0, '当前平台上没有 basename 为空的路径，这条用例白跑了')
     for (const p of noName) {
       const err = caught(() => collectProjectFacts(p))
-      assert.equal(err.code, 'DP.CONFIG.INVALID', `path=${p}`)
+      assert.equal(err.code, ERR.CONFIG.INVALID, `path=${p}`)
       assert.ok(err.hint !== undefined && err.hint.length > 0, `path=${p} 缺 hint`)
     }
   })
@@ -353,7 +353,7 @@ describe('dp deploy · 命令契约', () => {
       await writeSource(dir, { 'dist/index.html': 'x', 'dist/nginx.conf': 'server {}' })
       const err = await caughtAsync(runDeployIn(dir))
       // 零配置不造 server 块：凭空生成一份就是编造用户的意图
-      assert.equal(err.code, 'DP.CONFIG.INVALID')
+      assert.equal(err.code, ERR.CONFIG.INVALID)
       assert.ok(err.path?.includes('target.nginx'), `path 不含 target.nginx：${err.path}`)
       assert.match(err.hint ?? '', /server/)
     })
@@ -402,7 +402,7 @@ describe('dp deploy · 命令契约', () => {
       // 一个源根候选都没有 → 源根报错
       await fs.writeFile(join(dir, 'index.html'), 'x', 'utf8')
       const err = await caughtAsync(runDeployIn(dir))
-      assert.equal(err.code, 'DP.CONFIG.INVALID')
+      assert.equal(err.code, ERR.CONFIG.INVALID)
       assert.ok(err.path?.includes('source.root'), `path 不对：${err.path}`)
       assert.equal(err.name, 'DpError', '错误被包成了别的类型')
       assert.equal(exitCodeOf(err), EXIT_CONFIG)
@@ -411,5 +411,5 @@ describe('dp deploy · 命令契约', () => {
 })
 
 function exitCodeOf(err: unknown): number {
-  return err instanceof DpError ? (err.code === 'DP.CONFIG.INVALID' ? EXIT_CONFIG : 1) : 1
+  return err instanceof DpError ? (err.code === ERR.CONFIG.INVALID ? EXIT_CONFIG : 1) : 1
 }

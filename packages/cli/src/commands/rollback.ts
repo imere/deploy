@@ -12,7 +12,7 @@ import { readReleaseState, rollback, verifyRelease } from '@dp/target-static'
 import { isDockerExecFailure, rollbackDocker } from '@dp/target-docker'
 import { isProcessExecFailure, rollbackProcess } from '@dp/target-process'
 import { isSystemdExecFailure, rollbackSystemd } from '@dp/target-systemd'
-import { DpError, type TargetContext } from '@dp/ports'
+import { ERR, DpError, type TargetContext } from '@dp/ports'
 import type { HostConfig, ProjectConfig } from '@dp/schema'
 import { defaultApplyDeps } from '../deps.js'
 import { dockerConfigFor } from '../docker-config.js'
@@ -119,7 +119,7 @@ async function rollbackOne(
     // 没有上一版就别动 current。target-static 的 rollback() 也会拒，但那时
     // 已经读过一遍索引了；在这里先拒能让错误文案带上完整的项目/主机上下文
     if (state.current === undefined || state.previous === undefined) {
-      throw new DpError('DP.VERIFY.FAILED', `${host}:${project} 没有可回退的版本`, {
+      throw new DpError(ERR.VERIFY.FAILED, `${host}:${project} 没有可回退的版本`, {
         path: 'current',
         hint:
           state.current === undefined
@@ -191,7 +191,7 @@ async function rollbackOne(
           needsHealing: to !== state.current,
           warnings,
           error: {
-            code: 'DP.STATE.INCONSISTENT',
+            code: ERR.STATE.INCONSISTENT,
             message:
               `回滚目标与预期不一致：预期回退到 ${state.previous}，实际切到 ${to}` +
               (to === state.current ? '（与当前版本相同，没有发生切换）' : ''),
@@ -299,7 +299,7 @@ async function rollbackOne(
           needsHealing: true,
           warnings,
           error: {
-            code: 'DP.VERIFY.FAILED',
+            code: ERR.VERIFY.FAILED,
             message: `已切回 ${to}，但它健康检查不过，需要人工介入：${check.reason}`,
             hint: `人工确认 ${resolved.releaseRoot}/releases/ 下哪个版本可用，然后手动把 current 指过去`,
           },

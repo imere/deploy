@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError, type Facts, type Step } from '@dp/ports'
+import { ERR, WARN, DpError, type Facts, type Step } from '@dp/ports'
 import type { Plan } from '@dp/core'
 import { CliUsageError } from './args.js'
 import {
@@ -35,7 +35,7 @@ const PLAN: Plan = {
     { path: '/opt/web', writable: false, reason: '不可写（只读挂载 / 权限不足 / SELinux）' },
   ],
   steps: STEPS,
-  warnings: ['DP.SYSTEMD.NO_LINGER: 用户级服务未开启 linger'],
+  warnings: [`${WARN.SYSTEMD.NO_LINGER}: 用户级服务未开启 linger`],
 }
 
 describe('output · 退出码映射（纯函数）', () => {
@@ -45,35 +45,35 @@ describe('output · 退出码映射（纯函数）', () => {
     assert.equal(exitCodeFor(new CliUsageError('未知选项', { hint: 'x' })), EXIT_USAGE)
     // 用法错用的是 CONFIG_INVALID 这个码，靠类型而不是码来区分 —— 这正是
     // 需要 CliUsageError 的原因：同一个码对应两种完全不同的失败
-    assert.equal(new CliUsageError('x').code, 'DP.CONFIG.INVALID')
+    assert.equal(new CliUsageError('x').code, ERR.CONFIG.INVALID)
   })
 
   it('3 = 配置错', () => {
-    for (const code of ['DP.CONFIG.INVALID', 'DP.SOURCE.EMPTY', 'DP.PATH.RESERVED_NAME', 'DP.LAYOUT.MISMATCH'] as const) {
+    for (const code of [ERR.CONFIG.INVALID, ERR.SOURCE.EMPTY, ERR.PATH.RESERVED_NAME, ERR.LAYOUT.MISMATCH] as const) {
       assert.equal(exitCodeFor(new DpError(code, 'x')), EXIT_CONFIG, code)
     }
   })
 
   it('4 = 环境缺依赖', () => {
-    for (const code of ['DP.SSH.TOOL_MISSING', 'DP.SSH.DRIVER_UNAVAILABLE', 'DP.PREF.UNSUPPORTED', 'DP.LINK.UNAVAILABLE', 'DP.SSH.AUTH_FAILED'] as const) {
+    for (const code of [ERR.SSH.TOOL_MISSING, ERR.SSH.DRIVER_UNAVAILABLE, ERR.PREF.UNSUPPORTED, ERR.LINK.UNAVAILABLE, ERR.SSH.AUTH_FAILED] as const) {
       assert.equal(exitCodeFor(new DpError(code, 'x')), EXIT_MISSING_DEPENDENCY, code)
     }
   })
 
   it('2 = 验证失败且已回滚：DP.VERIFY.FAILED 独立于「部署失败已回滚」的 1', () => {
     // CI 要能对验证失败单独发通知，所以它不能和 1 混同
-    assert.equal(exitCodeFor(new DpError('DP.VERIFY.FAILED', '健康检查未通过')), EXIT_VERIFY_FAILED)
-    assert.equal(exitCodeFor(new DpError('DP.INTERACTIVE_PROMPT_DETECTED', 'x')), EXIT_FAILURE)
+    assert.equal(exitCodeFor(new DpError(ERR.VERIFY.FAILED, '健康检查未通过')), EXIT_VERIFY_FAILED)
+    assert.equal(exitCodeFor(new DpError(ERR.INTERACTIVE_PROMPT_DETECTED, 'x')), EXIT_FAILURE)
     // 而「其余部署失败但已完整回滚」仍然是 1
-    assert.equal(exitCodeFor(new DpError('DP.PATH.NOT_WRITABLE', 'x')), EXIT_CONFIG)
+    assert.equal(exitCodeFor(new DpError(ERR.PATH.NOT_WRITABLE, 'x')), EXIT_CONFIG)
     assert.equal(exitCodeFor(new Error('普通异常')), EXIT_FAILURE)
   })
 
   it('2 号码承载两种语义：靠 error.code 而不是退出码区分', () => {
     // 验证失败与用法错同码，但 JSON 里的 code 不同 —— 刻意不新造退出码
-    const verify = renderErrorJson(new DpError('DP.VERIFY.FAILED', 'x'), false)
+    const verify = renderErrorJson(new DpError(ERR.VERIFY.FAILED, 'x'), false)
     const usage = renderErrorJson(new CliUsageError('x'), false)
-    assert.equal(exitCodeFor(new DpError('DP.VERIFY.FAILED', 'x')), EXIT_USAGE)
+    assert.equal(exitCodeFor(new DpError(ERR.VERIFY.FAILED, 'x')), EXIT_USAGE)
     assert.equal(exitCodeFor(new CliUsageError('x')), EXIT_USAGE)
     assert.match(verify, /DP\.VERIFY\.FAILED/)
     assert.notEqual(
@@ -85,8 +85,8 @@ describe('output · 退出码映射（纯函数）', () => {
   it('其余 DpError → 1，不编造新码', () => {
     // DP.VERIFY.FAILED 已从这条移走：它有了专属映射（→ 2），
     // 不再属于「其余」。断言的是行为契约，契约改了断言就得跟着改。
-    assert.equal(exitCodeFor(new DpError('DP.TIMEOUT.EXEC', 'x')), EXIT_FAILURE)
-    assert.equal(exitCodeFor(new DpError('DP.DOCKER.PS_PARSE_FAILED', 'x')), EXIT_FAILURE)
+    assert.equal(exitCodeFor(new DpError(ERR.TIMEOUT.EXEC, 'x')), EXIT_FAILURE)
+    assert.equal(exitCodeFor(new DpError(ERR.DOCKER.PS_PARSE_FAILED, 'x')), EXIT_FAILURE)
   })
 
   it('未知错误 → 1，且带一句可执行建议', () => {
@@ -94,14 +94,14 @@ describe('output · 退出码映射（纯函数）', () => {
     assert.equal(exitCodeFor('字符串错误'), EXIT_FAILURE)
     assert.equal(exitCodeFor(undefined), EXIT_FAILURE)
     const report = describeError(new Error('boom'))
-    assert.equal(report.code, 'DP.CLI.INTERNAL')
+    assert.equal(report.code, ERR.CLI.INTERNAL)
     assert.match(report.hint ?? '', /--verbose/, '未知错误也要告诉用户下一步')
   })
 })
 
 describe('output · 错误渲染', () => {
   it('pretty 逐字：code + message + path + hint 全部出现', () => {
-    const err = new DpError('DP.PATH.NOT_WRITABLE', '没有可写的发布目录', { path: 'release.root', hint: '显式指定 release.root' })
+    const err = new DpError(ERR.PATH.NOT_WRITABLE, '没有可写的发布目录', { path: 'release.root', hint: '显式指定 release.root' })
     const text = renderErrorPretty(err, false)
     assert.equal(
       text,
@@ -121,12 +121,12 @@ describe('output · 错误渲染', () => {
   })
 
   it('json 形状固定：ok=false + error + exitCode', () => {
-    const err = new DpError('DP.CONFIG.INVALID', '找不到配置', { hint: '放一个 deploy.config.json' })
+    const err = new DpError(ERR.CONFIG.INVALID, '找不到配置', { hint: '放一个 deploy.config.json' })
     const parsed = JSON.parse(renderErrorJson(err, false)) as Record<string, unknown>
     assert.equal(parsed['ok'], false)
     assert.equal(parsed['exitCode'], EXIT_CONFIG)
     const e = parsed['error'] as Record<string, unknown>
-    assert.equal(e['code'], 'DP.CONFIG.INVALID')
+    assert.equal(e['code'], ERR.CONFIG.INVALID)
     assert.equal(e['message'], '找不到配置')
     assert.equal(e['hint'], '放一个 deploy.config.json')
   })
@@ -152,7 +152,7 @@ describe('output · Plan 渲染（黄金快照）', () => {
         '  ✗ /opt/web —— 不可写（只读挂载 / 权限不足 / SELinux）',
         '',
         '告警',
-        '  ! DP.SYSTEMD.NO_LINGER: 用户级服务未开启 linger',
+        `  ! ${WARN.SYSTEMD.NO_LINGER}: 用户级服务未开启 linger`,
         '',
         '探测说明',
         '  - ssh: 用 native-ssh 驱动',

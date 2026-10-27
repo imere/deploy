@@ -1,4 +1,4 @@
-import { DpError, type Facts, type Step } from '@dp/ports'
+import { ERR, DpError, type Facts, type Step } from '@dp/ports'
 import type { CandidateResult, Plan } from '@dp/core'
 import { isUsageError } from './args.js'
 
@@ -43,27 +43,27 @@ export function exitCodeFor(err: unknown): number {
   if (err instanceof DpError) {
     if (isUsageError(err)) return EXIT_USAGE
     switch (err.code) {
-      case 'DP.CONFIG.INVALID':
-      case 'DP.SOURCE.EMPTY':
-      case 'DP.PATH.RESERVED_NAME':
-      case 'DP.PATH.ILLEGAL_CHAR':
-      case 'DP.PATH.TOO_LONG':
-      case 'DP.PATH.CASE_COLLISION':
-      case 'DP.PATH.NOT_WRITABLE':
-      case 'DP.LAYOUT.MISMATCH':
+      case ERR.CONFIG.INVALID:
+      case ERR.SOURCE.EMPTY:
+      case ERR.PATH.RESERVED_NAME:
+      case ERR.PATH.ILLEGAL_CHAR:
+      case ERR.PATH.TOO_LONG:
+      case ERR.PATH.CASE_COLLISION:
+      case ERR.PATH.NOT_WRITABLE:
+      case ERR.LAYOUT.MISMATCH:
         return EXIT_CONFIG
-      case 'DP.SSH.TOOL_MISSING':
-      case 'DP.SSH.DRIVER_UNAVAILABLE':
-      case 'DP.SSH.CONNECT_FAILED':
-      case 'DP.SSH.TUNNEL_FAILED':
-      case 'DP.SSH.AUTH_FAILED':
-      case 'DP.SSH.HOST_KEY_UNKNOWN':
-      case 'DP.SSH.HOST_KEY_MISMATCH':
-      case 'DP.PREF.UNSUPPORTED':
-      case 'DP.LINK.UNAVAILABLE':
+      case ERR.SSH.TOOL_MISSING:
+      case ERR.SSH.DRIVER_UNAVAILABLE:
+      case ERR.SSH.CONNECT_FAILED:
+      case ERR.SSH.TUNNEL_FAILED:
+      case ERR.SSH.AUTH_FAILED:
+      case ERR.SSH.HOST_KEY_UNKNOWN:
+      case ERR.SSH.HOST_KEY_MISMATCH:
+      case ERR.PREF.UNSUPPORTED:
+      case ERR.LINK.UNAVAILABLE:
         return EXIT_MISSING_DEPENDENCY
       // 验证失败**且已回滚**：CI 靠这个码单独发通知，所以它不能和「部署失败
-      case 'DP.VERIFY.FAILED':
+      case ERR.VERIFY.FAILED:
         return EXIT_VERIFY_FAILED
       default:
         return EXIT_FAILURE
@@ -108,7 +108,7 @@ export function describeError(err: unknown): ErrorReport {
     return report
   }
   const message = err instanceof Error ? err.message : String(err)
-  return { code: 'DP.CLI.INTERNAL', message, hint: GENERIC_HINT, exitCode: EXIT_FAILURE }
+  return { code: ERR.CLI.INTERNAL, message, hint: GENERIC_HINT, exitCode: EXIT_FAILURE }
 }
 
 /**

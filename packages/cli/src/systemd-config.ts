@@ -1,4 +1,4 @@
-import { DpError, type Facts, type TargetContext } from '@dp/ports'
+import { ERR, DpError, type Facts, type TargetContext } from '@dp/ports'
 import type { SystemdConfig } from '@dp/schema'
 import type { SystemdScope, SystemdTargetConfig } from '@dp/target-systemd'
 import { renderContextFor } from './render-context.js'
@@ -63,7 +63,7 @@ export function resolveUnitDir(input: { readonly facts: Facts; readonly target?:
       ? `facts 里这台机器是 ${input.facts.platform}（scope=${scope}${scope === 'user' ? `，homedir=${input.facts.homedir === '' ? '未探测到' : input.facts.homedir}` : ''}），本仓对它没有可靠的 unit 目录默认值`
       : `已实测过 ${candidates.join(' | ')}，都不可写`
 
-  throw new DpError('DP.PERM.UNIT_DIR_NOT_WRITABLE', `推导不出可写的 systemd unit 目录：${note}`, {
+  throw new DpError(ERR.PERM.UNIT_DIR_NOT_WRITABLE, `推导不出可写的 systemd unit 目录：${note}`, {
     path: UNIT_DIR_PATH,
     hint:
       '两件事按顺序排查：① 这台机器的 unit 装在别处（发行版拆包、自建 rpm、非 root 的 systemd 实例）——' +

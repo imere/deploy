@@ -10,6 +10,7 @@ import {
   type ZeroConfigInput,
 } from './zero-config.js'
 
+import { ERR } from '@dp/ports'
 /**
  * `assert.throws` 在本仓的 @types/node 下返回 void，拿不到错误对象。
  * 统一走 @dp/testkit 的 caught：`instanceof` 收窄类型，不需要断言成具体子类
@@ -55,7 +56,7 @@ describe('zero-config · 源根候选', () => {
 
   it('一个都不在 → 报错，并列出它看了哪几个目录 + 指向 --config', () => {
     const err = caught(() => deriveZeroConfig(webInput({ existingDirs: ['src', 'node_modules'] })))
-    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.code, ERR.CONFIG.INVALID)
     assert.equal(err.path, 'projects.web.source.root')
     for (const dir of SOURCE_ROOT_CANDIDATES) {
       assert.match(err.hint ?? '', new RegExp(dir), `hint 里应当列出候选 ${dir}`)
@@ -65,7 +66,7 @@ describe('zero-config · 源根候选', () => {
 
   it('existingDirs 没给 → 同样报错（没依据时不知道该传什么）', () => {
     const err = caught(() => deriveZeroConfig({ projectName: 'web', hostId: 'local', entries: ['index.html'] }))
-    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.code, ERR.CONFIG.INVALID)
   })
 
   it('源根是产物目录本身的内容（contents 形态），不是目录本身', () => {
@@ -105,7 +106,7 @@ describe('zero-config · 目标类型', () => {
     const err = caught(() =>
       deriveZeroConfig(webInput({ entries: ['nginx.conf', 'index.html'], existingDirs: ['dist'] })),
     )
-    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.code, ERR.CONFIG.INVALID)
     assert.match(err.path ?? '', /target\.nginx/)
     assert.match(err.hint ?? '', /--config/)
     assert.match(err.hint ?? '', /server/)
@@ -148,7 +149,7 @@ describe('zero-config · pick 默认值来自 schema', () => {
         webInput({ entries: ['docker-compose.yml', 'index.html'], existingDirs: ['dist'], pick: 'fail' }),
       ),
     )
-    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.code, ERR.CONFIG.INVALID)
     assert.match(err.message, /target\.pick=fail/)
   })
 })
@@ -176,7 +177,7 @@ describe('resolveEnv · 多环境不能猜', () => {
 
   it('多个且没有 defaultEnv → 报错并列出全部 profile', () => {
     const err = caught(() => resolveEnv(['dev', 'prod'], undefined))
-    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.code, ERR.CONFIG.INVALID)
     assert.match(err.hint ?? '', /dev/)
     assert.match(err.hint ?? '', /prod/)
   })

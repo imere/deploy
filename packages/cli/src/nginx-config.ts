@@ -1,4 +1,4 @@
-import { DpError, type Facts, type TargetContext } from '@dp/ports'
+import { ERR, DpError, type Facts, type TargetContext } from '@dp/ports'
 import type { NginxConfig, TargetConfig } from '@dp/schema'
 import type { NginxTargetConfig } from '@dp/target-nginx'
 import { releaseVars } from '@dp/template'
@@ -35,7 +35,7 @@ export function resolveConfd(input: { readonly facts: Facts; readonly target?: T
       ? `facts 里这台机器是 ${input.facts.platform}，本仓对它没有可靠的 confd 默认值`
       : `已实测过 ${candidates.join(' | ')}，都不可写`
 
-  throw new DpError('DP.PERM.CONFD_NOT_WRITABLE', `推导不出可写的 nginx confd 目录：${platformNote}`, {
+  throw new DpError(ERR.PERM.CONFD_NOT_WRITABLE, `推导不出可写的 nginx confd 目录：${platformNote}`, {
     path: CONF_D_PATH,
     hint:
       '两件事按顺序排查：① 这台机器的 nginx 装在别处（源码编译、第三方源、自建 rpm）——' +

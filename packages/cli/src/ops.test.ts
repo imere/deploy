@@ -15,7 +15,7 @@ import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readReleaseState, type ReleaseState } from '@dp/target-static'
-import { type Facts, type Runner } from '@dp/ports'
+import { ERR, type Facts, type Runner } from '@dp/ports'
 import { linuxFacts, MemoryRunner } from '@dp/testkit'
 import { main } from './index.js'
 import { COMMANDS } from './help.js'
@@ -299,7 +299,7 @@ describe('ops · 边界', () => {
       const v = await runCli('verify', dir, ['--json', '--host', 'local'])
       assert.equal(v.code, EXIT_VERIFY_FAILED, '没东西可验绝不能报成功')
       const p = JSON.parse(v.stdout) as VerifyJson
-      assert.equal(p.error?.code, 'DP.VERIFY.FAILED')
+      assert.equal(p.error?.code, ERR.VERIFY.FAILED)
       assert.match(p.error?.hint ?? '', /dp apply/)
     })
   })
@@ -309,7 +309,7 @@ describe('ops · 边界', () => {
       const r = await runCli('rollback', dir, ['--json', '--host', 'local'])
       assert.equal(r.code, EXIT_VERIFY_FAILED)
       const p = JSON.parse(r.stdout) as RollbackJson
-      assert.equal(p.error?.code, 'DP.VERIFY.FAILED')
+      assert.equal(p.error?.code, ERR.VERIFY.FAILED)
     })
   })
 
@@ -427,7 +427,7 @@ describe('ops · 远端注入', () => {
       const r = await runCli('verify', dir, ['--json', '--host', 'prod', '--project', 'web'], remoteDeps(runner))
       assert.equal(r.code, EXIT_VERIFY_FAILED)
       const p = JSON.parse(r.stdout) as VerifyJson
-      assert.equal(p.error?.code, 'DP.VERIFY.FAILED')
+      assert.equal(p.error?.code, ERR.VERIFY.FAILED)
       assert.match(p.error?.hint ?? '', /dp rollback/)
     } finally {
       await fs.rm(dir, { recursive: true, force: true })
@@ -446,7 +446,7 @@ describe('ops · 远端注入', () => {
       const r = await runCli('rollback', dir, ['--json', '--host', 'prod', '--project', 'web'], remoteDeps(runner))
       assert.notEqual(r.code, EXIT_OK, '目标与预期不一致时必须报错，不能报成功')
       const p = JSON.parse(r.stdout) as RollbackJson
-      assert.equal(p.error?.code, 'DP.STATE.INCONSISTENT')
+      assert.equal(p.error?.code, ERR.STATE.INCONSISTENT)
       // current 必须**没有被悄悄改成别的版本**
       assert.equal(runner.peek('/srv/app/current'), '/srv/app/releases/web-2', '报了错就不许顺手切走')
     } finally {

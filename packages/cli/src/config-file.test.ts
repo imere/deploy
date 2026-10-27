@@ -14,6 +14,7 @@ import {
   validateConfig,
 } from './config-file.js'
 
+import { ERR } from '@dp/ports'
 /** 临时目录必须清干净 —— 测试不许在系统里留垃圾（铁律 4 的延伸） */
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = await fs.mkdtemp(join(tmpdir(), 'dp-cli-cfg-'))
@@ -57,7 +58,7 @@ describe('config-file · 优先级判定（纯函数，不碰文件系统）', (
     const err = caught(
       () => resolveConfigPath({ cwd, explicit: 'a.json', discovered: '/other/b.json' }),
     )
-    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.code, ERR.CONFIG.INVALID)
     assert.equal(err.path, '--config')
     assert.match(err.hint ?? '', /两者都处理掉/)
   })
@@ -117,7 +118,7 @@ describe('config-file · 加载', () => {
       const p = join(dir, 'bad.json')
       await fs.writeFile(p, '{ "a": 1, }', 'utf8')
       const err = await caughtAsync(loadConfigFile(p))
-      assert.equal(err.code, 'DP.CONFIG.INVALID')
+      assert.equal(err.code, ERR.CONFIG.INVALID)
       assert.match(err.hint ?? '', /deploy\.config\.ts/)
     })
   })
@@ -147,7 +148,7 @@ describe('config-file · 校验', () => {
 
   it('必填字段缺失 → 带 path 的 DpError', () => {
     const err = caught(() => validateConfig({ hosts: {} }, 'x.json'))
-    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.code, ERR.CONFIG.INVALID)
     assert.equal(err.path, 'config.projects')
   })
 

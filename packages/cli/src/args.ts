@@ -1,11 +1,11 @@
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 
 /**
  * 用法/参数错误。
  */
 export class CliUsageError extends DpError {
   constructor(message: string, options: { readonly path?: string; readonly hint?: string } = {}) {
-    super('DP.CONFIG.INVALID', message, options)
+    super(ERR.CONFIG.INVALID, message, options)
     this.name = 'CliUsageError'
   }
 }

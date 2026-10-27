@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { SOURCE_ROOT_CANDIDATES } from './zero-config.js'
 
 /** 源条目上限。超过就报错而不是截断 */
@@ -31,7 +31,7 @@ function projectNameOf(cwd: string): string {
   const abs = resolve(cwd)
   const name = basename(abs)
   if (name === '' || name === '.' || name === '..' || name === '/' || abs === name) {
-    throw new DpError('DP.CONFIG.INVALID', `从路径推不出项目名：${abs}`, {
+    throw new DpError(ERR.CONFIG.INVALID, `从路径推不出项目名：${abs}`, {
       path: 'projects',
       hint:
         '零配置用当前目录名当项目名。cd 到项目目录下再跑，或用 --config 给一份配置显式写 projects.<name>',
@@ -73,7 +73,7 @@ function entriesUnder(cwd: string, root: string, projectName: string): readonly 
       out.push(toRelative(root, abs))
       if (out.length > MAX_ENTRIES) {
         // 截断会让探测基于一部分证据下结论，而那比报错更难查：
-        throw new DpError('DP.CONFIG.INVALID', `源目录条目超过 ${MAX_ENTRIES} 个：${root}`, {
+        throw new DpError(ERR.CONFIG.INVALID, `源目录条目超过 ${MAX_ENTRIES} 个：${root}`, {
           path: `projects.${projectName}.source`,
           hint:
             '探测目标类型要看完整的源清单，看到一半会得出错误结论。用 --config 显式写 source.root / ' +
@@ -96,7 +96,7 @@ function packageScriptsOf(cwd: string): readonly string[] {
   try {
     raw = JSON.parse(readFileSync(path, 'utf8'))
   } catch (err) {
-    throw new DpError('DP.CONFIG.INVALID', `package.json 解析失败：${path}`, {
+    throw new DpError(ERR.CONFIG.INVALID, `package.json 解析失败：${path}`, {
       path: `${path}#scripts`,
       hint:
         'JSON 末尾不能有逗号、不能用注释。dp 只读它来探测目标类型（scripts.deploy 是一条证据）—— ' +

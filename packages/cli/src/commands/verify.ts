@@ -9,7 +9,7 @@ import { readReleaseState, verifyRelease } from '@dp/target-static'
 import { verifyDocker } from '@dp/target-docker'
 import { verifyProcess } from '@dp/target-process'
 import { verifySystemd } from '@dp/target-systemd'
-import { DpError, type Runner, type TargetContext } from '@dp/ports'
+import { ERR, DpError, type Runner, type TargetContext } from '@dp/ports'
 import type { HostConfig, ProjectConfig } from '@dp/schema'
 import { defaultApplyDeps } from '../deps.js'
 import { dockerConfigFor } from '../docker-config.js'
@@ -83,7 +83,7 @@ async function verifyOne(
     // 没部署过 → 验不了。报成功会让 CI 里的 verify 变成一盏永远绿的灯：
     // 「没东西可验」和「验过了没问题」在流水线里必须是两种结果
     if (state.current === undefined) {
-      throw new DpError('DP.VERIFY.FAILED', `${host}:${project} 尚未部署过，没有可校验的 current`, {
+      throw new DpError(ERR.VERIFY.FAILED, `${host}:${project} 尚未部署过，没有可校验的 current`, {
         path: 'current',
         hint: '先跑一次 `dp apply` 部署出 current，再回来 verify',
       })
@@ -164,7 +164,7 @@ async function verifyOne(
     if (!check.ok) {
       // 失败也要给一条能直接敲的下一步：
       // 只说「不健康」而不说「现在该干什么」，等于把判断成本全推给用户
-      throw new DpError('DP.VERIFY.FAILED', `健康检查未通过：${check.reason}`, {
+      throw new DpError(ERR.VERIFY.FAILED, `健康检查未通过：${check.reason}`, {
         path: `releases/${state.current}`,
         hint: `检查 ${resolved.releaseRoot}/releases/${state.current} 的内容；确认要回退就跑 \`dp rollback --host ${host} --project ${project}\``,
       })

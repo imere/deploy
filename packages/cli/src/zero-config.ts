@@ -1,5 +1,5 @@
 import { resolveTargetKind, type DetectResult, type TargetPick } from '@dp/core'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import {
   defineConfig,
   defineDocker,
@@ -99,7 +99,7 @@ export function resolveEnv(
     return defaultEnv
   }
 
-  throw new DpError('DP.CONFIG.INVALID', `配置里有 ${profiles.length} 个环境，没给 --env 时 dp 不猜`, {
+  throw new DpError(ERR.CONFIG.INVALID, `配置里有 ${profiles.length} 个环境，没给 --env 时 dp 不猜`, {
     path: '--env',
     hint: `可选：${profiles.join(' | ')}。默认挑第一个就是把预发的东西发到生产的入口 —— 显式用 --env 指定`,
   })
@@ -122,7 +122,7 @@ function sourceSpecFor(root: string): string {
 function pickSourceRoot(projectName: string, existingDirs: readonly string[]): string {
   const hit = SOURCE_ROOT_CANDIDATES.find((dir) => existingDirs.includes(dir))
   if (hit !== undefined) return hit
-  throw new DpError('DP.CONFIG.INVALID', `零配置找不到源根：cwd 下没有 ${SOURCE_ROOT_CANDIDATES.join(' / ')}`, {
+  throw new DpError(ERR.CONFIG.INVALID, `零配置找不到源根：cwd 下没有 ${SOURCE_ROOT_CANDIDATES.join(' / ')}`, {
     path: `projects.${projectName}.source.root`,
     hint:
       `它只看了这四个目录名（按 ${SOURCE_ROOT_CANDIDATES.join(' > ')} 取第一个存在的），一个都没出现。` +
@@ -137,7 +137,7 @@ function hostFor(): HostConfig {
 }
 
 function nginxAutoConfigError(projectName: string, detected: DetectResult): DpError {
-  return new DpError('DP.CONFIG.INVALID', `零配置不装配 nginx：探测到 ${detected.evidence.join('、')}`, {
+  return new DpError(ERR.CONFIG.INVALID, `零配置不装配 nginx：探测到 ${detected.evidence.join('、')}`, {
     path: `projects.${projectName}.target.nginx`,
     hint:
       'target.nginx 需要一个 server 块（listen / server_name / 反代规则），凭空造一份就是编造你的意图。' +
@@ -192,7 +192,7 @@ export function deriveZeroConfig(input: ZeroConfigInput): ZeroConfigResult {
     case 'nginx':
       throw nginxAutoConfigError(input.projectName, detected)
     default:
-      throw new DpError('DP.CONFIG.INVALID', `零配置不支持 ${detected.kind} 目标`, {
+      throw new DpError(ERR.CONFIG.INVALID, `零配置不支持 ${detected.kind} 目标`, {
         path: `projects.${input.projectName}.target.type`,
         hint: '用 --config 给一份配置，在里面显式写 target.type',
       })

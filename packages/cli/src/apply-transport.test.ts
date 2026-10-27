@@ -10,7 +10,7 @@ import { describe, it } from 'node:test'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DpError, type Facts } from '@dp/ports'
+import { ERR, DpError, type Facts } from '@dp/ports'
 import { linuxFacts, MemoryRunner } from '@dp/testkit'
 import { main } from './index.js'
 import type { ApplyDeps } from './deps.js'
@@ -172,7 +172,7 @@ describe('apply · 远端走 transport', () => {
 
   it('传输抛错 → 退出码非 0、rolledBack 如实、error 进 JSON', async () => {
     await withWorkspace(async (dir) => {
-      const boom = new DpError('DP.SSH.CONNECT_FAILED', '注入的传输失败', { hint: '这是注入的假错误' })
+      const boom = new DpError(ERR.SSH.CONNECT_FAILED, '注入的传输失败', { hint: '这是注入的假错误' })
       const h = makeHarness({ failWith: boom })
       const r = await run(dir, ['--json', '--host', 'prod'], h.deps)
       assert.notEqual(r.code, 0, '传输失败绝不能报成功')
@@ -184,7 +184,7 @@ describe('apply · 远端走 transport', () => {
         error?: { code: string }
       }
       assert.equal(parsed.ok, false)
-      assert.equal(parsed.error?.code, 'DP.SSH.CONNECT_FAILED', '失败原因必须进 JSON 的 error')
+      assert.equal(parsed.error?.code, ERR.SSH.CONNECT_FAILED, '失败原因必须进 JSON 的 error')
       // 第一次部署没有上一版，rollback 必然失败 → needsHealing，如实标 false
       assert.equal(typeof parsed.rolledBack, 'boolean')
       // 关键：失败时绝不能已经换向
@@ -244,7 +244,7 @@ describe('apply · 远端走 transport', () => {
       // DP.PREF.UNSUPPORTED → EXIT_MISSING_DEPENDENCY（4）：是环境缺依赖，不是配置写错
       assert.equal(r.code, EXIT_MISSING_DEPENDENCY, `stdout: ${r.stdout}`)
       const parsed = JSON.parse(r.stdout) as { error?: { code: string } }
-      assert.equal(parsed.error?.code, 'DP.PREF.UNSUPPORTED')
+      assert.equal(parsed.error?.code, ERR.PREF.UNSUPPORTED)
       assert.equal(h.calls.count, 0, '协商失败就不许起传输')
     }, config)
   })
@@ -322,7 +322,7 @@ describe('apply · 远端走 transport', () => {
       const r = await run(dir, ['--json', '--host', 'prod'], h.deps)
       assert.notEqual(r.code, 0, '带密码的 sudo 不能当成配置合法放行')
       const parsed = JSON.parse(r.stdout) as { error?: { code: string; message: string } }
-      assert.equal(parsed.error?.code, 'DP.CONFIG.INVALID')
+      assert.equal(parsed.error?.code, ERR.CONFIG.INVALID)
       assert.match(parsed.error?.message ?? '', /尚未接入传输层/)
       assert.equal(h.calls.count, 0, '装配期就拒绝，不起传输')
     }, config)

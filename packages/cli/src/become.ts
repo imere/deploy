@@ -5,7 +5,7 @@
  * `facts` 的可写性探测也要它 —— 探测按登录用户去探、写入却提权去写，
  * 是「明明配了免密 sudo，`/etc/nginx/conf.d` 却被判不可写」那一类错的标准形状。
  */
-import { DpError, type BecomeConfig } from '@dp/ports'
+import { ERR, DpError, type BecomeConfig } from '@dp/ports'
 import type { HostConfig } from '@dp/schema'
 
 /**
@@ -30,7 +30,7 @@ export function becomeFor(hostConfig: HostConfig, path: string): BecomeConfig | 
       // nonInteractive=false 的处理是**直接拒绝**（become.ts：铁律 0 不许等 stdin）。
       // 与其让它在深处抛一句看不懂的 refusal，不如在这里说清「没接」。
       if (b.method === 'stdin' || b.method === 'pty') {
-        throw new DpError('DP.CONFIG.INVALID', `become.method=${b.method} 尚未接入传输层`, {
+        throw new DpError(ERR.CONFIG.INVALID, `become.method=${b.method} 尚未接入传输层`, {
           path: `${path}.become.method`,
           hint: '传输层没有密码通道，带密码的 sudo 会撞铁律 0。请配免密 sudo（nopasswd）或改用 su',
         })
@@ -45,7 +45,7 @@ export function becomeFor(hostConfig: HostConfig, path: string): BecomeConfig | 
       return { type: 'doas', ...(b.user !== undefined ? { user: b.user } : {}) }
     case 'su': {
       if (b.user === undefined || b.user === '') {
-        throw new DpError('DP.CONFIG.INVALID', 'become.type=su 必须写 become.user', {
+        throw new DpError(ERR.CONFIG.INVALID, 'become.type=su 必须写 become.user', {
           path: `${path}.become.user`,
           hint: 'su 不给用户名就没有目标身份，写成 { "type": "su", "user": "www-data" }',
         })
@@ -57,7 +57,7 @@ export function becomeFor(hostConfig: HostConfig, path: string): BecomeConfig | 
       // 不经过 schema 的路径调用（测试夹具、--facts 旁路），「custom 一定有模板」
       // 得在代码里也成立，否则 wrapCommand 会在更深处抛一个不带配置项位置的错
       if (b.template === undefined || b.template.trim() === '') {
-        throw new DpError('DP.CONFIG.INVALID', 'become.type=custom 缺少 template', {
+        throw new DpError(ERR.CONFIG.INVALID, 'become.type=custom 缺少 template', {
           path: `${path}.become.template`,
           hint: '模板形如 `dzdo -u root ${cmd}`；${cmd} 会被替换成被提权的那条命令',
         })

@@ -13,6 +13,7 @@ import {
 } from './args.js'
 import { caught } from '@dp/testkit'
 
+import { ERR } from '@dp/ports'
 describe('args · 形状', () => {
   it('空 argv：没有命令、没有位置参数', () => {
     const p = parseArgs([])
@@ -91,7 +92,7 @@ describe('args · 形状', () => {
 describe('args · 拒绝歧义（铁律 2）', () => {
   it('未知长选项报错，且 hint 指向 --help', () => {
     const err = caught(() => parseArgs(['--nope']))
-    assert.equal(err.code, 'DP.CONFIG.INVALID')
+    assert.equal(err.code, ERR.CONFIG.INVALID)
     assert.equal(err.path, '--nope')
     assert.match(err.hint ?? '', /--help/)
     assert.ok(isUsageError(err), '必须是 CliUsageError，退出码才映射到 2')

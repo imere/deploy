@@ -4,7 +4,7 @@
  * 只做「配置 → 运行形态」的翻译，不做任何编排：步骤顺序与失败处理在 apply.ts。
  */
 import type { SourceSpec } from '@dp/local'
-import { DpError, type SourceEntry, type TargetContext } from '@dp/ports'
+import { ERR, DpError, type SourceEntry, type TargetContext } from '@dp/ports'
 import { dirname, sep } from 'node:path'
 import type { HostConfig, ProjectConfig } from '@dp/schema'
 import type { DockerTargetConfig } from '@dp/target-docker'
@@ -100,7 +100,7 @@ export function transportPreference(hostConfig: HostConfig, path: string): Trans
   for (const raw of strategy) {
     const kind = KIND_ALIASES[raw]
     if (kind === undefined) {
-      throw new DpError('DP.CONFIG.INVALID', `未知的传输方式：${raw}`, {
+      throw new DpError(ERR.CONFIG.INVALID, `未知的传输方式：${raw}`, {
         path,
         hint: `合法值：${Object.keys(KIND_ALIASES).join(' | ')}`,
       })
@@ -196,7 +196,7 @@ export async function makeTransferHook(
     if (stagingDir !== expected) {
       // 传错目录 = 把文件写到正在服务的目录或版本目录里，两种都是事故。
       // 所以这里拒绝，而不是「用 CLI 自己算的那个」。
-      throw new DpError('DP.CONFIG.INVALID', `传输目标与 deploy 的 staging 不一致：${stagingDir}`, {
+      throw new DpError(ERR.CONFIG.INVALID, `传输目标与 deploy 的 staging 不一致：${stagingDir}`, {
         path: hostPath,
         hint: `期望 ${expected}`,
       })

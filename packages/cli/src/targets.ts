@@ -1,4 +1,4 @@
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import type { Config, HostConfig, ProjectConfig } from '@dp/schema'
 import { CliUsageError } from './args.js'
 
@@ -72,7 +72,7 @@ export function selectTargets(input: TargetSelectionInput): SelectedTarget[] {
 
   const allProjects = projectNames(config)
   if (allProjects.length === 0) {
-    throw new DpError('DP.CONFIG.INVALID', '配置里没有任何项目（projects 为空）', {
+    throw new DpError(ERR.CONFIG.INVALID, '配置里没有任何项目（projects 为空）', {
       path: 'config.projects',
       hint: '至少写一个项目，形如 { "projects": { "web": { "source": { "root": "./dist" } } } }',
     })
@@ -120,7 +120,7 @@ export function selectTargets(input: TargetSelectionInput): SelectedTarget[] {
     } else if (available.length === 1) {
       hosts = available
     } else if (available.length === 0) {
-      throw new DpError('DP.CONFIG.INVALID', `配置里没有主机（config.hosts 为空），项目 ${name} 无处可部署`, {
+      throw new DpError(ERR.CONFIG.INVALID, `配置里没有主机（config.hosts 为空），项目 ${name} 无处可部署`, {
         path: 'config.hosts',
         hint: '加一个主机条目，形如 { "hosts": { "local": { "local": true } } }',
       })

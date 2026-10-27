@@ -17,7 +17,7 @@ import { describe, it } from 'node:test'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner, type TargetContext } from '@dp/ports'
+import { ERR, DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner, type TargetContext } from '@dp/ports'
 import { defineProject, type SystemdConfig } from '@dp/schema'
 import { assertExecInvariants, type ExecCall, linuxFacts as baseFacts } from '@dp/testkit'
 import { main } from './index.js'
@@ -94,7 +94,7 @@ class FakeRunner implements Runner {
 
   async readFile(path: string): Promise<string> {
     const v = this.tree.get(path)
-    if (v === undefined) throw new DpError('DP.PATH.NOT_WRITABLE', `不存在：${path}`)
+    if (v === undefined) throw new DpError(ERR.PATH.NOT_WRITABLE, `不存在：${path}`)
     return v ?? ''
   }
 
@@ -320,7 +320,7 @@ describe('resolveUnitDir 的三级优先级', () => {
     const facts = linuxFacts({ '/.config/systemd/user': true }, { homedir: '' })
     assert.throws(
       () => resolveUnitDir({ facts, target: derivable('user') }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.PERM.UNIT_DIR_NOT_WRITABLE',
+      (err: unknown) => err instanceof DpError && err.code === ERR.PERM.UNIT_DIR_NOT_WRITABLE,
     )
   })
 
@@ -329,7 +329,7 @@ describe('resolveUnitDir 的三级优先级', () => {
       () => resolveUnitDir({ facts: linuxFacts({ '/srv/app': true }), target: derivable() }),
       (err: unknown) => {
         if (!(err instanceof DpError)) return false
-        assert.equal(err.code, 'DP.PERM.UNIT_DIR_NOT_WRITABLE')
+        assert.equal(err.code, ERR.PERM.UNIT_DIR_NOT_WRITABLE)
         assert.equal(err.path, 'projects.*.target.systemd.unitDir')
         assert.match(err.message, /都不可写/, '要说清实测过哪些')
         assert.ok(err.hint !== undefined && /unitDir/.test(err.hint), '提示要告诉用户显式配置怎么写')
@@ -345,7 +345,7 @@ describe('resolveUnitDir 的三级优先级', () => {
   it('canWrite 明确为 false 与缺键同义', () => {
     assert.throws(
       () => resolveUnitDir({ facts: linuxFacts({ [UNIT_DIR]: false }), target: derivable() }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.PERM.UNIT_DIR_NOT_WRITABLE',
+      (err: unknown) => err instanceof DpError && err.code === ERR.PERM.UNIT_DIR_NOT_WRITABLE,
     )
   })
 
@@ -356,7 +356,7 @@ describe('resolveUnitDir 的三级优先级', () => {
       () => resolveUnitDir({ facts, target: derivable() }),
       (err: unknown) => {
         if (!(err instanceof DpError)) return false
-        assert.equal(err.code, 'DP.PERM.UNIT_DIR_NOT_WRITABLE')
+        assert.equal(err.code, ERR.PERM.UNIT_DIR_NOT_WRITABLE)
         // 「这台机器上有没有默认值」与「实测过但不可写」是两回事，报错要分得开
         assert.match(err.message, /darwin/)
         assert.doesNotMatch(err.message, /都不可写/)
@@ -603,7 +603,7 @@ describe('systemd 失败时的收场', () => {
         const { code, stdout } = await run('apply', ['--json'])
         assert.notEqual(code, 0)
         const result = resultOf(stdout)
-        assert.equal((result['error'] as Record<string, unknown>)['code'], 'DP.SYSD.TEST_FAILED')
+        assert.equal((result['error'] as Record<string, unknown>)['code'], ERR.SYSD.TEST_FAILED)
         assert.equal(result['filesWritten'], 0)
         assert.equal(result['rolledBack'], false, '什么都没写，没东西可回滚')
         assert.ok(!runner.events.some((e) => e.startsWith('transfer ')), 'install 失败后不得部署')
@@ -627,7 +627,7 @@ describe('systemd 失败时的收场', () => {
         const result = resultOf(stdout)
         assert.equal(result['rolledBack'], false, 'unit 的问题不该退掉一次成功的发布')
         assert.ok(String(runner.peek('/srv/app/current')).includes('releases/'), 'current 必须仍指向新版本')
-        assert.equal((result['error'] as Record<string, unknown>)['code'], 'DP.SYSD.RESTART_FAILED')
+        assert.equal((result['error'] as Record<string, unknown>)['code'], ERR.SYSD.RESTART_FAILED)
 
         const warnings = (result['warnings'] as string[]).join('\n')
         assert.match(warnings, /新 unit \+ 无服务/, '必须说清机器现在的状态')
@@ -647,7 +647,7 @@ describe('systemd 失败时的收场', () => {
           argv.includes('daemon-reload') ? { code: 1, stderr: 'Failed to reload manager: Permission denied' } : undefined
         const { code, stdout } = await run('apply', ['--json'])
         assert.notEqual(code, 0)
-        assert.equal((resultOf(stdout)['error'] as Record<string, unknown>)['code'], 'DP.SYSD.DAEMON_RELOAD_FAILED')
+        assert.equal((resultOf(stdout)['error'] as Record<string, unknown>)['code'], ERR.SYSD.DAEMON_RELOAD_FAILED)
 
         const warnings = (resultOf(stdout)['warnings'] as string[]).join('\n')
         assert.match(warnings, /daemon-reload 失败/)
@@ -667,7 +667,7 @@ describe('systemd 失败时的收场', () => {
         const { code, stdout } = await run('apply', ['--json'])
         assert.notEqual(code, 0)
         const error = resultOf(stdout)['error'] as Record<string, unknown>
-        assert.equal(error['code'], 'DP.SYSD.UNIT_NOT_MANAGED')
+        assert.equal(error['code'], ERR.SYSD.UNIT_NOT_MANAGED)
         assert.match(String(error['hint']), /managed by dp|force/, '提示要给出保住自己文件的三条路')
         assert.equal(runner.peek(UNIT_FILE), before, '用户自己的 unit 不得被改写')
         assert.ok(!runner.events.some((e) => e.startsWith('transfer ')), '判定不过就不该部署')
@@ -703,7 +703,7 @@ describe('systemd 失败时的收场', () => {
         assert.notEqual(code, 0)
         assert.equal(stdout, '', '没有结果文档就不该假装有')
         const error = JSON.parse(stderr)['error'] as Record<string, unknown>
-        assert.equal(error['code'], 'DP.CONFIG.INVALID')
+        assert.equal(error['code'], ERR.CONFIG.INVALID)
         assert.match(String(error['path']), /execStart/)
       },
       { systemd: true, execStart: '   ' },
@@ -774,7 +774,7 @@ describe('dp verify', () => {
         const { code, stdout } = await run('verify', ['--json'])
         assert.notEqual(code, 0, '服务没活着就不能放行')
         const error = resultOf(stdout)['error'] as Record<string, unknown>
-        assert.equal(error['code'], 'DP.SYSD.NOT_ACTIVE')
+        assert.equal(error['code'], ERR.SYSD.NOT_ACTIVE)
         // 三种 not-active 的排查路径完全不同，提示必须分开说
         assert.match(String(error['hint']), /not-found/)
         assert.match(String(error['hint']), /journalctl/)
@@ -847,7 +847,7 @@ describe('dp rollback', () => {
         const { code, stdout } = await run('rollback', ['--json'])
         assert.notEqual(code, 0, '没有可还原的 unit 却报成功 = 用户以为线上还是上一版')
         const error = resultOf(stdout)['error'] as Record<string, unknown>
-        assert.equal(error['code'], 'DP.SYSD.NO_PREVIOUS')
+        assert.equal(error['code'], ERR.SYSD.NO_PREVIOUS)
         assert.match(String(error['hint']), /daemon-reload/, '提示要给出「手动撤掉」的具体做法')
         assert.ok(!runner.events.some((e) => e.includes('systemctl restart')), '没还原成之前不许 restart')
         // 指针先切、服务后动，所以这次 current 已经指到上一版了 —— 那就是留在机器上的改动
@@ -868,7 +868,7 @@ describe('dp rollback', () => {
         const { code, stdout } = await run('rollback', ['--json'])
         assert.notEqual(code, 0)
         const result = resultOf(stdout)
-        assert.equal((result['error'] as Record<string, unknown>)['code'], 'DP.SYSD.NOT_ACTIVE')
+        assert.equal((result['error'] as Record<string, unknown>)['code'], ERR.SYSD.NOT_ACTIVE)
         assert.match(String((result['error'] as Record<string, unknown>)['hint']), /上一版/)
         // 顺序是「先切指针、后动服务」，所以到这里 current 已经是上一版了：
         // 指针动过、服务没起来，两件事都得报出来，不能只报一半

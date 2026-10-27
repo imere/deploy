@@ -15,7 +15,7 @@ import { describe, it } from 'node:test'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
+import { ERR, DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
 import { assertExecInvariants, type ExecCall, linuxFacts } from '@dp/testkit'
 import { main } from './index.js'
 import { defaultApplyDeps, type ApplyDeps } from './deps.js'
@@ -84,7 +84,7 @@ class FakeRunner implements Runner {
 
   async readFile(path: string): Promise<string> {
     const v = this.tree.get(path)
-    if (v === undefined) throw new DpError('DP.PATH.NOT_WRITABLE', `不存在：${path}`)
+    if (v === undefined) throw new DpError(ERR.PATH.NOT_WRITABLE, `不存在：${path}`)
     return v ?? ''
   }
 
@@ -326,7 +326,7 @@ describe('activate 失败时的收场', () => {
         // 这种东西 —— 报一个不存在的路径，比不说更难查（用户会照着它去 ls）
         assert.ok(!warnings.includes('conf.d/current'), `提示里出现了不存在的路径：${warnings}`)
         assert.ok(warnings.includes('/srv/app/current'), `提示没给出真实的软链位置：${warnings}`)
-        assert.equal((result['error'] as Record<string, unknown>)['code'], 'DP.NGX.RELOAD_FAILED')
+        assert.equal((result['error'] as Record<string, unknown>)['code'], ERR.NGX.RELOAD_FAILED)
         // conf 仍应是 activate 之后的那份：执行器没撤销就是没撤销
         assert.ok(runner.peek('/etc/nginx/conf.d/web.conf') !== null)
       },
@@ -368,7 +368,7 @@ describe('install 失败时的收场', () => {
         assert.equal(result['rolledBack'], false, '没写任何东西，没东西可回滚')
         assert.ok(!runner.events.some((e) => e.startsWith('write /srv/app')), 'install 失败后不得部署')
         assert.ok(!runner.events.includes('exec nginx -s reload'))
-        assert.equal((result['error'] as Record<string, unknown>)['code'], 'DP.NGX.TEST_FAILED')
+        assert.equal((result['error'] as Record<string, unknown>)['code'], ERR.NGX.TEST_FAILED)
       },
       { nginx: true, canWrite: { '/etc/nginx/conf.d': true } },
     )
@@ -400,7 +400,7 @@ describe('confd 推导', () => {
         assert.notEqual(code, 0)
         const result = resultOf(stdout)
         const error = result['error'] as Record<string, unknown>
-        assert.equal(error['code'], 'DP.PERM.CONFD_NOT_WRITABLE')
+        assert.equal(error['code'], ERR.PERM.CONFD_NOT_WRITABLE)
         assert.equal(error['path'], 'projects.*.target.confd')
         const hint = String(error['hint'])
         assert.match(hint, /target\.confd/, '必须告诉用户显式配置怎么写')

@@ -1,6 +1,6 @@
 import { deriveLayout, pickReleaseRoot } from '@dp/core'
 import { createLocalRunner } from '@dp/local'
-import { DpError, type Facts, type Runner } from '@dp/ports'
+import { ERR, DpError, type Facts, type Runner } from '@dp/ports'
 import { DEFAULT_KEEP, type HostConfig, type ProjectConfig } from '@dp/schema'
 import type { ApplyDeps } from './deps.js'
 import type { Logger } from '@dp/log'
@@ -65,7 +65,7 @@ export async function resolveTarget(input: ResolvedTargetInput): Promise<Resolve
   } else if (target.hostConfig.local === true) {
     runner = createLocalRunner(facts)
   } else {
-    throw new DpError('DP.CONFIG.INVALID', `--facts 只能用于 local 主机，${hostId} 是远端主机`, {
+    throw new DpError(ERR.CONFIG.INVALID, `--facts 只能用于 local 主机，${hostId} 是远端主机`, {
       path: '--facts',
       hint: `远端部署需要真连接才能写入文件，删掉 --facts 重跑（远端事实会现场探测）`,
     })
@@ -116,5 +116,5 @@ export function targetErrorFields(err: unknown): {
       ...(err.hint !== undefined ? { hint: err.hint } : {}),
     }
   }
-  return { code: 'DP.CLI.INTERNAL', message: err instanceof Error ? err.message : String(err) }
+  return { code: ERR.CLI.INTERNAL, message: err instanceof Error ? err.message : String(err) }
 }

@@ -18,7 +18,7 @@ import { describe, it } from 'node:test'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner, type TargetContext } from '@dp/ports'
+import { ERR, DpError, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner, type TargetContext } from '@dp/ports'
 import { defineProject, type ProcessConfig } from '@dp/schema'
 import { assertExecInvariants, type ExecCall, linuxFacts } from '@dp/testkit'
 import { main } from './index.js'
@@ -108,7 +108,7 @@ class FakeRunner implements Runner {
 
   async readFile(path: string): Promise<string> {
     const v = this.tree.get(path)
-    if (v === undefined) throw new DpError('DP.PATH.NOT_WRITABLE', `不存在：${path}`)
+    if (v === undefined) throw new DpError(ERR.PATH.NOT_WRITABLE, `不存在：${path}`)
     return v ?? ''
   }
 
@@ -521,7 +521,7 @@ describe('process 失败时的收场', () => {
         const result = resultOf(stdout)
         assert.equal(result['rolledBack'], false, '版本本身是好的，不该退掉')
         assert.ok(String(runner.peek(`${RELEASE_ROOT}/current`)).includes('releases/'), 'current 必须仍指向新版本')
-        assert.equal((result['error'] as Record<string, unknown>)['code'], 'DP.PROC.START_FAILED')
+        assert.equal((result['error'] as Record<string, unknown>)['code'], ERR.PROC.START_FAILED)
 
         const warnings = (result['warnings'] as string[]).join('\n')
         assert.match(warnings, /空窗/, '必须说清不是「还在跑旧的」')
@@ -539,7 +539,7 @@ describe('process 失败时的收场', () => {
         runner.failWhen = (argv) => (argv[1]?.endsWith('/stop.sh') ? { code: 1, stderr: 'dp: 进程 4242 在优雅期与强杀之后仍然存活' } : undefined)
         const { code, stdout } = await run('apply', ['--json'])
         assert.notEqual(code, 0)
-        assert.equal((resultOf(stdout)['error'] as Record<string, unknown>)['code'], 'DP.PROC.STOP_FAILED')
+        assert.equal((resultOf(stdout)['error'] as Record<string, unknown>)['code'], ERR.PROC.STOP_FAILED)
 
         // 起了新版本就等于让两个实例抢同一个端口 —— 那比停不掉的进程更难收拾
         assert.deepEqual(runner.scriptExecs('start.sh'), [], '停不掉就不许起')
@@ -557,7 +557,7 @@ describe('process 失败时的收场', () => {
         const { code, stdout } = await run('apply', ['--json'])
         assert.notEqual(code, 0)
         const error = resultOf(stdout)['error'] as Record<string, unknown>
-        assert.equal(error['code'], 'DP.PROC.COMMAND_INVALID')
+        assert.equal(error['code'], ERR.PROC.COMMAND_INVALID)
         assert.match(String(error['path']), /pidFile/)
         assert.match(String(error['hint']), /发布根/)
       },
@@ -570,7 +570,7 @@ describe('process 失败时的收场', () => {
       async ({ runner, run }) => {
         const { code, stdout } = await run('apply', ['--json'])
         assert.notEqual(code, 0)
-        assert.equal((resultOf(stdout)['error'] as Record<string, unknown>)['code'], 'DP.PROC.COMMAND_INVALID')
+        assert.equal((resultOf(stdout)['error'] as Record<string, unknown>)['code'], ERR.PROC.COMMAND_INVALID)
         // install 抛在写脚本之前：一次写都没发生
         assert.deepEqual(runner.scriptFiles(), [])
       },
@@ -642,7 +642,7 @@ describe('dp verify', () => {
         const { code, stdout } = await run('verify', ['--json'])
         assert.notEqual(code, 0, '进程没活着就不能放行')
         const error = resultOf(stdout)['error'] as Record<string, unknown>
-        assert.equal(error['code'], 'DP.PROC.NOT_RUNNING')
+        assert.equal(error['code'], ERR.PROC.NOT_RUNNING)
         assert.match(String(error['hint']), /端口|工作目录|权限|stdoutLog/)
         // 读的是 pidfile 里的 pid，不是 ps 的命令行 —— 同名进程会被误判成我们的
         assert.ok(runner.execs.some((e) => e.argv.some((part) => part.includes('kill -0 "$1"'))))
@@ -659,7 +659,7 @@ describe('dp verify', () => {
         const { code, stdout } = await run('verify', ['--json'])
         assert.notEqual(code, 0)
         const error = resultOf(stdout)['error'] as Record<string, unknown>
-        assert.equal(error['code'], 'DP.PROC.NOT_RUNNING')
+        assert.equal(error['code'], ERR.PROC.NOT_RUNNING)
         assert.match(String(error['message']), /pidfile/)
       },
       { process: true },
@@ -727,7 +727,7 @@ describe('dp rollback', () => {
         const { code, stdout } = await run('rollback', ['--json'])
         assert.notEqual(code, 0, '没有可退的目标却报成功 = 用户以为线上还是上一版')
         const error = resultOf(stdout)['error'] as Record<string, unknown>
-        assert.equal(error['code'], 'DP.PROC.NO_PREVIOUS')
+        assert.equal(error['code'], ERR.PROC.NO_PREVIOUS)
         assert.equal(runner.scriptExecs('start.sh').length, 0, '起一个不存在的脚本等于凭空报告一个服务')
         // 指针先切、服务后起，所以这次 current 已经指到上一版了 —— 那是留在机器上的
         // 改动，必须报出来；写成「一个指针都没动」是在替调用方隐瞒
