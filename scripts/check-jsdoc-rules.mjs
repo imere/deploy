@@ -388,6 +388,31 @@ export function arrowParams(masked, declEnd) {
 /**
  * 从源码文本扫出声明表：名字 → { kind, src, masked, pos, declStart, params, returnsVoid }。
  */
+/**
+ * 声明的**真正起点**：回到最外层那个修饰符关键字上。
+ *
+ * 正则的前导字符只吃掉一个，而 `export const X` 在遮罩后的文本里可能从 `const` 前的
+ * 空格起匹配 —— 直接从那里找 JSDoc 会撞上 `export` 而扑空，于是有注释的声明被报成
+ * 「缺 JSDoc」。所以匹配到之后再往前，`export` / `declare` / `abstract` / `async`
+ * 有几个退几个。
+ *
+ * @param {string} src 源码文本
+ * @param {number} from 正则匹配里第一个字母的位置
+ * @returns {number} 声明起点的下标
+ */
+export function declKeywordStart(src, from) {
+  let i = from
+  for (;;) {
+    let j = i - 1
+    while (j >= 0 && /\s/.test(src[j] ?? '')) j -= 1
+    if (j < 0) return i
+    const base = Math.max(0, j - 12)
+    const kw = /(?:^|[\s;}])(export|declare|abstract|async)$/.exec(src.slice(base, j + 1))
+    if (kw === null) return i
+    i = base + kw.index + (kw[0].length - kw[1].length)
+  }
+}
+
 export function scanDeclarations(src, file = '') {
   const masked = mask(src)
   // 导出语句的模块说明符是字符串，全遮罩会把 `from './x.js'` 一起吃掉。
@@ -401,7 +426,7 @@ export function scanDeclarations(src, file = '') {
       const pos = m.index + m[0].length - name.length
       if (decls.has(name)) continue
       // JSDoc 挂在**声明起点**（export / declare / async 那几个关键字之前），
-      const declStart = m.index + m[0].search(/[A-Za-z_$]/)
+      const declStart = declKeywordStart(src, m.index + m[0].search(/[A-Za-z_$]/))
       const decl = { name, kind, file, src, masked, pos, declStart, params: null, returnsVoid: false }
       if (kind === 'function') {
         const open = findParamsOpen(masked, pos + name.length)
