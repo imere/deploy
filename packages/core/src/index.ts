@@ -1,4 +1,4 @@
-import { INCOMING_SUFFIX, RELEASES_DIR_NAME, type Facts, type Layout, type Step } from '@dp/ports'
+import { WARN, INCOMING_SUFFIX, RELEASES_DIR_NAME, type Facts, type Layout, type Step } from '@dp/ports'
 import { DEFAULT_KEEP, type ProjectConfig } from '@dp/schema'
 import {
   checkSourcePaths,
@@ -66,10 +66,10 @@ export function makePlan(input: PlanInput): Plan {
 
   // ④ 已知的能力缺口，提前告知而不是等到运行时
   if (facts.capabilities.systemdScope === 'user' && !facts.capabilities.lingerEnabled) {
-    warnings.push('DP.SYSTEMD.NO_LINGER: 用户级服务未开启 linger，注销后不会存活')
+    warnings.push(`${WARN.SYSTEMD.NO_LINGER}: 用户级服务未开启 linger，注销后不会存活`)
   }
   if (project.activation?.mode === 'trial-promote' && project.healthcheck === undefined) {
-    warnings.push('DP.VERIFY.NO_HEALTHCHECK: 没有 healthcheck，autoPromote 退化为 never')
+    warnings.push(`${WARN.VERIFY.NO_HEALTHCHECK}: 没有 healthcheck，autoPromote 退化为 never`)
   }
 
   const root = choice.root

@@ -1,4 +1,4 @@
-import { DpError, type Facts, type Layout, type Platform } from '@dp/ports'
+import { ERR, DpError, type Facts, type Layout, type Platform } from '@dp/ports'
 
 // 模板展开
 
@@ -124,7 +124,7 @@ export function pickReleaseRoot(input: PickReleaseRootInput): ReleaseRootChoice 
   if (input.explicitRoot !== undefined) {
     const writable = facts.capabilities.canWrite[input.explicitRoot] === true
     if (!writable) {
-      throw new DpError('DP.PATH.NOT_WRITABLE', `release.root 不可写：${input.explicitRoot}`, {
+      throw new DpError(ERR.PATH.NOT_WRITABLE, `release.root 不可写：${input.explicitRoot}`, {
         path: 'release.root',
         hint: '检查权限 / 只读挂载 / SELinux 标签；或改成一个当前身份可写的路径',
       })
@@ -152,7 +152,7 @@ export function pickReleaseRoot(input: PickReleaseRootInput): ReleaseRootChoice 
     const tried = `候选：${candidates.map((c) => c.path).join(' | ')}`
     if (input.layoutExplicit === true) {
       throw new DpError(
-        'DP.LAYOUT.MISMATCH',
+        ERR.LAYOUT.MISMATCH,
         `点名了 ${layout} 布局，但它的 ${candidates.length} 个候选实测都不可写`,
         {
           path: 'hosts.*.layout',
@@ -161,7 +161,7 @@ export function pickReleaseRoot(input: PickReleaseRootInput): ReleaseRootChoice 
       )
     }
     throw new DpError(
-      'DP.PATH.NOT_WRITABLE',
+      ERR.PATH.NOT_WRITABLE,
       `没有可写的发布目录（已试 ${candidates.length} 个候选）`,
       {
         hint: `${tried}。可显式指定 release.root，或让运维授权其中一个目录`,
@@ -222,19 +222,19 @@ export function checkSourcePaths(entries: readonly string[], platform: Platform)
 
     if (platform === 'win32') {
       if (WIN_RESERVED.test(last)) {
-        throw new DpError('DP.PATH.RESERVED_NAME', `Windows 保留名，落到目标机即废：${entry}`, {
+        throw new DpError(ERR.PATH.RESERVED_NAME, `Windows 保留名，落到目标机即废：${entry}`, {
           hint: '重命名该文件或目录',
         })
       }
       if (WIN_ILLEGAL.test(entry)) {
-        throw new DpError('DP.PATH.ILLEGAL_CHAR', `含 Windows 非法字符：${entry}`, {
+        throw new DpError(ERR.PATH.ILLEGAL_CHAR, `含 Windows 非法字符：${entry}`, {
           hint: 'Windows 路径不能包含 < > : " | ? * 与控制字符',
         })
       }
     }
 
     if (entry.length > limit) {
-      throw new DpError('DP.PATH.TOO_LONG', `路径长度 ${entry.length} 超过 ${platform} 上限 ${limit}：${entry}`, {
+      throw new DpError(ERR.PATH.TOO_LONG, `路径长度 ${entry.length} 超过 ${platform} 上限 ${limit}：${entry}`, {
         hint: '缩短路径，或在 Windows 上启用 LongPathsEnabled',
       })
     }
@@ -244,7 +244,7 @@ export function checkSourcePaths(entries: readonly string[], platform: Platform)
       const previous = seen.get(key)
       if (previous !== undefined && previous !== entry) {
         throw new DpError(
-          'DP.PATH.CASE_COLLISION',
+          ERR.PATH.CASE_COLLISION,
           `「${previous}」与「${entry}」在 ${platform} 上会互相覆盖（大小写不敏感）`,
           { hint: '合并或重命名其中一个，否则部署后会静默丢文件' },
         )

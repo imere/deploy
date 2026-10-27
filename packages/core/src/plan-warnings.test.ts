@@ -11,6 +11,7 @@ import type { Facts } from '@dp/ports'
 import { defineProject } from '@dp/schema'
 import { makePlan } from './index.js'
 
+import { WARN } from '@dp/ports'
 function factsWith(over: { systemdScope?: 'none' | 'system' | 'user'; lingerEnabled?: boolean }): Facts {
   return {
     host: 'test-host',
@@ -47,7 +48,7 @@ describe('makePlan · 能力缺口告警', () => {
       facts: factsWith({ systemdScope: 'user', lingerEnabled: false }),
     })
     assert.deepEqual(plan.warnings, [
-      'DP.SYSTEMD.NO_LINGER: 用户级服务未开启 linger，注销后不会存活',
+      `${WARN.SYSTEMD.NO_LINGER}: 用户级服务未开启 linger，注销后不会存活`,
     ])
     assert.equal(plan.steps.length > 0, true)
   })
@@ -77,7 +78,7 @@ describe('makePlan · 能力缺口告警', () => {
       facts: factsWith({}),
     })
     assert.deepEqual(plan.warnings, [
-      'DP.VERIFY.NO_HEALTHCHECK: 没有 healthcheck，autoPromote 退化为 never',
+      `${WARN.VERIFY.NO_HEALTHCHECK}: 没有 healthcheck，autoPromote 退化为 never`,
     ])
   })
 

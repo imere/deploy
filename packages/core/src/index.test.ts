@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError } from '@dp/ports'
+import { WARN, ERR, DpError } from '@dp/ports'
 import { defaultFacts } from '@dp/testkit'
 import { defineProject } from '@dp/schema'
 import {
@@ -117,7 +117,7 @@ test('pickReleaseRoot: 显式 root 优先，但仍要实证', () => {
         name: 'web',
         explicitRoot: '/custom',
       }),
-    (e: unknown) => e instanceof DpError && e.code === 'DP.PATH.NOT_WRITABLE',
+    (e: unknown) => e instanceof DpError && e.code === ERR.PATH.NOT_WRITABLE,
   )
 })
 
@@ -127,7 +127,7 @@ test('pickReleaseRoot: 全部不可写 → 报错且 hint 列出候选', () => {
     assert.fail('应当抛错')
   } catch (e) {
     assert.ok(e instanceof DpError)
-    assert.equal(e.code, 'DP.PATH.NOT_WRITABLE')
+    assert.equal(e.code, ERR.PATH.NOT_WRITABLE)
     assert.match(e.hint ?? '', /\/srv\/web/)
   }
 })
@@ -145,7 +145,7 @@ test('pickReleaseRoot: 布局是用户点名的 → 一个候选都不可写时�
       }),
     (e: unknown) => {
       assert.ok(e instanceof DpError)
-      assert.equal(e.code, 'DP.LAYOUT.MISMATCH')
+      assert.equal(e.code, ERR.LAYOUT.MISMATCH)
       assert.equal(e.path, 'hosts.*.layout')
       assert.match(e.hint ?? '', /layout: auto/)
       return true
@@ -160,11 +160,11 @@ test('pickReleaseRoot: 布局是用户点名的 → 一个候选都不可写时�
 test('checkSourcePaths: Windows 保留名', () => {
   assert.throws(
     () => checkSourcePaths(['dist/NUL'], 'win32'),
-    (e: unknown) => e instanceof DpError && e.code === 'DP.PATH.RESERVED_NAME',
+    (e: unknown) => e instanceof DpError && e.code === ERR.PATH.RESERVED_NAME,
   )
   assert.throws(
     () => checkSourcePaths(['dist/aux.txt'], 'win32'),
-    (e: unknown) => e instanceof DpError && e.code === 'DP.PATH.RESERVED_NAME',
+    (e: unknown) => e instanceof DpError && e.code === ERR.PATH.RESERVED_NAME,
   )
   // 同样的名字在 linux 上完全合法
   checkSourcePaths(['dist/NUL'], 'linux')
@@ -173,11 +173,11 @@ test('checkSourcePaths: Windows 保留名', () => {
 test('checkSourcePaths: 仅大小写不同 → 不敏感平台上冲突', () => {
   assert.throws(
     () => checkSourcePaths(['a.js', 'A.js'], 'win32'),
-    (e: unknown) => e instanceof DpError && e.code === 'DP.PATH.CASE_COLLISION',
+    (e: unknown) => e instanceof DpError && e.code === ERR.PATH.CASE_COLLISION,
   )
   assert.throws(
     () => checkSourcePaths(['a.js', 'A.js'], 'darwin'),
-    (e: unknown) => e instanceof DpError && e.code === 'DP.PATH.CASE_COLLISION',
+    (e: unknown) => e instanceof DpError && e.code === ERR.PATH.CASE_COLLISION,
   )
   // linux 大小写敏感，不冲突
   checkSourcePaths(['a.js', 'A.js'], 'linux')
@@ -195,11 +195,11 @@ test('checkSourcePaths: 不敏感平台上的「正常情况」不许误报', ()
 test('checkSourcePaths: 非法字符与长度', () => {
   assert.throws(
     () => checkSourcePaths(['dist/a|b.js'], 'win32'),
-    (e: unknown) => e instanceof DpError && e.code === 'DP.PATH.ILLEGAL_CHAR',
+    (e: unknown) => e instanceof DpError && e.code === ERR.PATH.ILLEGAL_CHAR,
   )
   assert.throws(
     () => checkSourcePaths([`dist/${'x'.repeat(300)}.js`], 'win32'),
-    (e: unknown) => e instanceof DpError && e.code === 'DP.PATH.TOO_LONG',
+    (e: unknown) => e instanceof DpError && e.code === ERR.PATH.TOO_LONG,
   )
 })
 
@@ -233,7 +233,7 @@ test('makePlan: 无 healthcheck 时告警 autoPromote 退化', () => {
     releaseId: 'r-1',
     sourceEntries: ['index.html'],
   })
-  assert.ok(plan.warnings.some((w) => w.includes('DP.VERIFY.NO_HEALTHCHECK')))
+  assert.ok(plan.warnings.some((w) => w.includes(WARN.VERIFY.NO_HEALTHCHECK)))
 })
 
 test('makePlan: 源里有保留名时在计划阶段就失败（零副作用）', () => {
@@ -246,6 +246,6 @@ test('makePlan: 源里有保留名时在计划阶段就失败（零副作用）'
         releaseId: 'r-1',
         sourceEntries: ['CON'],
       }),
-    (e: unknown) => e instanceof DpError && e.code === 'DP.PATH.RESERVED_NAME',
+    (e: unknown) => e instanceof DpError && e.code === ERR.PATH.RESERVED_NAME,
   )
 })

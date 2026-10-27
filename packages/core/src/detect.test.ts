@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { detectCandidates, resolveTargetKind } from './detect.js'
 
 // 输入全部靠构造数组：本文件不建目录、不读盘（铁律 1，零 IO）
@@ -158,7 +158,7 @@ test('0 命中：源清单为空时说清楚是空的', () => {
 // （这个差别当初就是靠变异测试发现的：那一版它活下来了。）
 test('0 命中 · pick=fail：报的是「探测不到类型」，不是「0 个同时命中」', () => {
   const e = err(() => resolveTargetKind({ entries: [] }, 'fail'))
-  assert.equal(e.code, 'DP.CONFIG.INVALID')
+  assert.equal(e.code, ERR.CONFIG.INVALID)
   assert.match(e.message, /探测不到目标类型/)
   assert.match(e.hint ?? '', /源清单为空/)
   assert.doesNotMatch(e.message, /同时命中/)
@@ -332,7 +332,7 @@ test('systemd 已实现：源里只有 .service 文件时直接选中它，不�
 
 test('0 命中报的是 DP.CONFIG.INVALID，且列出的文件名已归一化', () => {
   const e = err(() => resolveTargetKind({ entries: ['a\\b.ts', '.', 'c.ts'] }, 'auto'))
-  assert.equal(e.code, 'DP.CONFIG.INVALID')
+  assert.equal(e.code, ERR.CONFIG.INVALID)
   // 反斜杠归一化后才不会在 Windows 上打出另一种形态
   assert.match(e.hint ?? '', /a\/b\.ts、c\.ts（共 2 个）/)
 })

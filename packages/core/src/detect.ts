@@ -1,4 +1,4 @@
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { TARGET_KINDS } from '@dp/schema'
 
 /** 对应 `targetSchema.pick`。不设默认值：调用方必须显式传，默认值由 schema 那一层给 */
@@ -217,7 +217,7 @@ function describeSeen(input: DetectInput): string {
  * 探测 + 仲裁。**不读盘**。
  */
 function noEvidenceError(input: DetectInput): DpError {
-  return new DpError('DP.CONFIG.INVALID', '探测不到目标类型：源里没有任何可识别的证据', {
+  return new DpError(ERR.CONFIG.INVALID, '探测不到目标类型：源里没有任何可识别的证据', {
     path: 'target.type',
     hint:
       `看到的文件：${describeSeen(input)}。显式写 target.type（${implementedList()}）告诉 dp 用哪一种；` +
@@ -245,7 +245,7 @@ export function resolveTargetKind(input: DetectInput, pick: TargetPick): DetectR
     if (only === undefined) throw noEvidenceError(input)
     if (!only.implemented) {
       throw new DpError(
-        'DP.CONFIG.INVALID',
+        ERR.CONFIG.INVALID,
         `探测到 ${only.evidence[0] ?? only.kind}，但本仓还没实现 ${only.kind} 目标`,
         {
           path: 'target.type',
@@ -263,7 +263,7 @@ export function resolveTargetKind(input: DetectInput, pick: TargetPick): DetectR
 
   if (pick === 'fail') {
     throw new DpError(
-      'DP.CONFIG.INVALID',
+      ERR.CONFIG.INVALID,
       `${candidates.length} 个目标类型同时命中，target.pick=fail 时不猜：${candidates.map(summarize).join('；')}`,
       {
         path: 'target.type',
@@ -279,7 +279,7 @@ export function resolveTargetKind(input: DetectInput, pick: TargetPick): DetectR
   const tier = ranked.filter((c) => c.confidence === top.confidence)
   if (tier.length > 1) {
     throw new DpError(
-      'DP.CONFIG.INVALID',
+      ERR.CONFIG.INVALID,
       `${tier.map((c) => c.kind).join(' 与 ')} 的证据强度相同（confidence ${top.confidence}），无法判定用哪个`,
       {
         path: 'target.type',
@@ -292,7 +292,7 @@ export function resolveTargetKind(input: DetectInput, pick: TargetPick): DetectR
   const chosen = usable[0]
   if (chosen === undefined) {
     throw new DpError(
-      'DP.CONFIG.INVALID',
+      ERR.CONFIG.INVALID,
       `探测到的 ${ranked.map((c) => c.kind).join('、')} 本仓都还没实现`,
       {
         path: 'target.type',
