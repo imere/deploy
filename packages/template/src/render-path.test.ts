@@ -10,7 +10,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { renderString } from './render.js'
 import { validateVars } from './vars.js'
 import type { RenderContext } from './context.js'
@@ -31,7 +31,7 @@ describe('renderString · 语法错补配置路径', () => {
       assert.fail('应当抛错')
     } catch (err) {
       assert.ok(err instanceof DpError)
-      assert.equal(err.code, 'DP.TPL.SYNTAX')
+      assert.equal(err.code, ERR.TPL.SYNTAX)
       assert.equal(err.path, 'projects.web.target.confd')
     }
   })
@@ -42,7 +42,7 @@ describe('renderString · 语法错补配置路径', () => {
       assert.fail('应当抛错')
     } catch (err) {
       assert.ok(err instanceof DpError)
-      assert.equal(err.code, 'DP.TPL.SYNTAX')
+      assert.equal(err.code, ERR.TPL.SYNTAX)
     }
   })
 
@@ -85,7 +85,7 @@ describe('validateVars · 非 DpError 原样上抛', () => {
     const errors = validateVars('${env.NOT_SET} ${env.OTHER_MISSING}', ctx)
     assert.deepEqual(
       errors.map((e) => e.code),
-      ['DP.TPL.MISSING_ENV', 'DP.TPL.MISSING_ENV'],
+      [ERR.TPL.MISSING_ENV, ERR.TPL.MISSING_ENV],
     )
   })
 })

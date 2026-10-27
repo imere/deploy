@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { collectVars, KNOWN_VARS, validateVars } from './vars.js'
 import { renderString } from './render.js'
 import type { RenderContext } from './context.js'
@@ -119,7 +119,7 @@ describe('段数必须严格 —— 多写一段是拼错，不是取字段', ()
     it(`${input} 报 UNKNOWN_VAR`, () => {
       assert.throws(
         () => renderString(input, ctx),
-        (err: unknown) => err instanceof DpError && err.code === 'DP.TPL.UNKNOWN_VAR',
+        (err: unknown) => err instanceof DpError && err.code === ERR.TPL.UNKNOWN_VAR,
       )
     })
   }

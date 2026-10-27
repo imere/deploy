@@ -1,4 +1,4 @@
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { checkSourcePaths } from '@dp/core'
 import type { Usage } from './context.js'
 
@@ -77,7 +77,7 @@ function assertPathRules(value: string, path: string | undefined): void {
     }
     const which = offender !== undefined ? escapeChar(offender) : err.code
     throw new DpError(
-      'DP.TPL.UNSAFE_VALUE',
+      ERR.TPL.UNSAFE_VALUE,
       `渲染结果含路径不允许的字符 ${which}：${escapeFragment(value)}（该值会被写进${DESTINATION.path}）`,
       {
         ...(path !== undefined ? { path } : {}),
@@ -109,7 +109,7 @@ export function assertSafe(value: string, usage: Usage, path?: string): void {
           ? '换行会把一个值拆成两行 —— 落到这个位置就意味着参数与指令的边界不再是代码划定的那条'
           : '控制字符没有正当用途'
     throw new DpError(
-      'DP.TPL.UNSAFE_VALUE',
+      ERR.TPL.UNSAFE_VALUE,
       `渲染结果含被拒字符 ${escapeChar(bad)}：${escapeFragment(value)}（该值会被写进${DESTINATION[usage]}）`,
       {
         ...(path !== undefined ? { path } : {}),

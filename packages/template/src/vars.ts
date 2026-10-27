@@ -1,4 +1,4 @@
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import type { RenderContext } from './context.js'
 
 /**
@@ -105,7 +105,7 @@ export function scan(input: string): ScanResult {
     const close = input.indexOf('}', i + 2)
     if (close === -1) {
       syntaxErrors.push(
-        new DpError('DP.TPL.SYNTAX', `未闭合的变量引用，位置约在：${contextAt(input, i)}`, {
+        new DpError(ERR.TPL.SYNTAX, `未闭合的变量引用，位置约在：${contextAt(input, i)}`, {
           hint: '补上结尾的 `}`。若这一段本该是字面量（例如 nginx 自己的 ${...}），写成 $${...} 转义',
         }),
       )
@@ -121,7 +121,7 @@ export function scan(input: string): ScanResult {
     // 嵌套：`${env.${x}}` 的第一个 `}` 会把 name 切成 `env.${x`，
     if (name.includes('{') || name.includes('$') || !NAME_RE.test(name)) {
       syntaxErrors.push(
-        new DpError('DP.TPL.SYNTAX', `不支持的变量写法：${raw}`, {
+        new DpError(ERR.TPL.SYNTAX, `不支持的变量写法：${raw}`, {
           hint: name.includes('{') || name.includes('$')
             ? '本包不是表达式引擎，不支持嵌套。`${env.${x}}` 请改成先在配置里定义中间变量，或直接写死值'
             : `变量名只能是字母 / 数字 / 下划线并以点分段，如 env.FOO、git.sha、release.current（收到的是 ${raw}）`,
@@ -168,13 +168,13 @@ export const KNOWN_VARS: readonly string[] = [
 
 function unknownVar(name: string, ctx: RenderContext, extraKeys: readonly string[]): DpError {
   const extra = extraKeys.length > 0 ? ` | ${extraKeys.join(' | ')}` : ''
-  return new DpError('DP.TPL.UNKNOWN_VAR', `未知变量 \${${name}}`, {
+  return new DpError(ERR.TPL.UNKNOWN_VAR, `未知变量 \${${name}}`, {
     hint: `可用变量：${KNOWN_VARS.join(' | ')}${extra}。要引用环境变量写成 \${env.NAME}，要引用环境名用 \${env}`,
   })
 }
 
 function missingValue(name: string, hint: string): DpError {
-  return new DpError('DP.TPL.MISSING_VALUE', `变量 \${${name}} 在当前上下文里没有值`, { hint })
+  return new DpError(ERR.TPL.MISSING_VALUE, `变量 \${${name}} 在当前上下文里没有值`, { hint })
 }
 
 /**
@@ -209,7 +209,7 @@ export function resolveVar(name: string, ctx: RenderContext, options?: { path?: 
       }
       if (rest.length > 1) {
         return fail(
-          new DpError('DP.TPL.UNKNOWN_VAR', `未知变量 \${${name}}`, {
+          new DpError(ERR.TPL.UNKNOWN_VAR, `未知变量 \${${name}}`, {
             hint: '环境变量名只能是一段，如 ${env.DEPLOY_KEY}',
           }),
         )
@@ -218,7 +218,7 @@ export function resolveVar(name: string, ctx: RenderContext, options?: { path?: 
       const value = ctx.envVars?.[key]
       if (value === undefined || value === '') {
         return fail(
-          new DpError('DP.TPL.MISSING_ENV', `环境变量 ${key} 未提供，无法渲染 \${env.${key}}`, {
+          new DpError(ERR.TPL.MISSING_ENV, `环境变量 ${key} 未提供，无法渲染 \${env.${key}}`, {
             hint: `设置环境变量 ${key}，或写成字面量。空值同样会被拒绝：路径塌成 \`/srv//\` 要到部署中途才暴露`,
           }),
         )

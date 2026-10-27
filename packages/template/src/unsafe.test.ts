@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { assertSafe, escapeChar, escapeFragment } from './unsafe.js'
 import { renderString } from './render.js'
 import type { RenderContext, Usage } from './context.js'
@@ -17,7 +17,7 @@ function rejects(value: string, usage: Usage): DpError {
     throw new Error(`期望 ${usage} 拒绝 ${JSON.stringify(value)}，实际放行`)
   } catch (err) {
     assert.ok(err instanceof DpError)
-    assert.equal(err.code, 'DP.TPL.UNSAFE_VALUE')
+    assert.equal(err.code, ERR.TPL.UNSAFE_VALUE)
     assert.ok((err.hint ?? '') !== '', '错误必须带 hint')
     return err
   }
@@ -109,7 +109,7 @@ describe('assertSafe · path 档', () => {
 
   it('拒绝 Windows 保留名', () => {
     const err = rejects('C:/srv/NUL', 'path')
-    assert.equal(err.code, 'DP.TPL.UNSAFE_VALUE')
+    assert.equal(err.code, ERR.TPL.UNSAFE_VALUE)
   })
 
   it('放行正常路径', () => {
@@ -293,7 +293,7 @@ describe('assertSafe · path 档的非字符级失败', () => {
       assert.fail('应当抛错')
     } catch (err) {
       assert.ok(err instanceof DpError)
-      assert.equal(err.code, 'DP.TPL.UNSAFE_VALUE')
+      assert.equal(err.code, ERR.TPL.UNSAFE_VALUE)
     }
   })
 })
@@ -316,7 +316,7 @@ describe('renderString · usage 生效', () => {
     const ctx2: RenderContext = { ...ctx, envVars: { DIR: '/srv\nweb' } }
     assert.throws(
       () => renderString('root ${env.DIR};', ctx2, { usage: 'path' }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.TPL.UNSAFE_VALUE',
+      (err: unknown) => err instanceof DpError && err.code === ERR.TPL.UNSAFE_VALUE,
     )
   })
 
@@ -346,7 +346,7 @@ describe('renderString · usage 生效', () => {
     assert.equal(renderString('root ${env.DIR};', ctx2, { usage: 'conf' }), 'root /srv/we*b;')
     assert.throws(
       () => renderString('root ${env.DIR};', ctx2, { usage: 'path' }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.TPL.UNSAFE_VALUE',
+      (err: unknown) => err instanceof DpError && err.code === ERR.TPL.UNSAFE_VALUE,
     )
   })
 
@@ -356,7 +356,7 @@ describe('renderString · usage 生效', () => {
       assert.fail('应当抛错')
     } catch (err) {
       assert.ok(err instanceof DpError)
-      assert.equal(err.code, 'DP.TPL.UNSAFE_VALUE')
+      assert.equal(err.code, ERR.TPL.UNSAFE_VALUE)
       assert.equal(err.path, 'projects.web.target.root')
     }
   })
@@ -366,7 +366,7 @@ describe('renderString · usage 生效', () => {
     assert.equal(renderString('${env.OK}\n${env.OK}', ctx2, { usage: 'path' }), '/srv/ok\n/srv/ok')
     assert.throws(
       () => renderString('${env.OK}\n${env.BAD}', ctx2, { usage: 'path' }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.TPL.UNSAFE_VALUE',
+      (err: unknown) => err instanceof DpError && err.code === ERR.TPL.UNSAFE_VALUE,
     )
   })
 })

@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { renderString } from './render.js'
 import type { RenderContext } from './context.js'
 
@@ -100,31 +100,31 @@ describe('renderString · 转义', () => {
 describe('renderString · 错误路径（每条都断言 code 与 hint）', () => {
   it('未知变量 → DP.TPL.UNKNOWN_VAR，hint 列出全部可用变量', () => {
     const { code, hint } = codeOf(() => renderString('${nope}', ctx))
-    assert.equal(code, 'DP.TPL.UNKNOWN_VAR')
+    assert.equal(code, ERR.TPL.UNKNOWN_VAR)
     assert.match(hint ?? '', /env\.NAME/)
     assert.match(hint ?? '', /release\.current/)
   })
 
   it('缺环境变量 → DP.TPL.MISSING_ENV，不渲染成空串', () => {
     const { code, hint } = codeOf(() => renderString('${env.NOT_SET}', ctx))
-    assert.equal(code, 'DP.TPL.MISSING_ENV')
+    assert.equal(code, ERR.TPL.MISSING_ENV)
     assert.match(hint ?? '', /NOT_SET/)
   })
 
   it('空值环境变量同样被拒', () => {
-    assert.equal(codeOf(() => renderString('${env.EMPTY_IS_REJECTED}', ctx)).code, 'DP.TPL.MISSING_ENV')
+    assert.equal(codeOf(() => renderString('${env.EMPTY_IS_REJECTED}', ctx)).code, ERR.TPL.MISSING_ENV)
   })
 
   it('git.tag 为空 → DP.TPL.MISSING_VALUE，hint 指向 git.sha', () => {
     const { code, hint } = codeOf(() => renderString('${git.tag}', { ...ctx, git: { sha: 'abc' } }))
-    assert.equal(code, 'DP.TPL.MISSING_VALUE')
+    assert.equal(code, ERR.TPL.MISSING_VALUE)
     assert.match(hint ?? '', /git\.sha/)
   })
 
   it('未闭合 → DP.TPL.SYNTAX，message 给出位置', () => {
     // 真正没有 `}` 的情况：位置片段里会出现 ⟦ 标记，让用户能直接看到断在哪
     const { code, hint } = codeOf(() => renderString('root ${release.current', ctx))
-    assert.equal(code, 'DP.TPL.SYNTAX')
+    assert.equal(code, ERR.TPL.SYNTAX)
     assert.match(hint ?? '', /\$\$\{/)
     try {
       renderString('root ${release.current', ctx)
@@ -137,28 +137,28 @@ describe('renderString · 错误路径（每条都断言 code 与 hint）', () =
 
   it('变量名里混入非法字符 → DP.TPL.SYNTAX', () => {
     const { code, hint } = codeOf(() => renderString('root ${release.current;};', ctx))
-    assert.equal(code, 'DP.TPL.SYNTAX')
+    assert.equal(code, ERR.TPL.SYNTAX)
     assert.match(hint ?? '', /变量名/)
   })
 
   it('嵌套 → DP.TPL.SYNTAX，hint 说明不支持嵌套', () => {
     const { code, hint } = codeOf(() => renderString('${env.${x}}', ctx))
-    assert.equal(code, 'DP.TPL.SYNTAX')
+    assert.equal(code, ERR.TPL.SYNTAX)
     assert.match(hint ?? '', /嵌套/)
   })
 
   it('变量名非法 → DP.TPL.SYNTAX', () => {
-    assert.equal(codeOf(() => renderString('${1bad}', ctx)).code, 'DP.TPL.SYNTAX')
+    assert.equal(codeOf(() => renderString('${1bad}', ctx)).code, ERR.TPL.SYNTAX)
   })
 
-  it('出错时不留下 ${x} 原文（绝不产出语法合法语义错的 conf）', () => {
-    let out = ''
-    try {
-      out = renderString('root ${nope};', ctx)
-    } catch {
-      // 抛错正是预期路径：要验的是「出错时不留下 ${x} 原文」，所以 out 保持空串
-    }
-    assert.equal(out.includes('${'), false)
+  it('缺变量就抛而不是留下 ${x} 原文 —— 语法合法、语义错的 conf 比报错贵得多', () => {
+    // 空 catch 会让「抛了」与「没抛」都通过：out 在两条路径上都是空串。
+    // 所以这里直接断言它抛的是什么，而不是去看返回值的形状
+    assert.throws(() => renderString('root ${nope};', ctx), (err: unknown) => {
+      assert.equal((err as DpError).code, ERR.TPL.UNKNOWN_VAR)
+      assert.match((err as Error).message, /\$\{nope\}/, '错误里要点名是哪个变量没给值')
+      return true
+    })
   })
 
   it('options.path 被带进错误，便于定位配置项', () => {

@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { releaseVars, renderDeep, renderString } from './render.js'
 import type { RenderContext } from './context.js'
 
@@ -100,7 +100,7 @@ describe('renderDeep', () => {
   it('叶子报错时整个渲染失败（不产出半成品配置）', () => {
     assert.throws(
       () => renderDeep({ ok: '${project}', bad: '${nope}' }, ctx),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.TPL.UNKNOWN_VAR',
+      (err: unknown) => err instanceof DpError && err.code === ERR.TPL.UNKNOWN_VAR,
     )
   })
 
@@ -109,7 +109,7 @@ describe('renderDeep', () => {
     const bad: RenderContext = { ...ctx, envVars: { DIR: '/srv\nweb' } }
     assert.throws(
       () => renderDeep(input, bad, { usage: 'path' }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.TPL.UNSAFE_VALUE',
+      (err: unknown) => err instanceof DpError && err.code === ERR.TPL.UNSAFE_VALUE,
     )
   })
 })
