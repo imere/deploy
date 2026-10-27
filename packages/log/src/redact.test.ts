@@ -7,7 +7,7 @@ import {
   isSecretKey,
   redact,
 } from './redact.js'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 
 const S = '***'
 
@@ -191,16 +191,16 @@ describe('redact / 健壮性', () => {
   })
 
   it('Error 上的 code/path/hint 一并带出（排障要靠它们）', () => {
-    const err = new DpError('DP.PATH.NOT_WRITABLE', 'nope', { path: 'projects.web.source', hint: '检查权限' })
+    const err = new DpError(ERR.PATH.NOT_WRITABLE, 'nope', { path: 'projects.web.source', hint: '检查权限' })
     const out = redact({ err }) as Record<string, any>
-    assert.equal(out.err.code, 'DP.PATH.NOT_WRITABLE')
+    assert.equal(out.err.code, ERR.PATH.NOT_WRITABLE)
     assert.equal(out.err.path, 'projects.web.source')
     assert.equal(out.err.hint, '检查权限')
   })
 
   it('toJSON 会被尊重（DpError 的结构化输出就靠它）', () => {
-    const out = redact({ err: new DpError('DP.VERIFY.FAILED', 'bad') }) as Record<string, any>
-    assert.equal(out.err.code, 'DP.VERIFY.FAILED')
+    const out = redact({ err: new DpError(ERR.VERIFY.FAILED, 'bad') }) as Record<string, any>
+    assert.equal(out.err.code, ERR.VERIFY.FAILED)
   })
 
   it('toJSON 抛错时退回自有键，不冒泡', () => {
