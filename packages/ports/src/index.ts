@@ -1,4 +1,3 @@
-
 // 平台与身份
 
 /**
@@ -152,7 +151,7 @@ export function parseSshTarget(value: string, path: string): SshTarget {
   const userPart = at >= 0 ? value.slice(0, at) : undefined
   const hostPart = at >= 0 ? value.slice(at + 1) : value
   if (hostPart === '') {
-    throw new DpError('DP.CONFIG.INVALID', `ssh 目标为空：${JSON.stringify(value)}`, {
+    throw new DpError(ERR.CONFIG.INVALID, `ssh 目标为空：${JSON.stringify(value)}`, {
       path,
       hint: '写成 user@host 或 user@host:port，例如 deploy@10.0.0.5:2222',
     })
@@ -162,7 +161,7 @@ export function parseSshTarget(value: string, path: string): SshTarget {
     const portText = hostPart.slice(colon + 1)
     const port = Number(portText)
     if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-      throw new DpError('DP.CONFIG.INVALID', `端口不合法：${portText}`, {
+      throw new DpError(ERR.CONFIG.INVALID, `端口不合法：${portText}`, {
         path,
         hint: '端口必须是 1–65535 的整数。不写端口就用 SSH 的默认值（22）',
       })
@@ -181,7 +180,7 @@ export function parseSshTarget(value: string, path: string): SshTarget {
  */
 export function assertPortInRange(port: number, path: string): void {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new DpError('DP.CONFIG.INVALID', `端口不合法：${port}`, {
+    throw new DpError(ERR.CONFIG.INVALID, `端口不合法：${port}`, {
       path,
       hint: '端口必须是 1–65535 的整数',
     })
@@ -191,92 +190,159 @@ export function assertPortInRange(port: number, path: string): void {
 // 错误
 
 /**
- * 全仓唯一的错误码登记表，`DpErrorCode` 由它派生。
+ * 全仓唯一的错误码登记表 —— 键是 `DP.` 之后的分组，值是那个码本身。
+ *
+ * 抛错与断言一律引用它（`ERR.PROC.START_FAILED`），**不写字面量**：字面量散在各包里，
+ * 改一个码要同步几十处，漏一处就是「报的是 A、断言的是 B」这种查不动的现场。
+ * 各码「为什么单列而不复用邻居」的理由写在它自己上面 —— 两个码合成一个之后，
+ * 报错里就只剩一句模棱两可的话，用户得自己分辨是哪一种。
  */
-export const DP_ERROR_CODES = [
-  'DP.CONFIG.INVALID',
-  'DP.PATH.CASE_COLLISION',
-  'DP.PATH.RESERVED_NAME',
-  'DP.PATH.TOO_LONG',
-  'DP.PATH.ILLEGAL_CHAR',
-  'DP.PATH.NOT_WRITABLE',
-  'DP.LAYOUT.MISMATCH',
-  'DP.PERM.CONFD_NOT_WRITABLE',
-  // ↓ systemd 目标的 unitDir 推导。与 confd 分列：confd 不可写是「nginx 的入口目录
-  // 不可写」，unitDir 不可写是「systemd 的单元目录不可写」，排查路径完全不同，
-  // 合成一个码之后报错里就只剩一句「推导不出目录」，用户得自己分辨是哪个
-  'DP.PERM.UNIT_DIR_NOT_WRITABLE',
-  'DP.PREF.UNSUPPORTED',
-  'DP.VERIFY.FAILED',
-  'DP.LINK.UNAVAILABLE',
-  'DP.SOURCE.EMPTY',
-  'DP.INTERACTIVE_PROMPT_DETECTED',
-  'DP.TIMEOUT.EXEC',
-  // ↓ SSH 远端 Runner（@dp/ssh）追加。
-  'DP.SSH.CONNECT_FAILED',
-  'DP.SSH.AUTH_FAILED',
-  'DP.SSH.HOST_KEY_UNKNOWN',
-  'DP.SSH.HOST_KEY_MISMATCH',
-  'DP.SSH.TOOL_MISSING',
-  'DP.SSH.DRIVER_UNAVAILABLE',
-  'DP.SSH.TUNNEL_FAILED',
-  // ↓ 模板层（@dp/template）追加。渲染期的问题一律用 DP.TPL.*：
-  'DP.TPL.UNKNOWN_VAR',
-  'DP.TPL.MISSING_ENV',
-  'DP.TPL.MISSING_VALUE',
-  'DP.TPL.SYNTAX',
-  'DP.TPL.UNSAFE_VALUE',
-  // ↓ nginx 目标（@dp/target-nginx）追加。conf 相关的问题单列一组：它们全部
-  'DP.NGX.CONF_INVALID',
-  'DP.NGX.NOT_MANAGED',
-  'DP.NGX.UNSAFE_VALUE',
-  'DP.NGX.RELOAD_CMD_INVALID',
-  'DP.NGX.NO_PREVIOUS',
-  // ↓ nginx 执行器（@dp/target-nginx）追加。这两个单列的理由是**处置方式相反**：
-  'DP.NGX.TEST_FAILED',
-  'DP.NGX.RELOAD_FAILED',
-  // ↓ docker 目标（@dp/target-docker）追加。全部是**配置期可判定**的问题：
-  'DP.DOCKER.MODE_UNSUPPORTED',
-  'DP.DOCKER.PROJECT_NAME_INVALID',
-  'DP.DOCKER.COMPOSE_FILES_EMPTY',
-  'DP.DOCKER.COMPOSE_FILE_DUPLICATED',
-  'DP.DOCKER.COMPOSE_FILE_INVALID',
-  'DP.DOCKER.PS_PARSE_FAILED',
-  'DP.DOCKER.NO_PREVIOUS',
-  // ↓ docker 执行器（@dp/target-docker）追加。这三个与上面那组**处置方式相反**：
-  'DP.DOCKER.FILE_MISSING',
-  'DP.DOCKER.PULL_FAILED',
-  'DP.DOCKER.PLAN_MISMATCH',
-  // ↓ 激活失败（在册，但类型里一直缺这一条）。它单列而不是复用
-  'DP.ACTIVATE.START_FAILED',
-  // ↓ 多跳链式转发（@dp/ssh）追加。单列而不是复用 DP.SSH.CONNECT_FAILED：
-  'DP.SSH.HOP_FAILED',
-  // ↓ systemd 目标（@dp/target-systemd）追加。前两个是**配置/渲染期**可判定的
-  // （零副作用，改配置重来即可）；后三个是**执行期**的，处置方式各不相同：
-  // unit 已落盘但没生效、unit 生效了但服务没起来，两种现场不能用同一句话描述。
-  'DP.SYSD.UNIT_INVALID',
-  'DP.SYSD.UNIT_NOT_MANAGED',
-  'DP.SYSD.TEST_FAILED',
-  'DP.SYSD.DAEMON_RELOAD_FAILED',
-  'DP.SYSD.RESTART_FAILED',
-  'DP.SYSD.NO_PREVIOUS',
-  'DP.SYSD.NOT_ACTIVE',
-  // unit 已在盘上且服务已起，缺的只是开机自启那条 wants 软链。它与上面几条的
-  // 处置方式都不同（服务现在是好的，坏的是重启之后），混进去就会报成「unit 没生效」
-  'DP.SYSD.ENABLE_FAILED',
-  // ↓ process 目标（@dp/target-process）追加。它自带进程管理（不依赖 systemd），
-  // 所以停止/启动/存活三类失败都得自己报，不能借 systemd 那一组 —— 借了之后
-  // 「systemctl 不在 PATH」与「进程自己退了」会混成同一句。NO_PREVIOUS 是「上一版
-  // 的启动脚本已经不在了」，与 systemd 的「备份 unit 不存在」同源但不是一回事。
-  'DP.PROC.COMMAND_INVALID',
-  'DP.PROC.START_FAILED',
-  'DP.PROC.STOP_FAILED',
-  'DP.PROC.NOT_RUNNING',
-  'DP.PROC.NO_PREVIOUS',
-] as const
+export const ERR = {
+  CONFIG: {
+    INVALID: 'DP.CONFIG.INVALID',
+  },
+  PATH: {
+    CASE_COLLISION: 'DP.PATH.CASE_COLLISION',
+    RESERVED_NAME: 'DP.PATH.RESERVED_NAME',
+    TOO_LONG: 'DP.PATH.TOO_LONG',
+    ILLEGAL_CHAR: 'DP.PATH.ILLEGAL_CHAR',
+    NOT_WRITABLE: 'DP.PATH.NOT_WRITABLE',
+  },
+  LAYOUT: {
+    MISMATCH: 'DP.LAYOUT.MISMATCH',
+  },
+  PERM: {
+    // confd 与 unitDir 分列：前者不可写是「nginx 的入口目录不可写」，后者是
+    // 「systemd 的单元目录不可写」，排查路径完全不同
+    CONFD_NOT_WRITABLE: 'DP.PERM.CONFD_NOT_WRITABLE',
+    UNIT_DIR_NOT_WRITABLE: 'DP.PERM.UNIT_DIR_NOT_WRITABLE',
+  },
+  PREF: {
+    UNSUPPORTED: 'DP.PREF.UNSUPPORTED',
+  },
+  VERIFY: {
+    FAILED: 'DP.VERIFY.FAILED',
+  },
+  LINK: {
+    UNAVAILABLE: 'DP.LINK.UNAVAILABLE',
+  },
+  SOURCE: {
+    EMPTY: 'DP.SOURCE.EMPTY',
+  },
+  INTERACTIVE_PROMPT_DETECTED: 'DP.INTERACTIVE_PROMPT_DETECTED',
+  TIMEOUT: {
+    EXEC: 'DP.TIMEOUT.EXEC',
+  },
+  // ↓ SSH 远端 Runner（@dp/ssh）追加的这一组
+  SSH: {
+    CONNECT_FAILED: 'DP.SSH.CONNECT_FAILED',
+    AUTH_FAILED: 'DP.SSH.AUTH_FAILED',
+    HOST_KEY_UNKNOWN: 'DP.SSH.HOST_KEY_UNKNOWN',
+    HOST_KEY_MISMATCH: 'DP.SSH.HOST_KEY_MISMATCH',
+    TOOL_MISSING: 'DP.SSH.TOOL_MISSING',
+    DRIVER_UNAVAILABLE: 'DP.SSH.DRIVER_UNAVAILABLE',
+    TUNNEL_FAILED: 'DP.SSH.TUNNEL_FAILED',
+    // 单列而不是复用 CONNECT_FAILED：链式转发失败时中间跳是通的、最后一跳没通，
+    // 「连不上」这句话指向的机器是错的
+    HOP_FAILED: 'DP.SSH.HOP_FAILED',
+  },
+  // ↓ 模板层（@dp/template）追加。渲染期的问题一律用这一组
+  TPL: {
+    UNKNOWN_VAR: 'DP.TPL.UNKNOWN_VAR',
+    MISSING_ENV: 'DP.TPL.MISSING_ENV',
+    MISSING_VALUE: 'DP.TPL.MISSING_VALUE',
+    SYNTAX: 'DP.TPL.SYNTAX',
+    UNSAFE_VALUE: 'DP.TPL.UNSAFE_VALUE',
+  },
+  NGX: {
+    CONF_INVALID: 'DP.NGX.CONF_INVALID',
+    NOT_MANAGED: 'DP.NGX.NOT_MANAGED',
+    UNSAFE_VALUE: 'DP.NGX.UNSAFE_VALUE',
+    RELOAD_CMD_INVALID: 'DP.NGX.RELOAD_CMD_INVALID',
+    NO_PREVIOUS: 'DP.NGX.NO_PREVIOUS',
+    // ↓ 这两个与上面那组处置方式相反：上面全是配置期可判定的（改配置重来即可），
+    // 这两个是执行期的 —— 盘上 conf 已过 `-t`，reload 失败也不回滚
+    TEST_FAILED: 'DP.NGX.TEST_FAILED',
+    RELOAD_FAILED: 'DP.NGX.RELOAD_FAILED',
+  },
+  DOCKER: {
+    MODE_UNSUPPORTED: 'DP.DOCKER.MODE_UNSUPPORTED',
+    PROJECT_NAME_INVALID: 'DP.DOCKER.PROJECT_NAME_INVALID',
+    COMPOSE_FILES_EMPTY: 'DP.DOCKER.COMPOSE_FILES_EMPTY',
+    COMPOSE_FILE_DUPLICATED: 'DP.DOCKER.COMPOSE_FILE_DUPLICATED',
+    COMPOSE_FILE_INVALID: 'DP.DOCKER.COMPOSE_FILE_INVALID',
+    PS_PARSE_FAILED: 'DP.DOCKER.PS_PARSE_FAILED',
+    NO_PREVIOUS: 'DP.DOCKER.NO_PREVIOUS',
+    // ↓ 这三个与上面那组处置方式相反：上面配置期可判定（零副作用），这三个是执行期
+    FILE_MISSING: 'DP.DOCKER.FILE_MISSING',
+    PULL_FAILED: 'DP.DOCKER.PULL_FAILED',
+    PLAN_MISMATCH: 'DP.DOCKER.PLAN_MISMATCH',
+  },
+  ACTIVATE: {
+    START_FAILED: 'DP.ACTIVATE.START_FAILED',
+  },
+  SYSD: {
+    UNIT_INVALID: 'DP.SYSD.UNIT_INVALID',
+    UNIT_NOT_MANAGED: 'DP.SYSD.UNIT_NOT_MANAGED',
+    TEST_FAILED: 'DP.SYSD.TEST_FAILED',
+    DAEMON_RELOAD_FAILED: 'DP.SYSD.DAEMON_RELOAD_FAILED',
+    RESTART_FAILED: 'DP.SYSD.RESTART_FAILED',
+    NO_PREVIOUS: 'DP.SYSD.NO_PREVIOUS',
+    NOT_ACTIVE: 'DP.SYSD.NOT_ACTIVE',
+    // unit 已在盘上且服务已起，缺的只是开机自启那条 wants 软链：它与上面几条处置
+    // 方式都不同（服务现在是对的，坏的是重启之后），混进去会报成「unit 没生效」
+    ENABLE_FAILED: 'DP.SYSD.ENABLE_FAILED',
+  },
+  // ↓ process 目标自带进程管理（不依赖 systemd），所以停止/启动/存活三类失败都得
+  // 自己报 —— 借 systemd 那一组之后，「systemctl 不在 PATH」与「进程自己退了」
+  // 会混成同一句话。NO_PREVIOUS 是「上一版的启动脚本已经不在了」
+  PROC: {
+    COMMAND_INVALID: 'DP.PROC.COMMAND_INVALID',
+    START_FAILED: 'DP.PROC.START_FAILED',
+    STOP_FAILED: 'DP.PROC.STOP_FAILED',
+    NOT_RUNNING: 'DP.PROC.NOT_RUNNING',
+    NO_PREVIOUS: 'DP.PROC.NO_PREVIOUS',
+  },
+  // ↓ dp 自己这一层：不是目标机的问题，是「机器上现在的状态」与「命令预期」对不上，
+  // 或者压根不是 DpError 的抛出物。两者都不能假装没发生，但也都不属于任何目标
+  STATE: {
+    INCONSISTENT: 'DP.STATE.INCONSISTENT',
+  },
+  CLI: {
+    INTERNAL: 'DP.CLI.INTERNAL',
+  },
+} as const
 
-/** 从数组派生：加码只改上面那一个地方，类型自动跟上 */
-export type DpErrorCode = (typeof DP_ERROR_CODES)[number]
+// 告警标记 —— 与 ERR 同形但**不是错误码**：它们只出现在 plan 的 warnings 与告警文案里，
+// 不进 `DpError.code`，所以 failures.md 里查不到处置办法（那里收的是「抛出来之后怎么
+// 办」，告警不中止流程）。同样只许引用、不许写字面量。
+
+/**
+ * 告警标记。与 `ERR` 的差别见上面那三条：形似错误码、但不是错误码。
+ */
+export const WARN = {
+  SYSTEMD: {
+    NO_LINGER: 'DP.SYSTEMD.NO_LINGER',
+  },
+  VERIFY: {
+    NO_HEALTHCHECK: 'DP.VERIFY.NO_HEALTHCHECK',
+  },
+  HEALING: {
+    REQUIRED: 'DP.HEALING.REQUIRED',
+  },
+} as const
+
+/** 分组的对象展开成该组下全部码的联合；两段的码（没有分组）就是它自己 */
+type CodeOf<T> = T extends Record<string, string> ? T[keyof T] : T
+
+/** 从 ERR 派生：加码只改上面那一个地方，类型自动跟上 */
+export type DpErrorCode = CodeOf<(typeof ERR)[keyof typeof ERR]>
+
+/** 扁平列表，给「文档与登记表是同一份知识」的一致性与唯一性检查用 */
+export const DP_ERROR_CODES: readonly DpErrorCode[] = Object.values(ERR).flatMap((group) =>
+  typeof group === 'string' ? [group] : Object.values(group),
+)
+
 
 /**
  * 错误附带的定位信息。

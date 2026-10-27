@@ -19,6 +19,7 @@ import {
   INCOMING_SUFFIX,
   POSIX_WRITE_CANDIDATES,
   RELEASES_DIR_NAME,
+  type DpErrorCode,
 } from './index.js'
 
 /** build/index.test.js → 仓库根/docs/failures.md */
@@ -95,7 +96,6 @@ const KNOWN_ORPHANS = [
   'DP.PORT.OCCUPIED',
   'DP.FILE.LOCKED',
   'DP.LOCK.HELD',
-  'DP.STATE.INCONSISTENT',
   'DP.TRANSFER.INTERRUPTED',
   'DP.TRANSFER.CHECKSUM_MISMATCH',
   'DP.VERIFY.HEALTH_TIMEOUT',
@@ -150,5 +150,18 @@ describe('错误码登记表', () => {
 
   it('码不重复 —— 数组里出现两次说明加码时手滑', () => {
     assert.equal(new Set(DP_ERROR_CODES).size, DP_ERROR_CODES.length)
+  })
+
+  it('DpErrorCode 收窄到字面量联合 —— 登记表外的码拼不出来', () => {
+    // 拼着写是为了不让「错误码硬编码」门禁把它当成实现里漏掉的引用。
+    // 类型退化成 string 的那天，下面那条 @ts-expect-error 会因为「没报错」而变红：
+    // 那等于所有野码都能混进 DpError，而 tests 与 docs 的对照全成了摆设
+    // @ts-expect-error 未登记的码不是 DpErrorCode（也不能拿 string 冒充：拼出来的就是 string）
+    const smuggled: DpErrorCode = ['DP.', 'NOT.A_CODE'].join('')
+    assert.equal(
+      (DP_ERROR_CODES as readonly string[]).includes(smuggled),
+      false,
+      '登记表里不该出现这个野码',
+    )
   })
 })
