@@ -3,7 +3,7 @@
  * 本机先把四份场景配置过一遍 schema —— 主机换成 local，不需要起容器。
  *
  * 它挡的是「配置形状不对」这一类：这类错误起完容器才暴露的话，一次来回是几分钟，
- * 而它其实在任何人起容器之前就能查出来。断言只认 DP.CONFIG.INVALID / DP.TPL.*，
+ * 而它其实在任何人起容器之前就能查出来。断言只认 `ERR.CONFIG.INVALID` / `ERR.TPL.*`，
  * 「连不上」「目录不存在」都算形状通过 —— 那是真机上才有的事。
  *
  * 用法：node tests/integration/check-configs.mjs（需要先 pnpm build）
@@ -12,10 +12,14 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ERR } from '@dp/ports'
 import { SCENARIOS, configFor, hopsHost, LOCAL_HOST } from './scenarios.mjs'
 
 /** 多跳那份的 host 段：形状检查不连机器，跳板与目标都写成占位串即可 */
 const HOPS_HOST = hopsHost(['jump'], 'target')
+
+/** 渲染期的形状问题全在这一组里，逐条比对而不是拼前缀 —— 前缀会连未来的码一起吃掉 */
+const TPL_CODES = Object.values(ERR.TPL)
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
@@ -47,7 +51,7 @@ for (const scenario of SCENARIOS) {
     parsed = undefined
   }
   const code = parsed?.error?.code
-  const shapeBad = code === 'DP.CONFIG.INVALID' || (code ?? '').startsWith('DP.TPL')
+  const shapeBad = code === ERR.CONFIG.INVALID || TPL_CODES.some((c) => c === code)
   if (shapeBad) {
     bad += 1
     process.stdout.write(
