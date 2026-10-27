@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname } from 'node:path'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { askpassToken, createAskpassHelper } from './askpass.js'
 
 const created: string[] = []
@@ -106,7 +106,7 @@ describe('createAskpassHelper —— 拒绝不安全输入', () => {
   it('空 secret 直接拒绝（必然认证失败，不必花一次往返）', () => {
     assert.throws(
       () => createAskpassHelper(''),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.CONFIG.INVALID',
+      (err: unknown) => err instanceof DpError && err.code === ERR.CONFIG.INVALID,
     )
   })
 
@@ -118,7 +118,7 @@ describe('createAskpassHelper —— 拒绝不安全输入', () => {
         () => createAskpassHelper(bad),
         (err: unknown) => {
           assert.ok(err instanceof DpError)
-          assert.equal(err.code, 'DP.SSH.AUTH_FAILED')
+          assert.equal(err.code, ERR.SSH.AUTH_FAILED)
           assert.ok(err.hint !== undefined && err.hint.length > 0, '必须有 hint')
           return true
         },
@@ -134,7 +134,7 @@ describe('createAskpassHelper —— 拒绝不安全输入', () => {
     assert.equal(before, true)
     assert.throws(() => createAskpassHelper('a&b'), (err: unknown) => {
       assert.ok(err instanceof DpError, `不是 DpError：${String(err)}`)
-      assert.equal(err.code, 'DP.SSH.AUTH_FAILED')
+      assert.equal(err.code, ERR.SSH.AUTH_FAILED)
       return true
     })
   })

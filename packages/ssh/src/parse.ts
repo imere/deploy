@@ -1,4 +1,4 @@
-import { DpError, type Arch, type DpErrorCode, type InitSystem, type Platform } from '@dp/ports'
+import { ERR, DpError, type Arch, type DpErrorCode, type InitSystem, type Platform } from '@dp/ports'
 
 // 截断
 
@@ -341,7 +341,7 @@ export function classifySshError(stderr: string, exitCode: number): SshFailure {
   if (mismatch) {
     const actual = /^ssh-(?:ed25519|rsa|ecdsa-\S+)\s+(AAAA\S+)/m.exec(s)
     return {
-      code: 'DP.SSH.HOST_KEY_MISMATCH',
+      code: ERR.SSH.HOST_KEY_MISMATCH,
       reason: '远端主机密钥与 known_hosts 里记录的不一致 —— 这意味着主机可能被重装/换密钥，也可能是一次中间人攻击',
       actual: actual?.[2] === undefined ? undefined : `SHA256:${actual[2]}`,
       keyType: actual?.[1],
@@ -349,7 +349,7 @@ export function classifySshError(stderr: string, exitCode: number): SshFailure {
   }
 
   if (/REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(s) === false && /Host key verification failed/i.test(s)) {
-    return { code: 'DP.SSH.HOST_KEY_MISMATCH', reason: '主机密钥校验失败（known_hosts 无此主机或指纹不符）' }
+    return { code: ERR.SSH.HOST_KEY_MISMATCH, reason: '主机密钥校验失败（known_hosts 无此主机或指纹不符）' }
   }
 
   const unknown =
@@ -358,7 +358,7 @@ export function classifySshError(stderr: string, exitCode: number): SshFailure {
     )
   if (unknown) {
     return {
-      code: 'DP.SSH.HOST_KEY_UNKNOWN',
+      code: ERR.SSH.HOST_KEY_UNKNOWN,
       reason: 'known_hosts 里没有这台主机的指纹，且当前策略是 strict',
     }
   }
@@ -368,14 +368,14 @@ export function classifySshError(stderr: string, exitCode: number): SshFailure {
       s,
     )
   ) {
-    return { code: 'DP.SSH.AUTH_FAILED', reason: firstLine(s) ?? '认证被拒绝' }
+    return { code: ERR.SSH.AUTH_FAILED, reason: firstLine(s) ?? '认证被拒绝' }
   }
 
   if (/ssh: (?:Could not resolve|Name or service not known|Nexthop|connect to host .* Connection refused|timed out)/i.test(s)) {
-    return { code: 'DP.SSH.CONNECT_FAILED', reason: firstLine(s) ?? `ssh 退出码 ${exitCode}` }
+    return { code: ERR.SSH.CONNECT_FAILED, reason: firstLine(s) ?? `ssh 退出码 ${exitCode}` }
   }
 
-  return { code: 'DP.SSH.CONNECT_FAILED', reason: firstLine(s) ?? `ssh 退出码 ${exitCode}` }
+  return { code: ERR.SSH.CONNECT_FAILED, reason: firstLine(s) ?? `ssh 退出码 ${exitCode}` }
 }
 
 /**
@@ -390,9 +390,9 @@ export function classifySshError(stderr: string, exitCode: number): SshFailure {
 export function hostKeyHint(failure: SshFailure): string {
   const expect = failure.expected === undefined ? '' : `期望 ${failure.expected}，实际 ${failure.actual ?? '未知'}`
   switch (failure.code) {
-    case 'DP.SSH.HOST_KEY_MISMATCH':
+    case ERR.SSH.HOST_KEY_MISMATCH:
       return `主机密钥不匹配（${expect}）。**请手动更新 known_hosts** —— 若你确认目标机是重装或换过密钥，用 \`ssh-keygen -R <host>\` 删掉旧记录后重新采集；我们不会自动改，那正好是中间人攻击最想要的效果。也可把该主机的指纹写进项目的 pinnedHostKeysPath`
-    case 'DP.SSH.HOST_KEY_UNKNOWN':
+    case ERR.SSH.HOST_KEY_UNKNOWN:
       return `该主机的指纹不在 known_hosts 里。确认无误后可显式配置 knownHosts: accept-new（会自动写入）或 tofu（记到项目 pin 文件，不污染系统 known_hosts）；strict 是默认值，刻意保持这一步需要人来确认`
     default:
       return '检查网络、端口与该主机的 sshd 状态'
@@ -420,18 +420,18 @@ function firstLine(text: string): string | undefined {
 export function ioError(code: string, path: string, detail: string): DpError {
   switch (code) {
     case 'ENOENT':
-      return new DpError('DP.PATH.NOT_WRITABLE', `路径不存在：${path}`)
+      return new DpError(ERR.PATH.NOT_WRITABLE, `路径不存在：${path}`)
     case 'EACCES':
     case 'EPERM':
     case 'EROFS':
-      return new DpError('DP.PATH.NOT_WRITABLE', `无权访问：${path}`, {
+      return new DpError(ERR.PATH.NOT_WRITABLE, `无权访问：${path}`, {
         hint: '检查权限 / 只读挂载 / SELinux 标签。我们绝不会替你 chown 系统目录也不改 ACL —— 授权必须由运维显式完成',
       })
     case 'ENOSPC':
-      return new DpError('DP.PATH.NOT_WRITABLE', `磁盘已满：${path}`, {
+      return new DpError(ERR.PATH.NOT_WRITABLE, `磁盘已满：${path}`, {
         hint: '清理空间后重试；目标程序如果依赖写临时文件，即使空间腾出也要重启它',
       })
     default:
-      return new DpError('DP.PATH.NOT_WRITABLE', `${path}：${detail}`)
+      return new DpError(ERR.PATH.NOT_WRITABLE, `${path}：${detail}`)
   }
 }

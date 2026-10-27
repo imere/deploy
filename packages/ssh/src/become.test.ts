@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError, type DpErrorCode } from '@dp/ports'
+import { ERR, DpError, type DpErrorCode } from '@dp/ports'
 import { ELEVATE_FAILED_HINT, summarizeElevateFailure, wrapCommand, type BecomeConfig } from './become.js'
 
 const CMD = ['systemctl', 'restart', 'nginx']
@@ -103,7 +103,7 @@ describe('become: sudo', () => {
       () => wrapCommand(CMD, { type: 'sudo', nonInteractive: false }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.CONFIG.INVALID' as DpErrorCode)
+        assert.equal(err.code, ERR.CONFIG.INVALID as DpErrorCode)
         assert.match(err.message, /等待 stdin/)
         assert.ok(err.hint !== undefined && err.hint.length > 0, '必须有 hint')
         return true
@@ -243,7 +243,7 @@ describe('become: custom', () => {
   it('模板不含 ${cmd} → 拒绝（原命令会被静默丢掉）', () => {
     assert.throws(
       () => wrapCommand(CMD, { type: 'custom', template: 'dzdo -u root' }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.CONFIG.INVALID',
+      (err: unknown) => err instanceof DpError && err.code === ERR.CONFIG.INVALID,
     )
   })
 })
@@ -285,7 +285,7 @@ describe('wrapCommand 的共同不变量', () => {
     for (const become of all) {
       assert.throws(
         () => wrapCommand([], become, { passwordChannel: true }),
-        (err: unknown) => err instanceof DpError && err.code === 'DP.CONFIG.INVALID',
+        (err: unknown) => err instanceof DpError && err.code === ERR.CONFIG.INVALID,
         become.type,
       )
     }

@@ -11,7 +11,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { planHopChain } from './hop-chain.js'
 import { openHopChain } from './ssh2-hops.js'
 import type { Ssh2ChannelLike, Ssh2ClientLike, Ssh2Load, Ssh2ModuleLike } from './ssh2-module.js'
@@ -205,7 +205,7 @@ describe('planHopChain —— 形状与报错', () => {
   it('0 跳报错而不是返回空数组（空数组会被调用方当成"不需要跳板"）', () => {
     assert.throws(() => planHopChain([]), (err: unknown) => {
       assert.ok(err instanceof DpError)
-      assert.equal(err.code, 'DP.CONFIG.INVALID')
+      assert.equal(err.code, ERR.CONFIG.INVALID)
       assert.equal(err.path, 'hosts.*.ssh.hops')
       return true
     })
@@ -216,7 +216,7 @@ describe('planHopChain —— 形状与报错', () => {
       () => planHopChain([hop('ops@a', { type: 'agent' }), hop('ops@b:22', { type: 'agent' }, 2222)]),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.CONFIG.INVALID')
+        assert.equal(err.code, ERR.CONFIG.INVALID)
         assert.equal(err.path, 'hosts.*.ssh.hops[1].port')
         assert.match(err.message, /第 1 跳/)
         return true
@@ -229,7 +229,7 @@ describe('planHopChain —— 形状与报错', () => {
       () => planHopChain([hop('ops@a', { type: 'agent' }), hop('ops@b')]),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.CONFIG.INVALID')
+        assert.equal(err.code, ERR.CONFIG.INVALID)
         assert.equal(err.path, 'hosts.*.ssh.hops[1].auth')
         assert.match(err.message, /第 1 跳/)
         return true
@@ -238,9 +238,9 @@ describe('planHopChain —— 形状与报错', () => {
   })
 
   it('非法连接串 / 非法端口在计划期就被拒', () => {
-    assert.throws(() => planHopChain([hop('ops@', { type: 'agent' })]), { code: 'DP.CONFIG.INVALID' })
+    assert.throws(() => planHopChain([hop('ops@', { type: 'agent' })]), { code: ERR.CONFIG.INVALID })
     assert.throws(() => planHopChain([hop('ops@a', { type: 'agent' }, 70000)]), {
-      code: 'DP.CONFIG.INVALID',
+      code: ERR.CONFIG.INVALID,
     })
   })
 
@@ -371,7 +371,7 @@ describe('openHopChain —— 链真的串起来了吗', () => {
           load: () => world.module,
           timeoutMs: 2000,
         }),
-      { code: 'DP.SSH.HOP_FAILED' },
+      { code: ERR.SSH.HOP_FAILED },
     )
     assert.equal(world.execs.length, 0, '默认不许在跳板上起进程')
   })
@@ -404,7 +404,7 @@ describe('openHopChain —— 链真的串起来了吗', () => {
         }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SSH.HOP_FAILED')
+        assert.equal(err.code, ERR.SSH.HOP_FAILED)
         assert.equal(err.path, 'hosts.*.ssh.hops[1]')
         assert.match(err.message, /forwardOut：.*open failed/s)
         assert.match(err.message, /nc：.*command not found/s)
@@ -422,7 +422,7 @@ describe('openHopChain —— 链真的串起来了吗', () => {
           options(),
           { load: () => world.module, timeoutMs: 2000 },
         ),
-      { code: 'DP.SSH.HOP_FAILED' },
+      { code: ERR.SSH.HOP_FAILED },
     )
     assert.equal(world.clients.length, 2, '第 3 跳的 client 根本不该建起来')
     assert.deepEqual(
@@ -442,7 +442,7 @@ describe('openHopChain —— 链真的串起来了吗', () => {
         }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SSH.HOP_FAILED')
+        assert.equal(err.code, ERR.SSH.HOP_FAILED)
         assert.equal(err.path, 'hosts.*.ssh.hops[0]')
         assert.match(err.message, /第 0 跳连接超时 30ms/)
         return true
@@ -482,7 +482,7 @@ describe('openHopChain —— 链真的串起来了吗', () => {
           load: () => ({ ok: false, reason: 'ssh2 未安装', hint: '装 ssh2' }),
           timeoutMs: 100,
         }),
-      { code: 'DP.SSH.DRIVER_UNAVAILABLE' },
+      { code: ERR.SSH.DRIVER_UNAVAILABLE },
     )
   })
 })

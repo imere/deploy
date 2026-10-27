@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import { isSea } from 'node:sea'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import type { AuthConfig } from './driver.js'
 
 // 最小接口声明（不是 ssh2 的完整类型，是我们用到的部分）
@@ -122,16 +122,16 @@ function narrowModule(mod: unknown): Ssh2Load {
 export function classifyConnectError(message: string, auth: AuthConfig): DpError {
   const kind = auth.type
   if (/All configured authentication methods failed/i.test(message)) {
-    return new DpError('DP.SSH.AUTH_FAILED', `认证失败（配置了 ${kind}）`, {
+    return new DpError(ERR.SSH.AUTH_FAILED, `认证失败（配置了 ${kind}）`, {
       hint: authHint(kind),
     })
   }
   if (/Handshake failed|no matching (key exchange|cipher|mac|host key)/i.test(message)) {
-    return new DpError('DP.SSH.CONNECT_FAILED', `握手失败：${message.slice(0, 200)}`, {
+    return new DpError(ERR.SSH.CONNECT_FAILED, `握手失败：${message.slice(0, 200)}`, {
       hint: '确认目标 sshd 支持的算法；若目标是老设备，crypto 侧可能要放宽（ssh2 不支持任何 PQ KEX）',
     })
   }
-  return new DpError('DP.SSH.CONNECT_FAILED', message.slice(0, 300), {
+  return new DpError(ERR.SSH.CONNECT_FAILED, message.slice(0, 300), {
     hint: '检查主机/端口可达性、sshd 是否在跑、网络策略',
   })
 }

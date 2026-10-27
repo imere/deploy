@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError, type DpErrorCode } from '@dp/ports'
+import { ERR, DpError, type DpErrorCode } from '@dp/ports'
 import { buildExecArgv } from './argv.js'
 import { statScript } from './posix.js'
 import { FakeSshDriver } from './fake-driver.js'
@@ -74,7 +74,7 @@ describe('resolveDriver —— 偏好链', () => {
     ).then(() => null, (e: unknown) => e)
 
     assert.ok(err instanceof DpError)
-    assert.equal(err.code, 'DP.SSH.DRIVER_UNAVAILABLE' as DpErrorCode)
+    assert.equal(err.code, ERR.SSH.DRIVER_UNAVAILABLE as DpErrorCode)
     assert.match(err.message, /native-ssh/)
     assert.match(err.message, /PATH 里找不到 ssh/)
     assert.match(err.message, /ssh2/)
@@ -88,7 +88,7 @@ describe('resolveDriver —— 偏好链', () => {
     }).then(() => null, (e: unknown) => e)
 
     assert.ok(err instanceof DpError)
-    assert.equal(err.code, 'DP.SSH.DRIVER_UNAVAILABLE')
+    assert.equal(err.code, ERR.SSH.DRIVER_UNAVAILABLE)
     // message 逐项列原因，「显式指定」这句在 hint 里（它是对用户的建议，不是失败事实）
     assert.match(err.message, /ssh2 未安装/)
     assert.match(err.hint ?? '', /显式指定了 ssh2/)
@@ -106,7 +106,7 @@ describe('resolveDriver —— 偏好链', () => {
     })
     const err = await resolveDriver(factory, { preferred: ['native-ssh'] }).then(() => null, (e: unknown) => e)
     assert.ok(err instanceof DpError)
-    assert.equal(err.code, 'DP.SSH.DRIVER_UNAVAILABLE')
+    assert.equal(err.code, ERR.SSH.DRIVER_UNAVAILABLE)
     assert.match(err.message, /探测 native-ssh 时炸了/)
   })
 
@@ -136,7 +136,7 @@ describe('resolveDriver —— 偏好链', () => {
     const d = new FakeSshDriver()
     const err = await d.exec({ argv: ['rm', '-rf', '/'] }).then(() => null, (e: unknown) => e)
     assert.ok(err instanceof DpError)
-    assert.equal(err.code, 'DP.SSH.DRIVER_UNAVAILABLE')
+    assert.equal(err.code, ERR.SSH.DRIVER_UNAVAILABLE)
   })
 })
 
@@ -155,7 +155,7 @@ describe('逐跳校验 —— 不合法就不许悄悄降级成单跳', () => {
       () => validateHops([{ ssh: 'ops@jump.example.com' }, { ssh: 'deploy@' }]),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.CONFIG.INVALID' as DpErrorCode)
+        assert.equal(err.code, ERR.CONFIG.INVALID as DpErrorCode)
         assert.equal(err.path, 'hosts.*.ssh.hops[1].ssh')
         return true
       },
@@ -167,7 +167,7 @@ describe('逐跳校验 —— 不合法就不许悄悄降级成单跳', () => {
       () => validateHops([{ ssh: 'ops@jump.example.com', port: 70000 }]),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.CONFIG.INVALID' as DpErrorCode)
+        assert.equal(err.code, ERR.CONFIG.INVALID as DpErrorCode)
         assert.equal(err.path, 'hosts.*.ssh.hops[0].port')
         return true
       },
@@ -176,7 +176,7 @@ describe('逐跳校验 —— 不合法就不许悄悄降级成单跳', () => {
 
   it('串与 port 字段给了两个不同端口 → 报错而不是二选一', () => {
     assert.throws(() => validateHops([{ ssh: 'ops@jump:2200', port: 2222 }]), {
-      code: 'DP.CONFIG.INVALID',
+      code: ERR.CONFIG.INVALID,
       path: 'hosts.*.ssh.hops[0].port',
     })
   })

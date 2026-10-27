@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError, type DpErrorCode, type Facts, type Runner } from '@dp/ports'
+import { ERR, DpError, type DpErrorCode, type Facts, type Runner } from '@dp/ports'
 import { FakeSshDriver } from './fake-driver.js'
 import { createSshRunner, isUnder, normalizeRemotePath, withCwd } from './runner.js'
 
@@ -81,7 +81,7 @@ describe('SshRunner.exec', () => {
   })
 
   it('空 argv 拒绝', async () => {
-    await expectCode(() => makeRunner().exec([]), 'DP.CONFIG.INVALID')
+    await expectCode(() => makeRunner().exec([]), ERR.CONFIG.INVALID)
   })
 })
 
@@ -127,7 +127,7 @@ describe('SshRunner.exec · cwd', () => {
       () => makeRunner(driver).exec(PS, { cwd: '/srv/app/releases/r9' }),
       // 与本机 Runner 同一个码：本机是 spawn 带 cwd 直接 ENOENT，两边不一致的话
       // 「只有远端才有的问题」会被当成命令失败
-      'DP.PATH.NOT_WRITABLE',
+      ERR.PATH.NOT_WRITABLE,
     )
   })
 
@@ -148,7 +148,7 @@ describe('SshRunner.exec · cwd', () => {
 describe('路径校验 —— 发出之前的两道关', () => {
   it('相对路径拒绝（cwd 随环境而变，部署必须可重复）', () => {
     assert.throws(() => normalizeRemotePath('srv/app', { platform: 'linux' }), (e: unknown) => {
-      assert.ok(e instanceof DpError && e.code === 'DP.PATH.ILLEGAL_CHAR')
+      assert.ok(e instanceof DpError && e.code === ERR.PATH.ILLEGAL_CHAR)
       return true
     })
   })
@@ -156,7 +156,7 @@ describe('路径校验 —— 发出之前的两道关', () => {
   it('NUL 字节拒绝', () => {
     assert.throws(() => normalizeRemotePath('/srv/a\0b', { platform: 'linux' }), (e: unknown) => {
       assert.ok(e instanceof DpError, `不是 DpError：${String(e)}`)
-      assert.equal(e.code, 'DP.PATH.ILLEGAL_CHAR')
+      assert.equal(e.code, ERR.PATH.ILLEGAL_CHAR)
       return true
     })
   })
@@ -170,7 +170,7 @@ describe('路径校验 —— 发出之前的两道关', () => {
   it('越过根往上走拒绝', () => {
     assert.throws(() => normalizeRemotePath('/../../etc/passwd', { platform: 'linux' }), (e: unknown) => {
       assert.ok(e instanceof DpError, `不是 DpError：${String(e)}`)
-      assert.equal(e.code, 'DP.PATH.ILLEGAL_CHAR')
+      assert.equal(e.code, ERR.PATH.ILLEGAL_CHAR)
       // 与「不是绝对路径」是同一条码，靠消息才分得开是哪一条守卫拦的
       assert.match(e.message, /逃出根目录/)
       return true
@@ -180,7 +180,7 @@ describe('路径校验 —— 发出之前的两道关', () => {
   it('允许根之外的路径拒绝（路径穿越）', () => {
     assert.throws(
       () => normalizeRemotePath('/etc/passwd', { platform: 'linux', allowedRoots: ['/srv/app'] }),
-      (e: unknown) => e instanceof DpError && e.code === 'DP.PATH.ILLEGAL_CHAR',
+      (e: unknown) => e instanceof DpError && e.code === ERR.PATH.ILLEGAL_CHAR,
     )
   })
 
@@ -199,11 +199,11 @@ describe('路径校验 —— 发出之前的两道关', () => {
 
   it('每个 Runner 方法都用同一道校验（不是只有 writeFile 有）', async () => {
     const runner = makeRunner(undefined, ['/srv/app'])
-    await expectCode(() => runner.stat('../etc'), 'DP.PATH.ILLEGAL_CHAR')
-    await expectCode(() => runner.listDir('/etc'), 'DP.PATH.ILLEGAL_CHAR')
-    await expectCode(() => runner.readFile('/etc/shadow'), 'DP.PATH.ILLEGAL_CHAR')
-    await expectCode(() => runner.remove('/etc/hosts'), 'DP.PATH.ILLEGAL_CHAR')
-    await expectCode(() => runner.mkdir('/etc/x'), 'DP.PATH.ILLEGAL_CHAR')
+    await expectCode(() => runner.stat('../etc'), ERR.PATH.ILLEGAL_CHAR)
+    await expectCode(() => runner.listDir('/etc'), ERR.PATH.ILLEGAL_CHAR)
+    await expectCode(() => runner.readFile('/etc/shadow'), ERR.PATH.ILLEGAL_CHAR)
+    await expectCode(() => runner.remove('/etc/hosts'), ERR.PATH.ILLEGAL_CHAR)
+    await expectCode(() => runner.mkdir('/etc/x'), ERR.PATH.ILLEGAL_CHAR)
   })
 })
 
@@ -241,7 +241,7 @@ describe('SshRunner.stat', () => {
   it('远端输出无法解析 → DP.PATH.NOT_WRITABLE 而不是猜', async () => {
     const driver = new FakeSshDriver()
     driver.queue.push({ code: 0, stdout: 'garbage from a broken remote' })
-    await expectCode(() => makeRunner(driver).stat('/srv/app/a'), 'DP.PATH.NOT_WRITABLE')
+    await expectCode(() => makeRunner(driver).stat('/srv/app/a'), ERR.PATH.NOT_WRITABLE)
   })
 })
 
@@ -267,7 +267,7 @@ describe('SshRunner.listDir', () => {
     const driver = new FakeSshDriver()
     driver.denied.add('/srv/secret')
     driver.dirs.add('/srv/secret')
-    await expectCode(() => makeRunner(driver).listDir('/srv/secret'), 'DP.PATH.NOT_WRITABLE')
+    await expectCode(() => makeRunner(driver).listDir('/srv/secret'), ERR.PATH.NOT_WRITABLE)
   })
 })
 
@@ -316,7 +316,7 @@ describe('SshRunner 写操作', () => {
   it('writeFile 权限失败 → DP.PATH.NOT_WRITABLE', async () => {
     const driver = new FakeSshDriver()
     driver.denied.add('/etc/secret')
-    await expectCode(() => makeRunner(driver).writeFile('/etc/secret/a', 'x'), 'DP.PATH.NOT_WRITABLE')
+    await expectCode(() => makeRunner(driver).writeFile('/etc/secret/a', 'x'), ERR.PATH.NOT_WRITABLE)
   })
 
   it('远端没有 base64 → DP.SSH.TOOL_MISSING 并给出替代方案', async () => {
@@ -326,7 +326,7 @@ describe('SshRunner 写操作', () => {
       .readFile('/srv/app/a')
       .then(() => null, (e: unknown) => e)
     assert.ok(err instanceof DpError)
-    assert.equal(err.code, 'DP.SSH.TOOL_MISSING')
+    assert.equal(err.code, ERR.SSH.TOOL_MISSING)
     assert.ok(err.hint !== undefined && err.hint.length > 0)
   })
 
@@ -346,7 +346,7 @@ describe('SshRunner 写操作', () => {
   })
 
   it('rename 源不存在 → DP.PATH.NOT_WRITABLE', async () => {
-    await expectCode(() => makeRunner().rename('/srv/app/nope', '/srv/app/x'), 'DP.PATH.NOT_WRITABLE')
+    await expectCode(() => makeRunner().rename('/srv/app/nope', '/srv/app/x'), ERR.PATH.NOT_WRITABLE)
   })
 })
 
@@ -379,7 +379,7 @@ describe('SshRunner 链接', () => {
       .symlink('/srv/app/x', '/etc/link')
       .then(() => null, (e: unknown) => e)
     assert.ok(err instanceof DpError)
-    assert.equal(err.code, 'DP.PATH.NOT_WRITABLE')
+    assert.equal(err.code, ERR.PATH.NOT_WRITABLE)
     assert.ok(err.hint !== undefined && err.hint.length > 0)
   })
 
@@ -404,7 +404,7 @@ describe('SshRunner.realpath', () => {
   it('解析结果落在允许根之外 → 拒绝（软链逃逸的防线）', async () => {
     const driver = new FakeSshDriver()
     driver.dirs.add('/etc')
-    await expectCode(() => makeRunner(driver, ['/srv/app']).realpath('/etc'), 'DP.PATH.ILLEGAL_CHAR')
+    await expectCode(() => makeRunner(driver, ['/srv/app']).realpath('/etc'), ERR.PATH.ILLEGAL_CHAR)
   })
 })
 
@@ -420,14 +420,14 @@ describe('SshRunner —— 超时与交互式 prompt', () => {
       .exec(['sleep', '100'])
       .then(() => null, (e: unknown) => e)
     assert.ok(err instanceof DpError)
-    assert.equal(err.code, 'DP.TIMEOUT.EXEC')
+    assert.equal(err.code, ERR.TIMEOUT.EXEC)
     assert.ok(err.hint !== undefined && err.hint.length > 0)
   })
 
   it('读文件时超时也是 DP.TIMEOUT.EXEC', async () => {
     const driver = new FakeSshDriver()
     driver.hangOn = 'base64'
-    await expectCode(() => makeRunner(driver).readFile('/srv/app/a'), 'DP.TIMEOUT.EXEC')
+    await expectCode(() => makeRunner(driver).readFile('/srv/app/a'), ERR.TIMEOUT.EXEC)
   })
 
   const promptCases: readonly [string, string][] = [
@@ -445,7 +445,7 @@ describe('SshRunner —— 超时与交互式 prompt', () => {
         .exec(['systemctl', 'restart', 'nginx'])
         .then(() => null, (e: unknown) => e)
       assert.ok(err instanceof DpError, String(err))
-      assert.equal(err.code, 'DP.INTERACTIVE_PROMPT_DETECTED')
+      assert.equal(err.code, ERR.INTERACTIVE_PROMPT_DETECTED)
       assert.ok(err.hint !== undefined && err.hint.length > 0, '必须有 hint 指导下一步')
     })
   }

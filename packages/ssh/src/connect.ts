@@ -1,5 +1,5 @@
 import type { Facts, Runner } from '@dp/ports'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { createLogger, type Logger } from '@dp/log'
 import type { SshConnectionOptions, SshDriver, SshDriverKind, Tunnel } from './driver.js'
 import { resolveDriver, validateHops } from './driver.js'
@@ -114,7 +114,7 @@ export async function connectSsh(
     probeNotes,
     tunnel: async () => {
       if (driver.openTunnel === undefined) {
-        throw new DpError('DP.SSH.TUNNEL_FAILED', `${driver.kind} 驱动没有实现 openTunnel`, {
+        throw new DpError(ERR.SSH.TUNNEL_FAILED, `${driver.kind} 驱动没有实现 openTunnel`, {
           hint: 'rsync 需要一条到远端的通道。换用 native-ssh 驱动，或用 transport.strategy: tar-ssh / sftp',
         })
       }

@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { createLogger, createMemorySink } from '@dp/log'
 import { assertNativeExecutable } from './native.js'
 import { connectSsh } from './connect.js'
@@ -130,7 +130,7 @@ describe('assertNativeExecutable —— 包装脚本不是可执行文件', () =
         () => assertNativeExecutable(p, 'ssh'),
         (err: unknown) => {
           assert.ok(err instanceof DpError)
-          assert.equal(err.code, 'DP.SSH.TOOL_MISSING')
+          assert.equal(err.code, ERR.SSH.TOOL_MISSING)
           assert.match(err.hint ?? '', /OpenSSH for Windows/)
           return true
         },
@@ -159,7 +159,7 @@ describe('assertNativeExecutable —— 包装脚本不是可执行文件', () =
       () => assertNativeExecutable(p, 'sftp'),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SSH.TOOL_MISSING')
+        assert.equal(err.code, ERR.SSH.TOOL_MISSING)
         assert.match(err.message, /shebang/)
         return true
       },

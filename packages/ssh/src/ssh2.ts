@@ -1,4 +1,4 @@
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import type {
   DriverAvailability,
   DriverExecResult,
@@ -57,7 +57,7 @@ export class Ssh2Driver implements SshDriver {
 
     const load = loadSsh2()
     if (!load.ok) {
-      throw new DpError('DP.SSH.DRIVER_UNAVAILABLE', `ssh2 驱动不可用：${load.reason}`, { hint: load.hint })
+      throw new DpError(ERR.SSH.DRIVER_UNAVAILABLE, `ssh2 驱动不可用：${load.reason}`, { hint: load.hint })
     }
     return this.runExec(await this.connect(), command, req, timeoutMs)
   }
@@ -85,7 +85,7 @@ export class Ssh2Driver implements SshDriver {
         client.end()
         done(() =>
           reject(
-            new DpError('DP.TIMEOUT.EXEC', `ssh2 执行超时 ${timeoutMs}ms`, {
+            new DpError(ERR.TIMEOUT.EXEC, `ssh2 执行超时 ${timeoutMs}ms`, {
               hint: '增大 timeout，或检查远端是否在等待输入',
             }),
           ),
@@ -103,7 +103,7 @@ export class Ssh2Driver implements SshDriver {
             client.end()
             done(() =>
               reject(
-                new DpError('DP.INTERACTIVE_PROMPT_DETECTED', `检测到交互式提示（${hit.kind}）：${hit.line}`, {
+                new DpError(ERR.INTERACTIVE_PROMPT_DETECTED, `检测到交互式提示（${hit.kind}）：${hit.line}`, {
                   hint: promptHint(hit.kind),
                 }),
               ),
@@ -119,7 +119,7 @@ export class Ssh2Driver implements SshDriver {
             client.end()
             done(() =>
               reject(
-                new DpError('DP.INTERACTIVE_PROMPT_DETECTED', `检测到交互式提示（${hit.kind}）：${hit.line}`, {
+                new DpError(ERR.INTERACTIVE_PROMPT_DETECTED, `检测到交互式提示（${hit.kind}）：${hit.line}`, {
                   hint: promptHint(hit.kind),
                 }),
               ),
@@ -146,14 +146,14 @@ export class Ssh2Driver implements SshDriver {
   async openTunnel(): Promise<Tunnel> {
     const hops = this.options.hops
     if (hops !== undefined && hops.length > 0) {
-      throw new DpError('DP.SSH.TUNNEL_FAILED', `多跳隧道未实现（收到 ${hops.length} 跳）`, {
+      throw new DpError(ERR.SSH.TUNNEL_FAILED, `多跳隧道未实现（收到 ${hops.length} 跳）`, {
         path: 'hosts.*.ssh.hops',
         hint:
           '多跳 + rsync 请用 native-ssh 驱动：它的 -o ProxyJump= 已经逐跳建好通道，--rsh 直接可用。' +
           'ssh2 侧的 exec 多跳已支持，但 rsync 隧道要一条常驻的父子 IPC 端点，与"每次 exec 一次性连接"不合 —— 所以这里明确失败而不是给一条走不通的通道',
       })
     }
-    throw new DpError('DP.SSH.TUNNEL_FAILED', 'ssh2 隧道未实现', {
+    throw new DpError(ERR.SSH.TUNNEL_FAILED, 'ssh2 隧道未实现', {
       hint: '请用 native-ssh 驱动 —— 它的 --rsh 前缀可以直接给 rsync（契约）。ssh2 侧的 rsync 隧道方案已实测可行，只差 IPC 助手',
     })
   }
@@ -168,7 +168,7 @@ export class Ssh2Driver implements SshDriver {
     if (this.client !== undefined) return Promise.resolve(this.client)
     const load = loadSsh2()
     if (!load.ok) {
-      return Promise.reject(new DpError('DP.SSH.DRIVER_UNAVAILABLE', load.reason, { hint: load.hint }))
+      return Promise.reject(new DpError(ERR.SSH.DRIVER_UNAVAILABLE, load.reason, { hint: load.hint }))
     }
 
     return new Promise<Ssh2ClientLike>((resolve, reject) => {
@@ -179,7 +179,7 @@ export class Ssh2Driver implements SshDriver {
       const timer = setTimeout(() => {
         client.end()
         reject(
-          new DpError('DP.SSH.CONNECT_FAILED', `ssh2 连接超时 ${timeoutMs}ms`, {
+          new DpError(ERR.SSH.CONNECT_FAILED, `ssh2 连接超时 ${timeoutMs}ms`, {
             hint: '检查主机/端口可达性，或调大 timeouts.connectMs',
           }),
         )

@@ -1,4 +1,4 @@
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import type { HopSpec, ResolvedSecrets, SshConnectionOptions } from './driver.js'
 import { resolveTimeoutMs } from './driver.js'
 import { planHopChain, type HopChainStep } from './hop-chain.js'
@@ -39,7 +39,7 @@ export async function openHopChain(
   const plan = planHopChain(hops)
   const load = (deps.load ?? (() => loadSsh2()))()
   if (!load.ok) {
-    throw new DpError('DP.SSH.DRIVER_UNAVAILABLE', `ssh2 驱动不可用：${load.reason}`, { hint: load.hint })
+    throw new DpError(ERR.SSH.DRIVER_UNAVAILABLE, `ssh2 驱动不可用：${load.reason}`, { hint: load.hint })
   }
 
   const connectMs = deps.timeoutMs ?? resolveTimeoutMs(opts.timeoutMs)
@@ -52,7 +52,7 @@ export async function openHopChain(
         // 前一跳必然已建好（plan 按跳序展开），这一支只是把「不可能」写成可读的错误
         const prev = clients[step.index - 1]
         if (prev === undefined) {
-          throw new DpError('DP.SSH.HOP_FAILED', `第 ${step.index - 1} 跳没有建好，无法继续建第 ${step.index} 跳`, {
+          throw new DpError(ERR.SSH.HOP_FAILED, `第 ${step.index - 1} 跳没有建好，无法继续建第 ${step.index} 跳`, {
             path: `hosts.*.ssh.hops[${step.index}]`,
             hint: '这是内部顺序错误：链必须按跳序建立，且前一跳失败时整条链都要关掉',
           })
@@ -157,7 +157,7 @@ function connectOne(
       client.end()
       finish(() =>
         reject(
-          new DpError('DP.SSH.HOP_FAILED', `第 ${step.index} 跳连接超时 ${ctx.timeoutMs}ms（${describe(step)}）`, {
+          new DpError(ERR.SSH.HOP_FAILED, `第 ${step.index} 跳连接超时 ${ctx.timeoutMs}ms（${describe(step)}）`, {
             path: `hosts.*.ssh.hops[${step.index}]`,
             hint: hopHint(step),
           }),
@@ -170,13 +170,13 @@ function connectOne(
       const message = err instanceof Error ? err.message : String(err)
       const classified = classifyConnectError(message, step.auth)
       // 认证失败保留原码：用户据此改凭据；其余归到 HOP_FAILED 并带跳序
-      if (classified.code === 'DP.SSH.AUTH_FAILED') {
+      if (classified.code === ERR.SSH.AUTH_FAILED) {
         finish(() => reject(classified))
         return
       }
       finish(() =>
         reject(
-          new DpError('DP.SSH.HOP_FAILED', `第 ${step.index} 跳连接失败（${describe(step)}）：${classified.message}`, {
+          new DpError(ERR.SSH.HOP_FAILED, `第 ${step.index} 跳连接失败（${describe(step)}）：${classified.message}`, {
             path: `hosts.*.ssh.hops[${step.index}]`,
             hint: hopHint(step),
             cause: classified,
@@ -272,7 +272,7 @@ function hopForwardError(
     attempts.length === 0
       ? '  · （一次都没发出去）'
       : attempts.map((a) => `  · ${a.via}：${a.ok ? '已建立' : a.reason ?? '失败'}`).join('\n')
-  return new DpError('DP.SSH.HOP_FAILED', `${summary}。已尝试：\n${tried}`, {
+  return new DpError(ERR.SSH.HOP_FAILED, `${summary}。已尝试：\n${tried}`, {
     path,
     hint:
       '几种常见原因：跳板禁了 TCP 转发（sshd_config 的 AllowTcpForwarding no，需要管理员开）、' +

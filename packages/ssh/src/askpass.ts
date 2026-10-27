@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 
 /** cmd.exe 会解释的字符。含它们的密码**拒绝**，不给注入面留缝。 */
 const CMD_UNSAFE = /[&|<>^%!"\r\n]/
@@ -44,14 +44,14 @@ function shQuote(value: string): string {
  */
 export function createAskpassHelper(secret: string, options: AskpassOptions = {}): AskpassHelper {
   if (secret === '') {
-    throw new DpError('DP.CONFIG.INVALID', 'askpass 收到空 secret', {
+    throw new DpError(ERR.CONFIG.INVALID, 'askpass 收到空 secret', {
       hint: '空密码必然认证失败。与其花一次往返，不如直接报配置问题',
     })
   }
 
   const isWindows = process.platform === 'win32'
   if (isWindows && CMD_UNSAFE.test(secret)) {
-    throw new DpError('DP.SSH.AUTH_FAILED', '该密码含 cmd.exe 会解释的字符，无法生成安全的 askpass 助手', {
+    throw new DpError(ERR.SSH.AUTH_FAILED, '该密码含 cmd.exe 会解释的字符，无法生成安全的 askpass 助手', {
       hint: 'Windows 上 askpass 只能走 .cmd，含 &|<>^%!" 的密码无法安全表达。改用密钥认证（auth.type=key）或 agent；或用 doas/sudo NOPASSWD 走提权而非密码',
     })
   }

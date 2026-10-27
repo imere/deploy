@@ -1,4 +1,4 @@
-import { DpError, type BecomeConfig, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
+import { ERR, DpError, type BecomeConfig, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
 import { checkSourcePaths } from '@dp/core'
 import type { SshDriver } from './driver.js'
 import { DEFAULT_MAX_OUTPUT_BYTES, resolveTimeoutMs } from './driver.js'
@@ -66,7 +66,7 @@ export function withCwd(argv: readonly string[], cwd: string): readonly string[]
  */
 export class RemoteCommandError extends DpError {
   constructor(
-    code: 'DP.PATH.NOT_WRITABLE' | 'DP.SSH.TOOL_MISSING',
+    code: typeof ERR.PATH.NOT_WRITABLE | typeof ERR.SSH.TOOL_MISSING,
     message: string,
     options: { hint?: string; cause?: unknown } = {},
   ) {
@@ -82,7 +82,7 @@ function raiseForExit(op: string, path: string, code: number, stderr: string): v
     case EXIT_NOT_LINK:
       throw ioError('EINVAL', path, '不是软链')
     case EXIT_NO_BASE64:
-      throw new DpError('DP.SSH.TOOL_MISSING', '远端没有 base64，无法按字节搬运文件', {
+      throw new DpError(ERR.SSH.TOOL_MISSING, '远端没有 base64，无法按字节搬运文件', {
         hint: '装 coreutils（提供 base64）；或让本地改走 sftp 通道（sftp 走的是长度前缀二进制协议，不需要 base64）',
       })
     case EXIT_DENIED:
@@ -117,16 +117,16 @@ export interface PathGuardOptions {
  */
 export function normalizeRemotePath(path: string, options: PathGuardOptions): string {
   if (path.includes('\0')) {
-    throw new DpError('DP.PATH.ILLEGAL_CHAR', '路径含 NUL 字节', {
+    throw new DpError(ERR.PATH.ILLEGAL_CHAR, '路径含 NUL 字节', {
       path,
       hint: 'NUL 会截断 C 层字符串，是纯粹的注入面',
     })
   }
   if (path === '') {
-    throw new DpError('DP.CONFIG.INVALID', '路径为空', { hint: '空路径没有意义' })
+    throw new DpError(ERR.CONFIG.INVALID, '路径为空', { hint: '空路径没有意义' })
   }
   if (!path.startsWith('/')) {
-    throw new DpError('DP.PATH.ILLEGAL_CHAR', `远端路径必须是绝对路径：${path}`, {
+    throw new DpError(ERR.PATH.ILLEGAL_CHAR, `远端路径必须是绝对路径：${path}`, {
       path,
       hint: '相对路径取决于登录时的 cwd，而 cwd 随环境而变 —— 部署必须是可重复的',
     })
@@ -137,7 +137,7 @@ export function normalizeRemotePath(path: string, options: PathGuardOptions): st
     if (seg === '' || seg === '.') continue
     if (seg === '..') {
       if (parts.length === 0) {
-        throw new DpError('DP.PATH.ILLEGAL_CHAR', `路径逃出根目录：${path}`, {
+        throw new DpError(ERR.PATH.ILLEGAL_CHAR, `路径逃出根目录：${path}`, {
           path,
           hint: '不允许越过 / 往上走。要写 /a/../b 就直接写 /b',
         })
@@ -155,7 +155,7 @@ export function normalizeRemotePath(path: string, options: PathGuardOptions): st
   if (options.allowedRoots !== undefined) {
     const ok = options.allowedRoots.some((root) => isUnder(normalized, root))
     if (!ok) {
-      throw new DpError('DP.PATH.ILLEGAL_CHAR', `路径不在允许根之下：${normalized}`, {
+      throw new DpError(ERR.PATH.ILLEGAL_CHAR, `路径不在允许根之下：${normalized}`, {
         path: normalized,
         hint: `允许根：${options.allowedRoots.join(' | ')}。越过它们写文件就是路径穿越`,
       })
@@ -260,7 +260,7 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
      */
     async exec(argv: readonly string[], execOptions: ExecOptions = {}): Promise<ExecResult> {
       if (argv.length === 0) {
-        throw new DpError('DP.CONFIG.INVALID', 'exec 收到空 argv', { hint: '至少给出可执行文件名' })
+        throw new DpError(ERR.CONFIG.INVALID, 'exec 收到空 argv', { hint: '至少给出可执行文件名' })
       }
       const cwd = execOptions.cwd
       const sent = cwd === undefined ? argv : withCwd(argv, cwd)
@@ -354,7 +354,7 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
         timeoutMs: resolveTimeoutMs(options.timeoutMs),
       })
       if (res.code !== 0) {
-        throw new DpError('DP.PATH.NOT_WRITABLE', `无法创建软链 ${l} → ${target}`, {
+        throw new DpError(ERR.PATH.NOT_WRITABLE, `无法创建软链 ${l} → ${target}`, {
           hint: '检查落点所在目录是否可写、文件系统是否支持软链、目标是否已存在且指向目录（需要加 -n 或先删）',
         })
       }

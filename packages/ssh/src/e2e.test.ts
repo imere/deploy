@@ -16,7 +16,7 @@
  */
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { connectSsh } from './connect.js'
 import type { SshConnectionOptions } from './driver.js'
 
@@ -118,7 +118,7 @@ describe('真机：主机密钥 strict 必须拒绝未知的指纹', { skip: SKI
     if (err === null) return // 该主机已在系统 known_hosts 里，跳过这条断言
     assert.ok(err instanceof DpError)
     assert.ok(
-      err.code === 'DP.SSH.HOST_KEY_UNKNOWN' || err.code === 'DP.SSH.CONNECT_FAILED',
+      err.code === ERR.SSH.HOST_KEY_UNKNOWN || err.code === ERR.SSH.CONNECT_FAILED,
       `实际是 ${err.code}：${err.message}`,
     )
   })

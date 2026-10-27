@@ -17,6 +17,7 @@ import {
   TRUNCATE_MARK,
 } from './parse.js'
 
+import { ERR } from '@dp/ports'
 describe('parseSshG', () => {
   const sample = [
     'user deploy',
@@ -271,26 +272,26 @@ describe('classifySshError —— 顺序敏感', () => {
       '@@@@@@@@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@@@@@@@@\nssh-ed25519 AAAAC3Nza dp-target\nHost key verification failed.',
       255,
     )
-    assert.equal(f.code, 'DP.SSH.HOST_KEY_MISMATCH')
+    assert.equal(f.code, ERR.SSH.HOST_KEY_MISMATCH)
   })
 
   it('未知主机', () => {
     const f = classifySshError('No ED25519 host key is known for dp-target and you have requested strict checking.', 255)
-    assert.equal(f.code, 'DP.SSH.HOST_KEY_UNKNOWN')
+    assert.equal(f.code, ERR.SSH.HOST_KEY_UNKNOWN)
   })
 
   it('认证失败', () => {
-    assert.equal(classifySshError('dp@host: Permission denied (publickey,password).', 255).code, 'DP.SSH.AUTH_FAILED')
-    assert.equal(classifySshError('Too many authentication failures', 255).code, 'DP.SSH.AUTH_FAILED')
+    assert.equal(classifySshError('dp@host: Permission denied (publickey,password).', 255).code, ERR.SSH.AUTH_FAILED)
+    assert.equal(classifySshError('Too many authentication failures', 255).code, ERR.SSH.AUTH_FAILED)
   })
 
   it('连不上', () => {
-    assert.equal(classifySshError('ssh: connect to host 10.0.0.7 port 22: Connection refused', 255).code, 'DP.SSH.CONNECT_FAILED')
-    assert.equal(classifySshError('ssh: Could not resolve hostname dp-target: Name or service not known', 255).code, 'DP.SSH.CONNECT_FAILED')
+    assert.equal(classifySshError('ssh: connect to host 10.0.0.7 port 22: Connection refused', 255).code, ERR.SSH.CONNECT_FAILED)
+    assert.equal(classifySshError('ssh: Could not resolve hostname dp-target: Name or service not known', 255).code, ERR.SSH.CONNECT_FAILED)
   })
 
   it('认不出来时归 CONNECT_FAILED 而不是瞎猜成 AUTH', () => {
-    assert.equal(classifySshError('some brand new OpenSSH wording we have never seen', 255).code, 'DP.SSH.CONNECT_FAILED')
+    assert.equal(classifySshError('some brand new OpenSSH wording we have never seen', 255).code, ERR.SSH.CONNECT_FAILED)
   })
 
   it('空 stderr 也给出可用的 reason', () => {
@@ -301,7 +302,7 @@ describe('classifySshError —— 顺序敏感', () => {
 describe('hostKeyHint —— 必须告诉用户「我们不会自动改」', () => {
   it('mismatch 给出期望/实际指纹与手动更新指引', () => {
     const h = hostKeyHint({
-      code: 'DP.SSH.HOST_KEY_MISMATCH',
+      code: ERR.SSH.HOST_KEY_MISMATCH,
       reason: 'r',
       expected: 'SHA256:old',
       actual: 'SHA256:new',
@@ -313,7 +314,7 @@ describe('hostKeyHint —— 必须告诉用户「我们不会自动改」', () 
   })
 
   it('unknown 指向 accept-new / tofu', () => {
-    const h = hostKeyHint({ code: 'DP.SSH.HOST_KEY_UNKNOWN', reason: 'r' })
+    const h = hostKeyHint({ code: ERR.SSH.HOST_KEY_UNKNOWN, reason: 'r' })
     assert.match(h, /accept-new/)
     assert.match(h, /tofu/)
   })

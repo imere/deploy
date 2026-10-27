@@ -1,4 +1,4 @@
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { readIntent } from './posix.js'
 import { truncateOutput } from './parse.js'
 import { detectPrompt, promptHint } from './prompt.js'
@@ -55,14 +55,14 @@ export class FakeSshDriver implements SshDriver {
     if (this.promptText !== undefined) {
       const hit = detectPrompt(this.promptText)
       if (hit !== undefined) {
-        throw new DpError('DP.INTERACTIVE_PROMPT_DETECTED', `检测到交互式提示（${hit.kind}）：${hit.line}`, {
+        throw new DpError(ERR.INTERACTIVE_PROMPT_DETECTED, `检测到交互式提示（${hit.kind}）：${hit.line}`, {
           hint: promptHint(hit.kind),
         })
       }
     }
 
     if (this.hangOn !== undefined && req.argv.join(' ').includes(this.hangOn)) {
-      throw new DpError('DP.TIMEOUT.EXEC', `模拟超时：${this.hangOn}`, {
+      throw new DpError(ERR.TIMEOUT.EXEC, `模拟超时：${this.hangOn}`, {
         hint: '真实驱动此时会杀掉整个进程树；假驱动没有进程可杀，但抛的是同一个错误码',
       })
     }
@@ -76,7 +76,7 @@ export class FakeSshDriver implements SshDriver {
 
     if (req.argv[0] !== 'sh' || req.argv[1] !== '-c' || req.argv[2] === undefined) {
       // 非 posix 脚本的裸命令：没有登记就报"没这条命令"，而不是静默成功
-      throw new DpError('DP.SSH.DRIVER_UNAVAILABLE', `假驱动没有登记这条命令：${req.argv.join(' ')}`, {
+      throw new DpError(ERR.SSH.DRIVER_UNAVAILABLE, `假驱动没有登记这条命令：${req.argv.join(' ')}`, {
         hint: '在 FakeOptions.responses 里登记它',
       })
     }

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { accessSync, closeSync, constants as fsConstants, openSync, readSync } from 'node:fs'
 import { delimiter, extname, join, resolve as resolvePath } from 'node:path'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import type {
   DriverAvailability,
   DriverExecResult,
@@ -46,7 +46,7 @@ export function assertNativeExecutable(path: string, name: string): string {
   const why = isWrapper
     ? '它是 cmd/PowerShell 包装脚本，不是原生可执行文件'
     : '它是一个带 shebang 的脚本，不是原生可执行文件'
-  throw new DpError('DP.SSH.TOOL_MISSING', `${name} 解析到不可执行的东西：${path} —— ${why}`, {
+  throw new DpError(ERR.SSH.TOOL_MISSING, `${name} 解析到不可执行的东西：${path} —— ${why}`, {
     hint: '我们从不经过 shell（spawn 的 shell 恒为 false），所以包装脚本无法执行。Windows 上需要原生的 ssh.exe / sftp.exe：装 OpenSSH for Windows，或在配置里直接给出 .exe 的绝对路径',
   })
 }
@@ -214,12 +214,12 @@ export class NativeSshDriver implements SshDriver {
   async exec(req: ExecRequest): Promise<DriverExecResult> {
     if (this.sshPath === null) {
       const availability = await this.available()
-      throw new DpError('DP.SSH.DRIVER_UNAVAILABLE', availability.reason ?? '找不到 ssh', {
+      throw new DpError(ERR.SSH.DRIVER_UNAVAILABLE, availability.reason ?? '找不到 ssh', {
         hint: availability.hint,
       })
     }
     if (req.argv.length === 0) {
-      throw new DpError('DP.CONFIG.INVALID', '远端命令 argv 为空', {
+      throw new DpError(ERR.CONFIG.INVALID, '远端命令 argv 为空', {
         hint: '至少给出可执行文件名。空 argv 没有语义',
       })
     }
@@ -237,7 +237,7 @@ export class NativeSshDriver implements SshDriver {
     if (needsAskpass) {
       const secret = this.options.secrets?.password ?? this.options.secrets?.passphrase
       if (secret === undefined) {
-        throw new DpError('DP.SSH.AUTH_FAILED', `认证方式是 ${this.options.auth.type}，但没有解析出凭据`, {
+        throw new DpError(ERR.SSH.AUTH_FAILED, `认证方式是 ${this.options.auth.type}，但没有解析出凭据`, {
           hint: '本包不解析 passwordRef（那是 schema/config 层的职责）。请在 SshConnectionOptions.secrets 里传入明文',
         })
       }
@@ -292,7 +292,7 @@ export class NativeSshDriver implements SshDriver {
         killProcessTree(child.pid)
         done(() =>
           reject(
-            new DpError('DP.TIMEOUT.EXEC', `SSH 执行超时 ${ctx.timeoutMs}ms`, {
+            new DpError(ERR.TIMEOUT.EXEC, `SSH 执行超时 ${ctx.timeoutMs}ms`, {
               hint: '增大 timeouts.execMs，或检查远端是否在等待输入。超时已杀掉整个进程树，不会有残留的 ssh 子进程',
             }),
           ),
@@ -309,7 +309,7 @@ export class NativeSshDriver implements SshDriver {
           killProcessTree(child.pid)
           done(() =>
             reject(
-              new DpError('DP.INTERACTIVE_PROMPT_DETECTED', `检测到交互式提示（${hit.kind}）：${hit.line}`, {
+              new DpError(ERR.INTERACTIVE_PROMPT_DETECTED, `检测到交互式提示（${hit.kind}）：${hit.line}`, {
                 hint: promptHint(hit.kind),
               }),
             ),
@@ -323,7 +323,7 @@ export class NativeSshDriver implements SshDriver {
       child.on('error', (e) => {
         done(() =>
           reject(
-            new DpError('DP.SSH.DRIVER_UNAVAILABLE', `无法启动 ${argv[0]}：${e.message}`, {
+            new DpError(ERR.SSH.DRIVER_UNAVAILABLE, `无法启动 ${argv[0]}：${e.message}`, {
               cause: e,
               hint: '检查 ssh 是否被安全软件拦截、PATH 是否正确',
             }),
@@ -345,9 +345,9 @@ export class NativeSshDriver implements SshDriver {
         if (exitCode === 255) {
           const failure = classifySshError(stderr, exitCode)
           if (
-            failure.code === 'DP.SSH.HOST_KEY_MISMATCH' ||
-            failure.code === 'DP.SSH.HOST_KEY_UNKNOWN' ||
-            failure.code === 'DP.SSH.AUTH_FAILED'
+            failure.code === ERR.SSH.HOST_KEY_MISMATCH ||
+            failure.code === ERR.SSH.HOST_KEY_UNKNOWN ||
+            failure.code === ERR.SSH.AUTH_FAILED
           ) {
             done(() =>
               reject(
@@ -374,7 +374,7 @@ export class NativeSshDriver implements SshDriver {
   async openTunnel(): Promise<Tunnel> {
     if (this.sshPath === null) {
       const availability = await this.available()
-      throw new DpError('DP.SSH.TUNNEL_FAILED', availability.reason ?? '找不到 ssh', {
+      throw new DpError(ERR.SSH.TUNNEL_FAILED, availability.reason ?? '找不到 ssh', {
         hint: availability.hint,
       })
     }
@@ -394,13 +394,13 @@ export class NativeSshDriver implements SshDriver {
   /** sftp 批量通道（远端文件系统首选路径，见 runner.ts） */
   async runSftpBatch(commands: readonly string[], timeoutMs: number): Promise<DriverExecResult> {
     if (this.sshPath === null) {
-      throw new DpError('DP.SSH.TOOL_MISSING', '找不到本地 ssh，无法走 sftp 通道', {
+      throw new DpError(ERR.SSH.TOOL_MISSING, '找不到本地 ssh，无法走 sftp 通道', {
         hint: '降级到 POSIX 命令通道（runner.ts 会自动降级）',
       })
     }
     const sftpPath = resolveTool('sftp', process.env as Readonly<Record<string, string | undefined>>)
     if (sftpPath === null) {
-      throw new DpError('DP.SSH.TOOL_MISSING', '找不到本地 sftp', {
+      throw new DpError(ERR.SSH.TOOL_MISSING, '找不到本地 sftp', {
         hint: '降级到 POSIX 命令通道（sh -c + base64），功能等价，只是没有 sftp 的长度前缀协议',
       })
     }
@@ -438,7 +438,7 @@ export class NativeSshDriver implements SshDriver {
         killProcessTree(child.pid)
         done(() =>
           reject(
-            new DpError('DP.TIMEOUT.EXEC', `sftp 批量执行超时 ${timeoutMs}ms`, {
+            new DpError(ERR.TIMEOUT.EXEC, `sftp 批量执行超时 ${timeoutMs}ms`, {
               hint: '检查远端 sftp-server 是否可用，或增大 timeout',
             }),
           ),
@@ -454,7 +454,7 @@ export class NativeSshDriver implements SshDriver {
           killProcessTree(child.pid)
           done(() =>
             reject(
-              new DpError('DP.INTERACTIVE_PROMPT_DETECTED', `检测到交互式提示（${hit.kind}）：${hit.line}`, {
+              new DpError(ERR.INTERACTIVE_PROMPT_DETECTED, `检测到交互式提示（${hit.kind}）：${hit.line}`, {
                 hint: promptHint(hit.kind),
               }),
             ),
@@ -464,7 +464,7 @@ export class NativeSshDriver implements SshDriver {
       child.stdout.on('data', onChunk(out))
       child.stderr.on('data', onChunk(err))
       child.on('error', (e) =>
-        done(() => reject(new DpError('DP.SSH.TOOL_MISSING', `无法启动 ${argv[0]}：${e.message}`, { cause: e }))),
+        done(() => reject(new DpError(ERR.SSH.TOOL_MISSING, `无法启动 ${argv[0]}：${e.message}`, { cause: e }))),
       )
       child.on('close', (code) => {
         const max = this.options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES

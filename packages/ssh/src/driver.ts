@@ -1,4 +1,4 @@
-import { DpError, assertPortInRange, parseSshTarget, type BecomeConfig, type KnownHostsMode as PortsKnownHostsMode } from '@dp/ports'
+import { ERR, DpError, assertPortInRange, parseSshTarget, type BecomeConfig, type KnownHostsMode as PortsKnownHostsMode } from '@dp/ports'
 
 /**
  * 驱动的两种身份。**native-ssh 排第一**是硬排序而不是偏好（`DEFAULT_PREFERENCE`）：只有它能协商抗量子 KEX，而 ssh2 遇到 PQ 算法直接抛错 —— 顺序反过来的后果是"配了 pq-required 却连不上"，且错误指向认证而不是 KEX 策略。
@@ -175,7 +175,7 @@ export function validateHops(hops: readonly HopSpec[] | undefined): void {
       assertPortInRange(hop.port, `${path}.port`)
       if (target.port !== undefined && target.port !== hop.port) {
         throw new DpError(
-          'DP.CONFIG.INVALID',
+          ERR.CONFIG.INVALID,
           `第 ${i} 跳给了两个互相矛盾的端口：ssh 串里是 ${target.port}，port 字段是 ${hop.port}`,
           {
             path: `${path}.port`,
@@ -259,7 +259,7 @@ export async function resolveDriver(
     '注意：ssh2 **不支持抗量子 KEX**（实测），若 crypto.kexPolicy=pq-required 只能走 native-ssh',
   ].join('；')
 
-  throw new DpError('DP.SSH.DRIVER_UNAVAILABLE', `没有可用的 SSH 驱动，已尝试：\n${detail}`, { hint })
+  throw new DpError(ERR.SSH.DRIVER_UNAVAILABLE, `没有可用的 SSH 驱动，已尝试：\n${detail}`, { hint })
 }
 
 /** 默认顺序：native 优先（唯一能抗量子），ssh2 兜底 */

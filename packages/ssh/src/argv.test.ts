@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import type { HopSpec, KnownHostsMode } from './driver.js'
 import {
   buildExecArgv,
@@ -387,7 +387,7 @@ describe('buildRemoteCommand', () => {
   it('空 argv 拒绝', () => {
     assert.throws(() => buildRemoteCommand([]), (e: unknown) => {
       assert.ok(e instanceof DpError, `期望 DpError，实际 ${String(e)}`)
-      assert.equal(e.code, 'DP.CONFIG.INVALID')
+      assert.equal(e.code, ERR.CONFIG.INVALID)
       return true
     })
   })
@@ -426,13 +426,13 @@ describe('setEnvOptions', () => {
     // 只断 code 的话，实现调换两个分支的顺序这条照样绿。
     assert.throws(() => setEnvOptions({ A: 'x\ny' }), (e: unknown) => {
       assert.ok(e instanceof DpError, `期望 DpError，实际 ${String(e)}`)
-      assert.equal(e.code, 'DP.CONFIG.INVALID')
+      assert.equal(e.code, ERR.CONFIG.INVALID)
       assert.match(e.message, /值含换行或 NUL/)
       return true
     })
     assert.throws(() => setEnvOptions({ A: 'x\0y' }), (e: unknown) => {
       assert.ok(e instanceof DpError, `期望 DpError，实际 ${String(e)}`)
-      assert.equal(e.code, 'DP.CONFIG.INVALID')
+      assert.equal(e.code, ERR.CONFIG.INVALID)
       assert.match(e.message, /值含换行或 NUL/)
       return true
     })
@@ -446,7 +446,7 @@ describe('setEnvOptions', () => {
         () => setEnvOptions({ [bad]: 'v' }),
         (e: unknown) => {
           assert.ok(e instanceof DpError, `期望 DpError，实际 ${String(e)}`)
-          assert.equal(e.code, 'DP.CONFIG.INVALID')
+          assert.equal(e.code, ERR.CONFIG.INVALID)
           // 消息必须回显被拒的名字，才能分得开是「变量名非法」而不是上面那条「值含换行」
           assert.ok(e.message.includes(JSON.stringify(bad)), `${e.message} 未回显 ${bad}`)
           return true
@@ -537,7 +537,7 @@ describe('hops -> ProxyJump（纯函数，产出 argv 元素而非 shell 字符�
           knownHostsMode: 'strict',
           hops: [{ ssh: 'ops@jump', auth: { type: 'password', passwordRef: 'env:P' } }, TARGET],
         }),
-      { code: 'DP.CONFIG.INVALID' },
+      { code: ERR.CONFIG.INVALID },
     )
   })
 
@@ -546,7 +546,7 @@ describe('hops -> ProxyJump（纯函数，产出 argv 元素而非 shell 字符�
       () => buildSshArgv({ authKind: 'agent', knownHostsMode: 'strict', hops: [{ ssh: 'ops@jump', auth: { type: 'password', passwordRef: 'env:P' } }, TARGET] }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.CONFIG.INVALID')
+        assert.equal(err.code, ERR.CONFIG.INVALID)
         assert.match(err.hint ?? '', /config/)
         return true
       },
@@ -556,7 +556,7 @@ describe('hops -> ProxyJump（纯函数，产出 argv 元素而非 shell 字符�
   it('跳板 keyboard-interactive 同样拒绝', () => {
     assert.throws(
       () => buildSshArgv({ authKind: 'agent', knownHostsMode: 'strict', hops: [{ ssh: 'ops@jump', auth: { type: 'keyboard-interactive', passwordRef: 'env:P' } }, TARGET] }),
-      { code: 'DP.CONFIG.INVALID' },
+      { code: ERR.CONFIG.INVALID },
     )
   })
 
@@ -570,7 +570,7 @@ describe('hops -> ProxyJump（纯函数，产出 argv 元素而非 shell 字符�
         }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.CONFIG.INVALID')
+        assert.equal(err.code, ERR.CONFIG.INVALID)
         assert.match(err.hint ?? '', /config/)
         return true
       },
@@ -600,7 +600,7 @@ describe('hops -> ProxyJump（纯函数，产出 argv 元素而非 shell 字符�
   it('hops 与 proxyJump 同时给 -> 报错，不替用户二选一', () => {
     assert.throws(
       () => buildSshArgv({ authKind: 'agent', knownHostsMode: 'strict', hops: [{ ssh: 'ops@jump' }], proxyJump: 'a@b' }),
-      { code: 'DP.CONFIG.INVALID' },
+      { code: ERR.CONFIG.INVALID },
     )
   })
 

@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { Ssh2Driver } from './ssh2.js'
 import type { Ssh2ChannelLike, Ssh2ClientLike, Ssh2Load } from './ssh2-module.js'
 import { validateHops, type SshConnectionOptions } from './driver.js'
@@ -63,7 +63,7 @@ describe('ssh2 + hops —— 走链，不再是入口就拒绝', () => {
       () => driver.exec({ argv: ['true'] }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SSH.HOP_FAILED')
+        assert.equal(err.code, ERR.SSH.HOP_FAILED)
         assert.equal(err.path, 'hosts.*.ssh.hops[1]')
         return true
       },
@@ -76,7 +76,7 @@ describe('ssh2 + hops —— 走链，不再是入口就拒绝', () => {
       () => driver.openTunnel(),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SSH.TUNNEL_FAILED')
+        assert.equal(err.code, ERR.SSH.TUNNEL_FAILED)
         assert.match(err.message, /多跳隧道未实现/)
         assert.match(err.hint ?? '', /native-ssh/)
         return true
@@ -89,13 +89,13 @@ describe('ssh2 + hops —— 走链，不再是入口就拒绝', () => {
     await assert.rejects(
       () => driver.exec({ argv: ['true'] }),
       // 走到这里说明没被多跳拦下；缺 ssh2 时是 DRIVER_UNAVAILABLE，这里不依赖本地装没装
-      (err: unknown) => !(err instanceof DpError) || err.code !== 'DP.CONFIG.INVALID' || !/多跳/.test(err.message),
+      (err: unknown) => !(err instanceof DpError) || err.code !== ERR.CONFIG.INVALID || !/多跳/.test(err.message),
     )
   })
 })
 
 describe('connectSsh 的逐跳校验入口', () => {
   it('非法连接串在选驱动之前就失败（不为注定失败的连接买单）', () => {
-    assert.throws(() => validateHops([{ ssh: 'ops@' }]), { code: 'DP.CONFIG.INVALID' })
+    assert.throws(() => validateHops([{ ssh: 'ops@' }]), { code: ERR.CONFIG.INVALID })
   })
 })

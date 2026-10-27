@@ -1,4 +1,4 @@
-import { DpError, type BecomeConfig } from '@dp/ports'
+import { ERR, DpError, type BecomeConfig } from '@dp/ports'
 import { quoteArg, quoteArgv } from './argv.js'
 
 export type { BecomeConfig }
@@ -18,7 +18,7 @@ export interface WrapOptions {
 const escape = (o: WrapOptions | undefined): ((a: string) => string) => o?.shellEscape ?? quoteArg
 
 function refuseInteractive(what: string): never {
-  throw new DpError('DP.CONFIG.INVALID', `become.${what} 会产生一个等待 stdin 的命令，已拒绝`, {
+  throw new DpError(ERR.CONFIG.INVALID, `become.${what} 会产生一个等待 stdin 的命令，已拒绝`, {
     path: `become.${what}`,
     hint: '铁律 0：永不交互。要么配免密（sudoers NOPASSWD 白名单，实测 `sudo -n` 可用），要么由调用方显式提供密码通道（options.passwordChannel = true，走 stdin 投喂 / pty 会话）',
   })
@@ -88,7 +88,7 @@ export function wrapCommand(
   opts?: WrapOptions,
 ): readonly string[] {
   if (argv.length === 0) {
-    throw new DpError('DP.CONFIG.INVALID', 'wrapCommand 收到空 argv', {
+    throw new DpError(ERR.CONFIG.INVALID, 'wrapCommand 收到空 argv', {
       hint: '提权一个不存在的命令没有意义；检查调用方',
     })
   }
@@ -129,7 +129,7 @@ export function wrapCommand(
     case 'custom': {
       const cmd = argv.map(esc).join(' ')
       if (!become.template.includes('${cmd}')) {
-        throw new DpError('DP.CONFIG.INVALID', 'become.template 不含 ${cmd} 占位', {
+        throw new DpError(ERR.CONFIG.INVALID, 'become.template 不含 ${cmd} 占位', {
           path: 'become.template',
           hint: '模板必须有一个 ${cmd} 占位，例如 `dzdo -u root ${cmd}`；没有占位的话原命令会被丢掉',
         })
@@ -137,7 +137,7 @@ export function wrapCommand(
       const rendered = become.template.replaceAll('${cmd}', cmd)
       const parts = splitShellWords(rendered)
       if (parts.length === 0) {
-        throw new DpError('DP.CONFIG.INVALID', 'become.template 渲染后为空', {
+        throw new DpError(ERR.CONFIG.INVALID, 'become.template 渲染后为空', {
           path: 'become.template',
           hint: '检查模板里 ${cmd} 两侧的内容',
         })

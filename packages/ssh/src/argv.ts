@@ -1,4 +1,4 @@
-import { DpError, assertPortInRange, parseSshTarget } from '@dp/ports'
+import { ERR, DpError, assertPortInRange, parseSshTarget } from '@dp/ports'
 import type { HopSpec, KnownHostsMode } from './driver.js'
 
 // POSIX 单引号转义
@@ -42,20 +42,20 @@ export function quoteArgv(argv: readonly string[]): string {
  */
 export function buildRemoteCommand(argv: readonly string[]): string {
   if (argv.length === 0) {
-    throw new DpError('DP.CONFIG.INVALID', 'buildRemoteCommand 收到空 argv', {
+    throw new DpError(ERR.CONFIG.INVALID, 'buildRemoteCommand 收到空 argv', {
       hint: '至少给出可执行文件名',
     })
   }
   for (const arg of argv) {
     // NUL 在任何一层都能截断字符串（shell 与 C 都如此），没有引号能救它
     if (arg.includes('\0')) {
-      throw new DpError('DP.CONFIG.INVALID', '远端命令参数含 NUL，已拒绝', {
+      throw new DpError(ERR.CONFIG.INVALID, '远端命令参数含 NUL，已拒绝', {
         hint: 'NUL 会在 shell 与 C 两层同时截断命令，无法用引号中和',
       })
     }
     // CR 会让带标签的输出行（DPW\t<path>\t<1>）被读成两行，而没有任何脚本需要它
     if (arg.includes('\r')) {
-      throw new DpError('DP.CONFIG.INVALID', '远端命令参数含 CR，已拒绝', {
+      throw new DpError(ERR.CONFIG.INVALID, '远端命令参数含 CR，已拒绝', {
         hint: 'CR 只在命令真正换行时才出现；脚本里的换行用 \\n',
       })
     }
@@ -80,12 +80,12 @@ export function setEnvOptions(env: Readonly<Record<string, string>>): string[] {
   const out: string[] = []
   for (const [k, v] of Object.entries(env)) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) {
-      throw new DpError('DP.CONFIG.INVALID', `非法环境变量名：${JSON.stringify(k)}`, {
+      throw new DpError(ERR.CONFIG.INVALID, `非法环境变量名：${JSON.stringify(k)}`, {
         hint: '只能用 POSIX 环境变量名：字母或下划线开头，后接字母、数字、下划线',
       })
     }
     if (v.includes('\n') || v.includes('\r') || v.includes('\0')) {
-      throw new DpError('DP.CONFIG.INVALID', `环境变量 ${k} 的值含换行或 NUL，已拒绝`, {
+      throw new DpError(ERR.CONFIG.INVALID, `环境变量 ${k} 的值含换行或 NUL，已拒绝`, {
         hint: '凭据与多行内容不走环境变量',
       })
     }
@@ -204,7 +204,7 @@ export function buildSshArgv(options: SshArgvOptions): string[] {
   // hops 优先于 proxyJump：两处都给了就报错而不是二选一，那会让用户以为
   if (options.hops !== undefined && options.hops.length > 0) {
     if (options.proxyJump !== undefined) {
-      throw new DpError('DP.CONFIG.INVALID', '同时给了 hops 与 proxyJump，多跳链有两条互相矛盾的来源', {
+      throw new DpError(ERR.CONFIG.INVALID, '同时给了 hops 与 proxyJump，多跳链有两条互相矛盾的来源', {
         path: 'hosts.*.ssh.hops',
         hint: '留一个。多跳用 hops；proxyJump 只留给"直接写一条跳板串"的场景（不经过配置校验）',
       })
@@ -282,7 +282,7 @@ export function hopsProxyJump(
   ctx: { readonly knownHosts?: KnownHostsMode; readonly path?: string },
 ): string | undefined {
   if (hops.length === 0) {
-    throw new DpError('DP.CONFIG.INVALID', 'hopsProxyJump 收到空跳板链', {
+    throw new DpError(ERR.CONFIG.INVALID, 'hopsProxyJump 收到空跳板链', {
       path: ctx.path ?? 'hosts.*.ssh.hops',
       hint: '空链按单跳处理，不要调用这个函数',
     })
@@ -296,7 +296,7 @@ export function hopsProxyJump(
       const path = `${base}[${i}]`
       const authType = hop.auth?.type
       if (authType === 'password' || authType === 'keyboard-interactive') {
-        throw new DpError('DP.CONFIG.INVALID', `第 ${i} 跳要求 ${authType} 认证，多跳不支持`, {
+        throw new DpError(ERR.CONFIG.INVALID, `第 ${i} 跳要求 ${authType} 认证，多跳不支持`, {
           path: `${path}.auth`,
           hint:
             '`-J` 无法逐跳喂密码：跳板连接由系统 ssh 自己发起，我们既没有它的凭据通道，也保证不了不交互（它会去读 tty，在 CI 里就是一次挂起）。' +
@@ -305,7 +305,7 @@ export function hopsProxyJump(
       }
       if (hop.knownHosts !== undefined && ctx.knownHosts !== undefined && hop.knownHosts !== ctx.knownHosts) {
         throw new DpError(
-          'DP.CONFIG.INVALID',
+          ERR.CONFIG.INVALID,
           `第 ${i} 跳的主机密钥策略（${hop.knownHosts}）与整体设置（${ctx.knownHosts}）冲突`,
           {
             path: `${path}.knownHosts`,

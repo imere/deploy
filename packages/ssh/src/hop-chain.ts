@@ -1,4 +1,4 @@
-import { DpError, assertPortInRange, parseSshTarget } from '@dp/ports'
+import { ERR, DpError, assertPortInRange, parseSshTarget } from '@dp/ports'
 import type { AuthConfig, HopSpec } from './driver.js'
 
 export type HopAuth = AuthConfig
@@ -34,7 +34,7 @@ export function planHopChain(
 ): readonly HopChainStep[] {
   const base = opts.path ?? DEFAULT_PATH
   if (hops.length === 0) {
-    throw new DpError('DP.CONFIG.INVALID', '跳板链为空（0 跳）', {
+    throw new DpError(ERR.CONFIG.INVALID, '跳板链为空（0 跳）', {
       path: base,
       hint: '单跳请写 hosts.*.ssh，多跳至少给 1 跳。返回空数组会让调用方以为"不需要跳板"，于是直连 —— 那正是跳板机被放在这里的原因',
     })
@@ -49,7 +49,7 @@ export function planHopChain(
       assertPortInRange(hop.port, `${path}.port`)
       if (port !== undefined && port !== hop.port) {
         throw new DpError(
-          'DP.CONFIG.INVALID',
+          ERR.CONFIG.INVALID,
           `第 ${index} 跳给了两个互相矛盾的端口：ssh 串里是 ${port}，port 字段是 ${hop.port}`,
           {
             path: `${path}.port`,
@@ -61,7 +61,7 @@ export function planHopChain(
     }
 
     if (hop.auth === undefined) {
-      throw new DpError('DP.CONFIG.INVALID', `第 ${index} 跳没有给认证方式`, {
+      throw new DpError(ERR.CONFIG.INVALID, `第 ${index} 跳没有给认证方式`, {
         path: `${path}.auth`,
         hint:
           '每一跳的凭据都可能与别的跳不同（跳板机一套、目标机一套是常态），所以逐跳必须显式声明 auth。' +
