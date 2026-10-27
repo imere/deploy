@@ -7,7 +7,7 @@
  */
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { buildScpPlan, runScpPlan } from './scp.js'
 import { fakeSpawn } from './fake-spawn.js'
 import type { ScpPlan } from './scp.js'
@@ -78,7 +78,7 @@ describe('buildScpPlan', () => {
   test('deleteExtraneous → 显式拒绝（scp 没这个能力）', () => {
     assert.throws(
       () => buildScpPlan({ ...req, deleteExtraneous: true }, opts),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.PREF.UNSUPPORTED',
+      (err: unknown) => err instanceof DpError && err.code === ERR.PREF.UNSUPPORTED,
     )
   })
 
@@ -96,7 +96,7 @@ describe('buildScpPlan', () => {
   test('空源 → DP.SOURCE.EMPTY', () => {
     assert.throws(
       () => buildScpPlan({ ...req, entries: [] }, opts),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.SOURCE.EMPTY',
+      (err: unknown) => err instanceof DpError && err.code === ERR.SOURCE.EMPTY,
     )
   })
 })
@@ -130,7 +130,7 @@ describe('runScpPlan', () => {
     }
     await assert.rejects(
       () => runScpPlan(plan, { spawnImpl: fake.impl, timeoutMs: 5000 }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.PATH.NOT_WRITABLE',
+      (err: unknown) => err instanceof DpError && err.code === ERR.PATH.NOT_WRITABLE,
     )
     assert.equal(fake.count(), 1)
     assert.equal(fake.records[0]!.file, '/usr/bin/ssh')
@@ -140,7 +140,7 @@ describe('runScpPlan', () => {
     const fake = fakeSpawn({ exitCode: 255, stderr: 'ssh: connect to host dp-target: No route to host' })
     await assert.rejects(
       () => runScpPlan(simple, { spawnImpl: fake.impl, timeoutMs: 5000 }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.SSH.CONNECT_FAILED',
+      (err: unknown) => err instanceof DpError && err.code === ERR.SSH.CONNECT_FAILED,
     )
   })
 
@@ -148,7 +148,7 @@ describe('runScpPlan', () => {
     const fake = fakeSpawn({ exitCode: 1, stderr: '/srv/www/current: No such file or directory' })
     await assert.rejects(
       () => runScpPlan(simple, { spawnImpl: fake.impl, timeoutMs: 5000 }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.PATH.NOT_WRITABLE',
+      (err: unknown) => err instanceof DpError && err.code === ERR.PATH.NOT_WRITABLE,
     )
   })
 
@@ -156,7 +156,7 @@ describe('runScpPlan', () => {
     const fake = fakeSpawn({ autoClose: false })
     await assert.rejects(
       () => runScpPlan(simple, { spawnImpl: fake.impl, timeoutMs: 20 }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.TIMEOUT.EXEC',
+      (err: unknown) => err instanceof DpError && err.code === ERR.TIMEOUT.EXEC,
     )
     assert.deepEqual([...fake.records[0]!.killed], ['SIGKILL'])
   })

@@ -6,7 +6,7 @@
  */
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { buildTarArgv, remoteExtractCommand, runTarSsh } from './tar-ssh.js'
 import { fakeSpawn } from './fake-spawn.js'
 import type { TransferRequest } from './types.js'
@@ -73,7 +73,7 @@ describe('buildTarArgv', () => {
   test('空源 → DP.SOURCE.EMPTY', () => {
     assert.throws(
       () => buildTarArgv({ ...req, entries: [] }, opts),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.SOURCE.EMPTY',
+      (err: unknown) => err instanceof DpError && err.code === ERR.SOURCE.EMPTY,
     )
   })
 })
@@ -124,7 +124,7 @@ describe('runTarSsh', () => {
       () => runTarSsh(buildTarArgv(req, opts), { spawnImpl: impl, timeoutMs: 5000 }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.VERIFY.FAILED')
+        assert.equal(err.code, ERR.VERIFY.FAILED)
         return true
       },
     )
@@ -136,7 +136,7 @@ describe('runTarSsh', () => {
       () => runTarSsh(buildTarArgv(req, opts), { spawnImpl: impl, timeoutMs: 5000 }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SSH.CONNECT_FAILED')
+        assert.equal(err.code, ERR.SSH.CONNECT_FAILED)
         return true
       },
     )
@@ -148,7 +148,7 @@ describe('runTarSsh', () => {
       () => runTarSsh(buildTarArgv(req, opts), { spawnImpl: impl, timeoutMs: 5000 }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SSH.TOOL_MISSING')
+        assert.equal(err.code, ERR.SSH.TOOL_MISSING)
         return true
       },
     )
@@ -160,7 +160,7 @@ describe('runTarSsh', () => {
       () => runTarSsh(buildTarArgv(req, opts), { spawnImpl: impl, timeoutMs: 5000 }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PATH.NOT_WRITABLE')
+        assert.equal(err.code, ERR.PATH.NOT_WRITABLE)
         return true
       },
     )
@@ -191,7 +191,7 @@ describe('runTarSsh', () => {
       () => runTarSsh(buildTarArgv(req, opts), { spawnImpl: fake.impl, timeoutMs: 20 }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.TIMEOUT.EXEC')
+        assert.equal(err.code, ERR.TIMEOUT.EXEC)
         return true
       },
     )

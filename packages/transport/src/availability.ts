@@ -1,4 +1,4 @@
-import { DpError, type Facts } from '@dp/ports'
+import { ERR, DpError, type Facts } from '@dp/ports'
 import type { ChooseTransportInput, TransportChoice, TransportKind } from './types.js'
 
 /**
@@ -140,7 +140,7 @@ export function chooseTransport(input: ChooseTransportInput): TransportChoice {
     const wanted = (input.preferred ?? []).filter((k) => k !== 'local-copy')
     if (wanted.length > 0) {
       throw new DpError(
-        'DP.PREF.UNSUPPORTED',
+        ERR.PREF.UNSUPPORTED,
         `local 目标不支持传输方式 ${wanted.join(' / ')}`,
         {
           path: 'transport.preferred',
@@ -161,7 +161,7 @@ export function chooseTransport(input: ChooseTransportInput): TransportChoice {
 
   if (accepted.length === 0) {
     // 用户点名了却一个都不成立 —— 抛错，并**逐项**说清为什么
-    throw new DpError('DP.PREF.UNSUPPORTED', buildUnusableMessage(input, rejected), {
+    throw new DpError(ERR.PREF.UNSUPPORTED, buildUnusableMessage(input, rejected), {
       path: 'transport.preferred',
       hint: buildSuggestion(input),
     })

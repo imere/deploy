@@ -1,4 +1,4 @@
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { quoteArg, wrapCommand } from '@dp/ssh'
 import { runProcess, summarizeFailure } from './proc.js'
 import { buildRshArgv, rshValueForRsync } from './rsh.js'
@@ -39,7 +39,7 @@ export interface TarArgvPair {
  */
 export function buildTarArgv(req: TransferRequest, options: TarArgvOptions): TarArgvPair {
   if (req.entries.length === 0) {
-    throw new DpError('DP.SOURCE.EMPTY', '源清单为空，拒绝传输', {
+    throw new DpError(ERR.SOURCE.EMPTY, '源清单为空，拒绝传输', {
       hint: '构建产物为空，或 include/exclude 把所有文件都排除了',
     })
   }
@@ -129,22 +129,22 @@ export async function runTarSsh(
   const remoteDetail = summarizeFailure(remote.stderr)
 
   if (local.code !== 0) {
-    throw new DpError('DP.VERIFY.FAILED', `本地打包失败（tar ${local.code}）：${localDetail}`, {
+    throw new DpError(ERR.VERIFY.FAILED, `本地打包失败（tar ${local.code}）：${localDetail}`, {
       hint: '确认源文件在传输过程中没被删掉；或用 --dry-run 先看清单',
     })
   }
   if (remote.code !== 0) {
     if (remote.code === 255) {
-      throw new DpError('DP.SSH.CONNECT_FAILED', `ssh 层失败：${remoteDetail}`, {
+      throw new DpError(ERR.SSH.CONNECT_FAILED, `ssh 层失败：${remoteDetail}`, {
         hint: '检查主机可达性、凭据与跳板链',
       })
     }
     if (remote.code === 127) {
-      throw new DpError('DP.SSH.TOOL_MISSING', `目标机没有 tar（exit 127）：${remoteDetail}`, {
+      throw new DpError(ERR.SSH.TOOL_MISSING, `目标机没有 tar（exit 127）：${remoteDetail}`, {
         hint: '在目标机装 tar，或改用 rsync-ssh',
       })
     }
-    throw new DpError('DP.PATH.NOT_WRITABLE', `远端解包失败（tar ${remote.code}）：${remoteDetail}`, {
+    throw new DpError(ERR.PATH.NOT_WRITABLE, `远端解包失败（tar ${remote.code}）：${remoteDetail}`, {
       hint: '确认目标目录存在且当前身份可写；需要提权就配 hosts.*.become',
     })
   }

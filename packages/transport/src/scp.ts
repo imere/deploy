@@ -1,4 +1,4 @@
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { quoteArg, wrapCommand } from '@dp/ssh'
 import { runProcess, summarizeFailure } from './proc.js'
 import { sshOptionsForCopyTool } from './copy-opts.js'
@@ -44,12 +44,12 @@ export interface ScpPlan {
  */
 export function buildScpPlan(req: TransferRequest, options: ScpArgvOptions): ScpPlan {
   if (req.entries.length === 0) {
-    throw new DpError('DP.SOURCE.EMPTY', '源清单为空，拒绝传输', {
+    throw new DpError(ERR.SOURCE.EMPTY, '源清单为空，拒绝传输', {
       hint: '构建产物为空，或 include/exclude 把所有文件都排除了',
     })
   }
   if (req.deleteExtraneous === true) {
-    throw new DpError('DP.PREF.UNSUPPORTED', 'scp 不支持删除目标上多出来的文件', {
+    throw new DpError(ERR.PREF.UNSUPPORTED, 'scp 不支持删除目标上多出来的文件', {
       path: 'transport.delete',
       hint: 'scp 协议没有这个能力。想清理远端目录请用 rsync-ssh 的 --delete，或在目标机上显式清理',
     })
@@ -58,7 +58,7 @@ export function buildScpPlan(req: TransferRequest, options: ScpArgvOptions): Scp
   // 提权：scp 没有 --rsync-path，远端命令没有可以包装的位置 —— 直接拒绝，
   // 而不是静默降成无提权跑（那等于把要求提权的配置当成了没写）
   if (req.become !== undefined && req.become.type !== 'none') {
-    throw new DpError('DP.PREF.UNSUPPORTED', 'scp 路径不支持远端提权', {
+    throw new DpError(ERR.PREF.UNSUPPORTED, 'scp 路径不支持远端提权', {
       path: 'hosts.*.become',
       hint: 'scp 协议没有可以包装远端命令的位置（rsync 有 --rsync-path）。需要提权请改用 rsync-ssh 或 tar-ssh',
     })
@@ -136,7 +136,7 @@ export async function runScpPlan(
     const mkdir = await ensureRemoteDirs(plan.mkdirArgv, options)
     if (mkdir.code !== 0) {
       throw new DpError(
-        'DP.PATH.NOT_WRITABLE',
+        ERR.PATH.NOT_WRITABLE,
         `远端建父目录失败：${summarizeFailure(mkdir.stderr) || `exit ${mkdir.code}`}`,
         {
           hint: '确认目标目录存在且当前身份可写',
@@ -156,16 +156,16 @@ export async function runScpPlan(
     if (result.code !== 0) {
       const detail = summarizeFailure(result.stderr)
       if (result.code === 255) {
-        throw new DpError('DP.SSH.CONNECT_FAILED', `scp 的 ssh 层失败：${detail}`, {
+        throw new DpError(ERR.SSH.CONNECT_FAILED, `scp 的 ssh 层失败：${detail}`, {
           hint: '检查主机可达性与凭据',
         })
       }
       if (result.code === 1 || /not found|no such file/i.test(detail)) {
-        throw new DpError('DP.PATH.NOT_WRITABLE', `scp 传输失败：${detail || `exit ${result.code}`}`, {
+        throw new DpError(ERR.PATH.NOT_WRITABLE, `scp 传输失败：${detail || `exit ${result.code}`}`, {
           hint: '确认目标目录存在且可写',
         })
       }
-      throw new DpError('DP.VERIFY.FAILED', `scp 失败（exit ${result.code}）：${detail}`, {
+      throw new DpError(ERR.VERIFY.FAILED, `scp 失败（exit ${result.code}）：${detail}`, {
         hint: 'scp 无增量与删除能力，考虑改用 rsync-ssh —— 它带服务端 --dry-run，能真的验一遍',
       })
     }

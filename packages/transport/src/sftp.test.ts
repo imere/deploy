@@ -6,7 +6,7 @@
  */
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { buildSftpPlan, runSftp } from './sftp.js'
 import { fakeSpawn } from './fake-spawn.js'
 import type { TransferRequest } from './types.js'
@@ -110,7 +110,7 @@ describe('buildSftpPlan · 做不到的事明确拒绝', () => {
   test('空源 → DP.SOURCE.EMPTY', () => {
     assert.throws(
       () => buildSftpPlan({ ...req, entries: [] }, opts),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.SOURCE.EMPTY',
+      (err: unknown) => err instanceof DpError && err.code === ERR.SOURCE.EMPTY,
     )
   })
 
@@ -119,7 +119,7 @@ describe('buildSftpPlan · 做不到的事明确拒绝', () => {
       () => buildSftpPlan({ ...req, deleteExtraneous: true }, opts),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PREF.UNSUPPORTED')
+        assert.equal(err.code, ERR.PREF.UNSUPPORTED)
         assert.match(err.hint ?? '', /rsync/)
         return true
       },
@@ -131,7 +131,7 @@ describe('buildSftpPlan · 做不到的事明确拒绝', () => {
       () => buildSftpPlan({ ...req, become: { type: 'sudo' } }, opts),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PREF.UNSUPPORTED')
+        assert.equal(err.code, ERR.PREF.UNSUPPORTED)
         assert.match(err.hint ?? '', /rsync-ssh|tar-ssh/)
         return true
       },
@@ -171,7 +171,7 @@ describe('runSftp', () => {
     const fake = fakeSpawn({ exitCode: 255, stderr: 'ssh: connect to host dp-target port 22: Connection refused' })
     await assert.rejects(
       () => runSftp(buildSftpPlan(req, opts), { spawnImpl: fake.impl, timeoutMs: 5000 }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.SSH.CONNECT_FAILED',
+      (err: unknown) => err instanceof DpError && err.code === ERR.SSH.CONNECT_FAILED,
     )
   })
 
@@ -179,7 +179,7 @@ describe('runSftp', () => {
     const fake = fakeSpawn({ exitCode: 1, stderr: "Couldn't create directory: Permission denied" })
     await assert.rejects(
       () => runSftp(buildSftpPlan(req, opts), { spawnImpl: fake.impl, timeoutMs: 5000 }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.PATH.NOT_WRITABLE',
+      (err: unknown) => err instanceof DpError && err.code === ERR.PATH.NOT_WRITABLE,
     )
   })
 
@@ -187,7 +187,7 @@ describe('runSftp', () => {
     const fake = fakeSpawn({ exitCode: 2, stderr: 'Connection closed' })
     await assert.rejects(
       () => runSftp(buildSftpPlan(req, opts), { spawnImpl: fake.impl, timeoutMs: 5000 }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.VERIFY.FAILED',
+      (err: unknown) => err instanceof DpError && err.code === ERR.VERIFY.FAILED,
     )
   })
 
@@ -195,7 +195,7 @@ describe('runSftp', () => {
     const fake = fakeSpawn({ autoClose: false })
     await assert.rejects(
       () => runSftp(buildSftpPlan(req, opts), { spawnImpl: fake.impl, timeoutMs: 20 }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.TIMEOUT.EXEC',
+      (err: unknown) => err instanceof DpError && err.code === ERR.TIMEOUT.EXEC,
     )
     assert.deepEqual([...(fake.records[0]?.killed ?? [])], ['SIGKILL'])
   })
@@ -206,7 +206,7 @@ describe('runSftp', () => {
     fake.emit(0, 'stderr', "dp-user@dp-target's password: ")
     await assert.rejects(pending, (err: unknown) => {
       assert.ok(err instanceof DpError)
-      assert.equal(err.code, 'DP.INTERACTIVE_PROMPT_DETECTED')
+      assert.equal(err.code, ERR.INTERACTIVE_PROMPT_DETECTED)
       return true
     })
   })

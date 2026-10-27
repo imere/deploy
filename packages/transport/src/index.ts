@@ -1,4 +1,4 @@
-import { DpError, type Facts } from '@dp/ports'
+import { ERR, DpError, type Facts } from '@dp/ports'
 import { createLogger, type Logger } from '@dp/log'
 import { hostTarget, type KnownHostsMode, type SshAuthKind } from '@dp/ssh'
 import { chooseTransport } from './availability.js'
@@ -59,7 +59,7 @@ export async function transfer(
   deps: TransferDeps,
 ): Promise<TransferResult> {
   if (deps.localFacts === undefined) {
-    throw new DpError('DP.CONFIG.INVALID', 'transfer 需要 localFacts', {
+    throw new DpError(ERR.CONFIG.INVALID, 'transfer 需要 localFacts', {
       hint: '协商的唯一输入是两端 Facts（一次探完，别一问一答）',
     })
   }
@@ -70,7 +70,7 @@ export async function transfer(
   // 本地两端口是同一份事实 —— 传两份不同的会凭空造出"两端工具不一致"的假象
   const remoteFacts = deps.remoteFacts ?? deps.localFacts
   if (req.kind === 'remote' && deps.remoteFacts === undefined) {
-    throw new DpError('DP.CONFIG.INVALID', '远程传输需要 remoteFacts', {
+    throw new DpError(ERR.CONFIG.INVALID, '远程传输需要 remoteFacts', {
       hint: '用 @dp/ssh 的 probeFacts 探测目标机；--facts 夹具只能用于 local 主机',
     })
   }
@@ -111,7 +111,7 @@ async function runLocal(
   log: Logger,
 ): Promise<TransferResult> {
   if (deps.localRunner === undefined) {
-    throw new DpError('DP.CONFIG.INVALID', 'local 传输需要注入 localRunner', {
+    throw new DpError(ERR.CONFIG.INVALID, 'local 传输需要注入 localRunner', {
       hint: '本包不依赖 @dp/local：调用方用 createLocalRunner(facts) 建好 Runner 传进来，本地只有一个真相来源',
     })
   }
@@ -129,18 +129,18 @@ async function runRemote(
   const localFacts = deps.localFacts
   const remoteFacts = deps.remoteFacts
   if (remoteFacts === undefined) {
-    throw new DpError('DP.CONFIG.INVALID', '远程传输需要 remoteFacts', { hint: '见 transfer() 的说明' })
+    throw new DpError(ERR.CONFIG.INVALID, '远程传输需要 remoteFacts', { hint: '见 transfer() 的说明' })
   }
   const sshPath = localFacts.tools.ssh ?? null
   if (sshPath === null) {
-    throw new DpError('DP.SSH.TOOL_MISSING', '本地没有 ssh，远程传输无法进行', {
+    throw new DpError(ERR.SSH.TOOL_MISSING, '本地没有 ssh，远程传输无法进行', {
       hint: '本包走系统 ssh 作为 rsync 的 remote-shell。装 OpenSSH，或在 ssh2 驱动上走 dp-rsh 助手',
     })
   }
 
   const target = req.sshTarget ?? req.host
   if (target === undefined || target === '') {
-    throw new DpError('DP.CONFIG.INVALID', '远程传输需要 sshTarget 或 host', {
+    throw new DpError(ERR.CONFIG.INVALID, '远程传输需要 sshTarget 或 host', {
       hint: 'host 只用于日志，真正连接靠 sshTarget（user@host[:port]）',
     })
   }
@@ -162,7 +162,7 @@ async function runRemote(
     case 'rsync-ssh': {
       const rsyncPath = localFacts.tools.rsync ?? null
       if (rsyncPath === null) {
-        throw new DpError('DP.SSH.TOOL_MISSING', '本地没有 rsync（协商结论已过期）', {
+        throw new DpError(ERR.SSH.TOOL_MISSING, '本地没有 rsync（协商结论已过期）', {
           hint: '重新探测 Facts 后再协商；不要在这里偷偷换成 tar —— 那会让 plan 与实际执行不一致',
         })
       }
@@ -175,7 +175,7 @@ async function runRemote(
     case 'tar-ssh': {
       const tarPath = localFacts.tools.tar ?? null
       if (tarPath === null) {
-        throw new DpError('DP.SSH.TOOL_MISSING', '本地没有 tar（协商结论已过期）', {
+        throw new DpError(ERR.SSH.TOOL_MISSING, '本地没有 tar（协商结论已过期）', {
           hint: '重新探测 Facts 后再协商',
         })
       }
@@ -195,7 +195,7 @@ async function runRemote(
     case 'scp': {
       const scpPath = localFacts.tools.scp ?? null
       if (scpPath === null) {
-        throw new DpError('DP.SSH.TOOL_MISSING', '本地没有 scp（协商结论已过期）', {
+        throw new DpError(ERR.SSH.TOOL_MISSING, '本地没有 scp（协商结论已过期）', {
           hint: '重新探测 Facts 后再协商',
         })
       }
@@ -210,7 +210,7 @@ async function runRemote(
     case 'sftp': {
       const sftpPath = localFacts.tools.sftp ?? null
       if (sftpPath === null) {
-        throw new DpError('DP.SSH.TOOL_MISSING', '本地没有 sftp（协商结论已过期）', {
+        throw new DpError(ERR.SSH.TOOL_MISSING, '本地没有 sftp（协商结论已过期）', {
           hint: '重新探测 Facts 后再协商；不要在这里偷偷换成 scp —— 那会让 plan 与实际执行不一致',
         })
       }
@@ -223,7 +223,7 @@ async function runRemote(
       })
     }
     case 'local-copy':
-      throw new DpError('DP.CONFIG.INVALID', 'local-copy 只适用于 kind=local', { hint: '检查调用方传错了 kind' })
+      throw new DpError(ERR.CONFIG.INVALID, 'local-copy 只适用于 kind=local', { hint: '检查调用方传错了 kind' })
   }
 }
 

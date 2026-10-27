@@ -1,4 +1,4 @@
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import {
   buildRshArgv as buildSshRshArgv,
   rshOptionValue,
@@ -62,7 +62,7 @@ export function buildRshArgv(options: RshOptions): readonly string[] {
 
   if (hops.length > 1 && hopMode !== 'proxy-jump') {
     // ProxyCommand 只表达一跳的转发；多跳链只能交给 -J 或自建助手
-    throw new DpError('DP.CONFIG.INVALID', `ProxyCommand 形态只支持一跳，收到 ${hops.length} 跳`, {
+    throw new DpError(ERR.CONFIG.INVALID, `ProxyCommand 形态只支持一跳，收到 ${hops.length} 跳`, {
       path: 'hosts.*.hops',
       hint: '多跳请用 -J（hopMode 默认值）；只有单跳且跳板禁 TCP 转发时才有必要退到 ProxyCommand',
     })
@@ -70,7 +70,7 @@ export function buildRshArgv(options: RshOptions): readonly string[] {
   if (hops.length > 0) {
     for (const h of hops) {
       if (h.trim() === '' || hasWhitespace(h)) {
-        throw new DpError('DP.CONFIG.INVALID', `跳板标识含空白，无法作为单个 argv 传给 ssh：${JSON.stringify(h)}`, {
+        throw new DpError(ERR.CONFIG.INVALID, `跳板标识含空白，无法作为单个 argv 传给 ssh：${JSON.stringify(h)}`, {
           path: 'hosts.*.hops',
           hint: "写成 'user@host' 或 'user@host:port'，一个跳板一个元素",
         })
@@ -78,7 +78,7 @@ export function buildRshArgv(options: RshOptions): readonly string[] {
     }
   }
   if (!Number.isInteger(connectTimeoutSec) || connectTimeoutSec <= 0) {
-    throw new DpError('DP.CONFIG.INVALID', `ConnectTimeout 必须为正整数秒：${connectTimeoutSec}`, {
+    throw new DpError(ERR.CONFIG.INVALID, `ConnectTimeout 必须为正整数秒：${connectTimeoutSec}`, {
       path: 'hosts.*.connectTimeout',
       hint: '写 15 或 30 这样的整数；连接超时必须由我们自己兜底，不能让 ssh 无限等（铁律 0）',
     })
@@ -130,7 +130,7 @@ export function rshValueForRsync(argv: readonly string[]): string {
   } catch (err) {
     const proxyCommand = argv.find((a) => a.startsWith('ProxyCommand='))
     if (proxyCommand !== undefined) {
-      throw new DpError('DP.CONFIG.INVALID', 'ProxyCommand 形态的 rsh 无法通过 rsync 的 -e 传递', {
+      throw new DpError(ERR.CONFIG.INVALID, 'ProxyCommand 形态的 rsh 无法通过 rsync 的 -e 传递', {
         path: 'hosts.*.hops',
         hint:
           `原因：rsync 把 -e 的值按空白拆分且不过 shell，而 ${proxyCommand.slice(0, 40)}… 里含空格。` +

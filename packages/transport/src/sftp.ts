@@ -4,7 +4,7 @@
  * 它成立的条件最松 —— 只要 sshd 开了 sftp 子系统，不要求目标机装 rsync 或 tar；
  * 代价是既没有增量，也删不掉目标上多出来的文件（这两件事都被明确拒绝，不静默）。
  */
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { buildSftpBatch, sftpQuote } from '@dp/ssh'
 import { runProcess, summarizeFailure } from './proc.js'
 import { buildRshArgv } from './rsh.js'
@@ -56,18 +56,18 @@ export interface SftpPlan {
  */
 export function buildSftpPlan(req: TransferRequest, options: SftpArgvOptions): SftpPlan {
   if (req.entries.length === 0) {
-    throw new DpError('DP.SOURCE.EMPTY', '源清单为空，拒绝传输', {
+    throw new DpError(ERR.SOURCE.EMPTY, '源清单为空，拒绝传输', {
       hint: '构建产物为空，或 include/exclude 把所有文件都排除了',
     })
   }
   if (req.deleteExtraneous === true) {
-    throw new DpError('DP.PREF.UNSUPPORTED', 'sftp 不支持删除目标上多出来的文件', {
+    throw new DpError(ERR.PREF.UNSUPPORTED, 'sftp 不支持删除目标上多出来的文件', {
       path: 'transport.delete',
       hint: '「多出来哪些」需要先递归列出远端再与本地清单比对，而 sftp 的批处理没有递归列目录。想清理远端目录请用 rsync-ssh 的 --delete，或在目标机上显式清理',
     })
   }
   if (req.become !== undefined && req.become.type !== 'none') {
-    throw new DpError('DP.PREF.UNSUPPORTED', 'sftp 路径不支持远端提权', {
+    throw new DpError(ERR.PREF.UNSUPPORTED, 'sftp 路径不支持远端提权', {
       path: 'hosts.*.become',
       hint: 'sftp 服务端由 sshd 以登录用户的身份起，脚本里没有可以包装成 sudo 的位置（rsync 有 --rsync-path，tar 走命令包装）。需要提权请改用 rsync-ssh 或 tar-ssh',
     })
@@ -146,16 +146,16 @@ export async function runSftp(plan: SftpPlan, options: RunSftpOptions = {}): Pro
   if (result.code !== 0) {
     const detail = summarizeFailure(result.stderr)
     if (result.code === 255) {
-      throw new DpError('DP.SSH.CONNECT_FAILED', `sftp 的 ssh 层失败：${detail}`, {
+      throw new DpError(ERR.SSH.CONNECT_FAILED, `sftp 的 ssh 层失败：${detail}`, {
         hint: '检查主机可达性与凭据；sftp 子系统被禁用时（sshd 的 Subsystem sftp 一行）也会落到这里',
       })
     }
     if (/no such file|not found|permission denied|cannot create|couldn't create/i.test(detail)) {
-      throw new DpError('DP.PATH.NOT_WRITABLE', `sftp 传输失败：${detail || `exit ${result.code}`}`, {
+      throw new DpError(ERR.PATH.NOT_WRITABLE, `sftp 传输失败：${detail || `exit ${result.code}`}`, {
         hint: '确认目标目录的父目录存在且登录身份可写；需要提权请改用 rsync-ssh 或 tar-ssh',
       })
     }
-    throw new DpError('DP.VERIFY.FAILED', `sftp 失败（exit ${result.code}）：${detail}`, {
+    throw new DpError(ERR.VERIFY.FAILED, `sftp 失败（exit ${result.code}）：${detail}`, {
       hint: '带 --dry-run 重跑看清单；sftp 没有增量也没有删除能力，能装 rsync 就换回 rsync-ssh',
     })
   }

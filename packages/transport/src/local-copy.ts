@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { DpError, type Runner } from '@dp/ports'
+import { ERR, DpError, type Runner } from '@dp/ports'
 import type { TransferRequest, TransferResult } from './types.js'
 
 const rel = (root: string, relativePath: string): string => join(root, ...relativePath.split('/'))
@@ -18,7 +18,7 @@ export async function copyLocal(
   runner: Runner,
 ): Promise<TransferResult> {
   if (req.entries.length === 0) {
-    throw new DpError('DP.SOURCE.EMPTY', '源清单为空，拒绝复制', {
+    throw new DpError(ERR.SOURCE.EMPTY, '源清单为空，拒绝复制', {
       hint: '构建产物为空，或 include/exclude 把所有文件都排除了',
     })
   }

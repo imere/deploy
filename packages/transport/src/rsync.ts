@@ -1,4 +1,4 @@
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { quoteArg, wrapCommand } from '@dp/ssh'
 import { redact } from '@dp/log'
 import { runProcess, summarizeFailure, type RunProcessResult } from './proc.js'
@@ -74,12 +74,12 @@ export function buildRsyncPlan(
   options: RsyncArgvOptions,
 ): RsyncPlan {
   if (req.entries.length === 0) {
-    throw new DpError('DP.SOURCE.EMPTY', '源清单为空，拒绝传输', {
+    throw new DpError(ERR.SOURCE.EMPTY, '源清单为空，拒绝传输', {
       hint: '构建产物为空，或 include/exclude 把所有文件都排除了',
     })
   }
   if (options.remoteTarget.trim() === '') {
-    throw new DpError('DP.CONFIG.INVALID', '远端目标标识为空', { hint: 'remote 传输需要 sshTarget 或 host' })
+    throw new DpError(ERR.CONFIG.INVALID, '远端目标标识为空', { hint: 'remote 传输需要 sshTarget 或 host' })
   }
 
   // rshValue / rsync-path 只算一次：rsh 含空白时在这里就抛，不等循环里每组长一遍
@@ -151,7 +151,7 @@ export function classifyRsyncExit(
     return {
       ok: false,
       partial: false,
-      error: new DpError('DP.VERIFY.FAILED', `rsync 全部文件传输失败：${detail}`, {
+      error: new DpError(ERR.VERIFY.FAILED, `rsync 全部文件传输失败：${detail}`, {
         hint: '检查目标目录权限与磁盘空间；或在目标机装上 rsync',
       }),
     }
@@ -160,7 +160,7 @@ export function classifyRsyncExit(
     return {
       ok: false,
       partial: false,
-      error: new DpError('DP.PATH.NOT_WRITABLE', `目标机路径或权限问题（rsync ${code}）：${detail}`, {
+      error: new DpError(ERR.PATH.NOT_WRITABLE, `目标机路径或权限问题（rsync ${code}）：${detail}`, {
         hint: '确认目标目录存在且当前身份可写。需要提权就配 hosts.*.become（我们只包装，不替你改 sudoers）',
       }),
     }
@@ -169,7 +169,7 @@ export function classifyRsyncExit(
     return {
       ok: false,
       partial: false,
-      error: new DpError('DP.SSH.TOOL_MISSING', `目标机找不到 rsync（exit 127）：${detail}`, {
+      error: new DpError(ERR.SSH.TOOL_MISSING, `目标机找不到 rsync（exit 127）：${detail}`, {
         hint: '要么在目标机装 rsync，要么在配置里把传输方式降级为 tar-ssh（两端都有 tar 时可用）',
       }),
     }
@@ -180,7 +180,7 @@ export function classifyRsyncExit(
   return {
     ok: false,
     partial: false,
-    error: new DpError('DP.VERIFY.FAILED', `rsync 失败（exit ${code}）：${detail}`, {
+    error: new DpError(ERR.VERIFY.FAILED, `rsync 失败（exit ${code}）：${detail}`, {
       hint: '带 --dry-run 重跑看它到底要做什么；同时确认传输方式与两端工具仍然匹配',
     }),
   }
@@ -191,7 +191,7 @@ function sshError(detail: string): DpError {
     detail,
   )
   if (auth) {
-    return new DpError('DP.SSH.AUTH_FAILED', `ssh 认证失败：${detail}`, {
+    return new DpError(ERR.SSH.AUTH_FAILED, `ssh 认证失败：${detail}`, {
       hint: '检查 identityFile / 远端 authorized_keys。铁律 0：不会退化成交互式密码输入',
     })
   }
@@ -199,11 +199,11 @@ function sshError(detail: string): DpError {
     detail,
   )
   if (hostKey) {
-    return new DpError('DP.SSH.HOST_KEY_MISMATCH', `主机密钥校验失败：${detail}`, {
+    return new DpError(ERR.SSH.HOST_KEY_MISMATCH, `主机密钥校验失败：${detail}`, {
       hint: '确认目标机身份后再更新 known_hosts。主机密钥不匹配永不自动放行',
     })
   }
-  return new DpError('DP.SSH.CONNECT_FAILED', `ssh 连接失败：${detail}`, {
+  return new DpError(ERR.SSH.CONNECT_FAILED, `ssh 连接失败：${detail}`, {
     hint: '检查主机可达性、端口、防火墙与跳板链',
   })
 }
@@ -287,7 +287,7 @@ export async function runRsyncPlan(
   if (plan.remoteDirs.length > 0 && plan.mkdirArgv !== undefined && plan.dryRun !== true) {
     const mkdir = await ensureRemoteDirs(plan.mkdirArgv, options)
     if (mkdir.code !== 0) {
-      throw new DpError('DP.PATH.NOT_WRITABLE', `远端建父目录失败：${summarizeFailure(redactString(mkdir.stderr))}`, {
+      throw new DpError(ERR.PATH.NOT_WRITABLE, `远端建父目录失败：${summarizeFailure(redactString(mkdir.stderr))}`, {
         hint: '确认发布根存在且当前身份可写。需要提权就配 hosts.*.become（我们只包装，不替你改 sudoers）',
       })
     }

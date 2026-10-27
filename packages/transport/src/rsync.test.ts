@@ -8,7 +8,7 @@
  */
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { buildRsyncPath, buildRsyncPlan, classifyRsyncExit, parseRsyncOutput, runRsyncPlan } from './rsync.js'
 import { fakeSpawn } from './fake-spawn.js'
 import type { RsyncPlan } from './rsync.js'
@@ -122,14 +122,14 @@ describe('buildRsyncPlan', () => {
   test('空源 → DP.SOURCE.EMPTY（不传输空的"成功"）', () => {
     assert.throws(
       () => buildRsyncPlan({ ...req, entries: [] }, opts),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.SOURCE.EMPTY',
+      (err: unknown) => err instanceof DpError && err.code === ERR.SOURCE.EMPTY,
     )
   })
 
   test('空远端目标 → 拒绝，不猜', () => {
     assert.throws(
       () => buildRsyncPlan(req, { ...opts, remoteTarget: '  ' }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.CONFIG.INVALID',
+      (err: unknown) => err instanceof DpError && err.code === ERR.CONFIG.INVALID,
     )
   })
 })
@@ -152,7 +152,7 @@ describe('buildRsyncPath · 提权包装', () => {
   test('custom 模板必须含 ${cmd}，否则 @dp/ssh 直接拒', () => {
     assert.throws(
       () => buildRsyncPath({ type: 'custom', template: 'dzdo rsync' }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.CONFIG.INVALID',
+      (err: unknown) => err instanceof DpError && err.code === ERR.CONFIG.INVALID,
     )
   })
 })
@@ -174,17 +174,17 @@ describe('classifyRsyncExit', () => {
   test('11 / 12 → DP.PATH.NOT_WRITABLE', () => {
     for (const code of [11, 12]) {
       const v = classifyRsyncExit(code, 'Permission denied')
-      assert.equal(v.error?.code, 'DP.PATH.NOT_WRITABLE')
+      assert.equal(v.error?.code, ERR.PATH.NOT_WRITABLE)
     }
   })
 
   test('255 → DP.SSH.*，并按 stderr 细分认证 / 主机密钥 / 连接', () => {
-    assert.equal(classifyRsyncExit(255, 'Permission denied (publickey)').error?.code, 'DP.SSH.AUTH_FAILED')
+    assert.equal(classifyRsyncExit(255, 'Permission denied (publickey)').error?.code, ERR.SSH.AUTH_FAILED)
     assert.equal(
       classifyRsyncExit(255, 'Host key verification failed.').error?.code,
-      'DP.SSH.HOST_KEY_MISMATCH',
+      ERR.SSH.HOST_KEY_MISMATCH,
     )
-    assert.equal(classifyRsyncExit(255, 'Connection refused').error?.code, 'DP.SSH.CONNECT_FAILED')
+    assert.equal(classifyRsyncExit(255, 'Connection refused').error?.code, ERR.SSH.CONNECT_FAILED)
   })
 
   test('255 的 message 带上 ssh 的原话（排障需要）', () => {
@@ -193,11 +193,11 @@ describe('classifyRsyncExit', () => {
   })
 
   test('127 → 目标机没有 rsync', () => {
-    assert.equal(classifyRsyncExit(127, 'rsync: command not found').error?.code, 'DP.SSH.TOOL_MISSING')
+    assert.equal(classifyRsyncExit(127, 'rsync: command not found').error?.code, ERR.SSH.TOOL_MISSING)
   })
 
   test('25 → 全部失败', () => {
-    assert.equal(classifyRsyncExit(25, 'x').error?.code, 'DP.VERIFY.FAILED')
+    assert.equal(classifyRsyncExit(25, 'x').error?.code, ERR.VERIFY.FAILED)
   })
 })
 
@@ -259,7 +259,7 @@ describe('runRsyncPlan · fake spawn 驱动', () => {
     }
     await assert.rejects(
       () => runRsyncPlan(plan, { spawnImpl: fake.impl, timeoutMs: 5000 }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.PATH.NOT_WRITABLE',
+      (err: unknown) => err instanceof DpError && err.code === ERR.PATH.NOT_WRITABLE,
     )
     assert.equal(fake.count(), 1, '前奏失败后不该再起 rsync')
     assert.equal(fake.records[0]!.file, '/usr/bin/ssh')
@@ -294,7 +294,7 @@ describe('runRsyncPlan · fake spawn 驱动', () => {
       () => runRsyncPlan(simple, { spawnImpl: fake.impl, timeoutMs: 5000 }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SSH.AUTH_FAILED')
+        assert.equal(err.code, ERR.SSH.AUTH_FAILED)
         assert.match(err.message, /Permission denied/)
         return true
       },
@@ -307,7 +307,7 @@ describe('runRsyncPlan · fake spawn 驱动', () => {
       () => runRsyncPlan(simple, { spawnImpl: fake.impl, timeoutMs: 20 }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.TIMEOUT.EXEC')
+        assert.equal(err.code, ERR.TIMEOUT.EXEC)
         return true
       },
     )
@@ -322,7 +322,7 @@ describe('runRsyncPlan · fake spawn 驱动', () => {
       () => promise,
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.INTERACTIVE_PROMPT_DETECTED')
+        assert.equal(err.code, ERR.INTERACTIVE_PROMPT_DETECTED)
         return true
       },
     )

@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn } from 'node:child_process'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { detectPrompt, killProcessTree } from '@dp/ssh'
 import type { SpawnImpl, SpawnedProcess } from './types.js'
 
@@ -68,7 +68,7 @@ export function runProcess(
   const label = options.label ?? argv[0] ?? ''
 
   if (argv.length === 0) {
-    throw new DpError('DP.CONFIG.INVALID', 'argv 为空', { hint: '至少给出可执行文件名' })
+    throw new DpError(ERR.CONFIG.INVALID, 'argv 为空', { hint: '至少给出可执行文件名' })
   }
 
   return new Promise<RunProcessResult>((resolve, reject) => {
@@ -85,7 +85,7 @@ export function runProcess(
       })
     } catch (err) {
       reject(
-        new DpError('DP.CONFIG.INVALID', `无法启动 ${label}：${(err as Error).message}`, {
+        new DpError(ERR.CONFIG.INVALID, `无法启动 ${label}：${(err as Error).message}`, {
           cause: err,
           hint: '检查可执行文件是否存在、是否被安全软件拦截',
         }),
@@ -123,7 +123,7 @@ export function runProcess(
 
     const timer = setTimeout(() => {
       failFast(
-        new DpError('DP.TIMEOUT.EXEC', `传输超时 ${timeoutMs}ms：${label}`, {
+        new DpError(ERR.TIMEOUT.EXEC, `传输超时 ${timeoutMs}ms：${label}`, {
           hint: '增大 transport.timeout，或检查链路是否卡在等待输入（若是，先配好免密）',
         }),
       )
@@ -139,7 +139,7 @@ export function runProcess(
       const matched = detectPrompt(buf.toString('utf8'))
       if (matched === undefined) return
       failFast(
-        new DpError('DP.INTERACTIVE_PROMPT_DETECTED', `检测到交互式提示 ${matched}，已终止：${label}`, {
+        new DpError(ERR.INTERACTIVE_PROMPT_DETECTED, `检测到交互式提示 ${matched}，已终止：${label}`, {
           hint: '配置免密 sudo / 密钥直登 / SSH_ASKPASS。铁律 0：永不交互，我们不会等人类输入',
         }),
       )
@@ -157,7 +157,7 @@ export function runProcess(
     child.on('error', (err: Error) => {
       done(() =>
         reject(
-          new DpError('DP.SSH.TOOL_MISSING', `无法启动 ${label}：${err.message}`, {
+          new DpError(ERR.SSH.TOOL_MISSING, `无法启动 ${label}：${err.message}`, {
             cause: err,
             hint: '这个可执行文件不存在。传输方式的选择是按 facts.tools 的实证结果做的，所以这通常意味着 facts 是陈旧的 —— 重新探测再试',
           }),

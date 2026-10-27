@@ -6,7 +6,7 @@
  */
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { buildRshArgv, rshValueForRsync, DEFAULT_CONNECT_TIMEOUT_SEC } from './rsh.js'
 
 const base = {
@@ -92,7 +92,7 @@ describe('buildRshArgv · 多跳', () => {
       () => buildRshArgv({ ...base, hops: ['a@h1', 'b@h2'], hopMode: 'proxy-command-w' }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.CONFIG.INVALID')
+        assert.equal(err.code, ERR.CONFIG.INVALID)
         return true
       },
     )
@@ -101,7 +101,7 @@ describe('buildRshArgv · 多跳', () => {
   test('跳板标识含空白 → 拒绝（歧义靠拒绝）', () => {
     assert.throws(
       () => buildRshArgv({ ...base, hops: ['jump@host extra'] }),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.CONFIG.INVALID',
+      (err: unknown) => err instanceof DpError && err.code === ERR.CONFIG.INVALID,
     )
   })
 })
@@ -111,7 +111,7 @@ describe('buildRshArgv · 非法输入', () => {
     for (const bad of [0, -1, 1.5]) {
       assert.throws(
         () => buildRshArgv({ ...base, connectTimeoutSec: bad }),
-        (err: unknown) => err instanceof DpError && err.code === 'DP.CONFIG.INVALID',
+        (err: unknown) => err instanceof DpError && err.code === ERR.CONFIG.INVALID,
         `ConnectTimeout=${bad} 应被拒绝`,
       )
     }
@@ -133,7 +133,7 @@ describe('rshValueForRsync · rsync 的 -e 空白拆分限制', () => {
       () => rshValueForRsync(buildRshArgv({ ...base, hops: ['jump@host'], hopMode: 'proxy-command-w' })),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.CONFIG.INVALID')
+        assert.equal(err.code, ERR.CONFIG.INVALID)
         assert.match(err.hint ?? '', /dp-rsh/)
         return true
       },

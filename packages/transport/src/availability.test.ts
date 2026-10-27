@@ -6,7 +6,7 @@
  */
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { chooseTransport, DEFAULT_PREFERENCE } from './availability.js'
 import { LOCAL_NO_RSYNC, LOCAL_WITH_RSYNC, REMOTE_TAR_ONLY, REMOTE_WITH_RSYNC, makeFacts } from './fixtures.js'
 
@@ -23,7 +23,7 @@ describe('chooseTransport · local', () => {
       () => chooseTransport({ local: LOCAL_NO_RSYNC, remote: LOCAL_NO_RSYNC, kind: 'local', preferred: ['rsync-ssh'] }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PREF.UNSUPPORTED')
+        assert.equal(err.code, ERR.PREF.UNSUPPORTED)
         return true
       },
     )
@@ -111,7 +111,7 @@ describe('chooseTransport · 显式偏好不可用就抛错', () => {
       () => chooseTransport({ local: LOCAL_NO_RSYNC, remote: REMOTE_WITH_RSYNC, kind: 'remote', preferred: ['rsync-ssh'] }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.PREF.UNSUPPORTED')
+        assert.equal(err.code, ERR.PREF.UNSUPPORTED)
         // 逐项：不能只说"不支持"
         assert.match(err.message, /本地未检测到 rsync/)
         assert.ok(err.hint !== undefined && err.hint.length > 0, '必须有可执行建议')
