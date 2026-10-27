@@ -18,6 +18,7 @@
 | `DP.FILE.LOCKED` | 传输/激活 | ⚠️ |  | 预留（未实现） |
 | `DP.LOCK.HELD` | 并发 | ✅ | abort + 打印持锁者 | 预留（未实现） |
 | `DP.STATE.INCONSISTENT` | 运行期 | ✅ | abort + 打印索引现状（**不**静默改动 current） | `@dp/cli`（`dp rollback`） |
+| `DP.CLI.INTERNAL` | 任意 | ❌ | abort + 通用 hint（**保留原始 message**，不把它说成某个目标的问题） | `@dp/cli`（`describeError`：抛出物不是 `DpError` 时的兜底） |
 | `DP.TPL.UNKNOWN_VAR` | 配置渲染 | ✅ | abort（**绝不留下 `${x}` 原文**） | `@dp/template` |
 | `DP.TPL.MISSING_ENV` | 配置渲染 | ✅ | abort（空值同缺值处理） | `@dp/template` |
 | `DP.TPL.MISSING_VALUE` | 配置渲染 | ✅ | abort（同上：路径塌成 `/srv//` 要到中途才暴露） | `@dp/template` |

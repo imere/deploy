@@ -24,7 +24,7 @@ pnpm 单仓多包，包名前缀 `@dp/*`。**Node ≥ 24**。
 pnpm build                # tsc -b，产物 packages/<pkg>/build
 pnpm test                 # 构建 + node --test + 覆盖率 → build/coverage/lcov.info
 pnpm run integration      # 真机集成测试：podman 靶机 + 真 ssh，见 tests/integration/
-pnpm verify               # build + lint + test + 八项静态门禁（verify:gates）
+pnpm verify               # build + lint + test + 九项静态门禁（verify:gates）
 pnpm run verify:selfcheck # 门禁自检：注入违规看它们是否还拦得住
 pnpm run verify:mutation  # 变异测试（每个变异都要整包跑一遍测试，慢，常规交给 CI 周跑）
 pnpm run build:bin        # 单文件可执行程序 → build/bin/dp-<platform>-<arch>
@@ -53,7 +53,7 @@ packages/       @dp/* 各包（ports / schema / core / local / log / ssh / targe
 tests/          真机集成测试：容器靶机（sshd / nginx / systemd）+ 跑构建产物的客户端
 openspec/        行为契约（source of truth）：specs/<capability>/spec.md
 docs/           三份参考：config.md（配置字段）、decisions.md（决策与理由）、failures.md（故障分类表）
-scripts/        构建与八道门禁；build-binary.mjs 出单文件产物，link-workspace.mjs 补 pnpm 链接
+scripts/        构建与九道门禁；build-binary.mjs 出单文件产物，link-workspace.mjs 补 pnpm 链接
 .github/        CI：verify（门禁 + 覆盖率）与 binary（各平台各出一次产物）
 .agents/skills/ 可复用流程（与本项目无关，可整体搬到别处）：
                  subagent-dispatch（派活与验收）
@@ -96,6 +96,12 @@ build/          覆盖率产物所在根目录（已 gitignore）
   顺序按**实际依赖**定：`ports` 不依赖任何包，所以它最左；`schema` 要拿 `ports` 的
   `DpError` / `assertPortInRange` / `parseSshTarget` 去校验配置，站在它右边。
   把 `schema` 当最底层是错的（门禁脚本踩过一次，凭空报出 3 处反向依赖）
+- **错误码只许引用常量**：`DP.*` 的唯一定义处是 `@dp/ports` 的 `ERR`（错误码）与 `WARN`
+  （告警标记 —— 只进 warnings 与告警文案，不进 `DpError.code`，所以 failures.md 里查不到）。
+  源码与测试一律写 `ERR.PROC.START_FAILED`，不写 `'DP.PROC.START_FAILED'`；
+  字面量散在各包里时，改一个码要同步几十处，漏一处就是「报的是 A、断言的是 B」。
+  门禁 `check-error-codes` 盯着这条（文档里登记过、尚未实现的预留码豁免：它们没有常量可引）；
+  `ERR` 里的码又必须在 `docs/failures.md` 有处置说明 —— 那条由 `@dp/ports` 的断言盯着
 - **目标探测（`@dp/core/detect.ts`）**：源清单与 `package.json` 的 scripts **都由调用方注入**
   （它零 IO，否则 `makePlan()` 那套纯函数断言就不成立了）。仲裁比探测更保守：
   0 命中报错（列出它看到了哪些文件，不假装 static）、未实现的类型报错而不降级、
