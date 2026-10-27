@@ -1,4 +1,4 @@
-import { DpError, MANAGED_MARKER } from '@dp/ports'
+import { ERR, DpError, MANAGED_MARKER } from '@dp/ports'
 import { renderString, type RenderContext } from '@dp/template'
 import type { SystemdTargetConfig } from './types.js'
 
@@ -46,7 +46,7 @@ function renderValue(
   if (template === undefined) return undefined
   const value = renderString(template, ctx, { usage: 'conf', path })
   if (CONTROL_CHARS.test(value)) {
-    throw new DpError('DP.SYSD.UNIT_INVALID', `渲染结果含控制字符：${JSON.stringify(value).slice(0, 80)}`, {
+    throw new DpError(ERR.SYSD.UNIT_INVALID, `渲染结果含控制字符：${JSON.stringify(value).slice(0, 80)}`, {
       path,
       hint:
         'unit 是「一行一条指令」的格式，值里的换行会变成额外的 unit 指令（比如再插一条 ExecStart=）。' +
@@ -117,7 +117,7 @@ export function renderUnit(input: UnitRenderInput): string {
 
   for (const line of config.extra ?? []) {
     if (CONTROL_CHARS.test(line)) {
-      throw new DpError('DP.SYSD.UNIT_INVALID', `extra 的行含控制字符：${JSON.stringify(line).slice(0, 80)}`, {
+      throw new DpError(ERR.SYSD.UNIT_INVALID, `extra 的行含控制字符：${JSON.stringify(line).slice(0, 80)}`, {
         path: `${input.path}.extra`,
         hint: 'extra 是逐行原样输出的逃生舱；一行里带换行等于多出几条 unit 指令 —— 那不是逃生舱，是指令注入口',
       })

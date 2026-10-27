@@ -1,4 +1,5 @@
 import {
+  ERR,
   DpError,
   describeExecFailure,
   excerptOutput,
@@ -167,7 +168,7 @@ function argvOf(step: Step): readonly string[] {
   if (Array.isArray(argv) && argv.length > 0 && argv.every((item) => typeof item === 'string')) {
     return argv as readonly string[]
   }
-  throw new DpError('DP.SYSD.UNIT_INVALID', `${step.id} 的 detail.argv 缺失或不是非空字符串数组`, {
+  throw new DpError(ERR.SYSD.UNIT_INVALID, `${step.id} 的 detail.argv 缺失或不是非空字符串数组`, {
     hint: '执行器只按计划里发布的 argv 造命令。要改命令就改 target.ts 的 plan，不要在执行器里另写一份',
   })
 }
@@ -216,7 +217,7 @@ const PRESERVE_HINT =
 function assertUnitOverwritable(existing: string | null, options: { readonly force?: boolean; readonly path: string }): SystemdOwnership {
   const decision = decideUnitOverwrite(existing, options)
   if (decision.action === 'abort') {
-    throw new DpError('DP.SYSD.UNIT_NOT_MANAGED', decision.reason, {
+    throw new DpError(ERR.SYSD.UNIT_NOT_MANAGED, decision.reason, {
       path: options.path,
       hint: PRESERVE_HINT,
     })
@@ -364,7 +365,7 @@ class Session {
     const ran = new Set(this.steps.map((step) => step.id))
     const missing = planned.filter((id) => !ran.has(id))
     if (missing.length > 0) {
-      throw new DpError('DP.SYSD.UNIT_INVALID', `执行器漏掉了计划里的步骤：${missing.join(', ')}`, {
+      throw new DpError(ERR.SYSD.UNIT_INVALID, `执行器漏掉了计划里的步骤：${missing.join(', ')}`, {
         hint: '执行器与 target.ts 的步骤 id 不一致。这是代码错误，不是部署失败',
       })
     }
@@ -429,7 +430,7 @@ export async function installSystemd(input: SystemdExecInput): Promise<SystemdEx
   const argv = argvOf(stepAt(plan, 'systemd.validate-shadow'))
   const check = await session.exec(argv)
   if (check.code !== 0) {
-    return session.fail(checkStep, 'DP.SYSD.TEST_FAILED', `候选 unit 过不了 systemd-analyze verify（退出码 ${check.code}）`, {
+    return session.fail(checkStep, ERR.SYSD.TEST_FAILED, `候选 unit 过不了 systemd-analyze verify（退出码 ${check.code}）`, {
       output: outputOf(check),
       hint: (report) =>
         `${compensationSuffix(report)}unitDir 里的 ${session.paths.file} 没被碰过，` +
@@ -514,7 +515,7 @@ export async function activateSystemd(input: SystemdExecInput): Promise<SystemdE
   } else {
     const reloaded = await session.exec(argvOf(reloadStep))
     if (reloaded.code !== 0) {
-      return session.fail(reloadStep, 'DP.SYSD.DAEMON_RELOAD_FAILED', `systemctl daemon-reload 失败（退出码 ${reloaded.code}）`, {
+      return session.fail(reloadStep, ERR.SYSD.DAEMON_RELOAD_FAILED, `systemctl daemon-reload 失败（退出码 ${reloaded.code}）`, {
         output: outputOf(reloaded),
         hint: (report) =>
           `${compensationSuffix(report)}${session.paths.file} 已经在盘上，但 systemd 还没读到它，` +
@@ -537,7 +538,7 @@ export async function activateSystemd(input: SystemdExecInput): Promise<SystemdE
     } else {
       const enabled = await session.exec(argvOf(enableStep))
       if (enabled.code !== 0) {
-        return session.fail(enableStep, 'DP.SYSD.ENABLE_FAILED', `systemctl enable ${session.paths.unitName} 失败（退出码 ${enabled.code}）`, {
+        return session.fail(enableStep, ERR.SYSD.ENABLE_FAILED, `systemctl enable ${session.paths.unitName} 失败（退出码 ${enabled.code}）`, {
           output: outputOf(enabled),
           hint:
             '服务本身没受影响 —— unit 已落盘、daemon-reload 已过，缺的只是 WantedBy 那条软链，' +
@@ -559,7 +560,7 @@ export async function activateSystemd(input: SystemdExecInput): Promise<SystemdE
   } else {
     const restarted = await session.exec(argvOf(restartStep))
     if (restarted.code !== 0) {
-      return session.fail(restartStep, 'DP.SYSD.RESTART_FAILED', `systemctl restart ${session.paths.unitName} 失败（退出码 ${restarted.code}）`, {
+      return session.fail(restartStep, ERR.SYSD.RESTART_FAILED, `systemctl restart ${session.paths.unitName} 失败（退出码 ${restarted.code}）`, {
         output: outputOf(restarted),
         hint: (report) =>
           `${compensationSuffix(report)}unit 已经落盘并生效，只是服务没起来 —— ` +
@@ -596,7 +597,7 @@ export async function verifySystemd(input: SystemdExecInput): Promise<SystemdExe
   const result = await session.exec(argvOf(step))
   if (result.code !== 0) {
     const state = excerptOutput(result.stdout) || excerptOutput(result.stderr) || '(无输出)'
-    return session.fail(step, 'DP.SYSD.NOT_ACTIVE', `unit ${session.paths.unitName} 不是 active：${state}`, {
+    return session.fail(step, ERR.SYSD.NOT_ACTIVE, `unit ${session.paths.unitName} 不是 active：${state}`, {
       output: outputOf(result),
       hint:
         `systemctl is-active 报的是 ${state}。` +
@@ -630,7 +631,7 @@ export async function rollbackSystemd(input: SystemdExecInput): Promise<SystemdE
   const restoreStep = stepAt(plan, 'systemd.restore-backup')
   session.begin(restoreStep)
   if ((await session.runner.stat(session.paths.backup)) === null) {
-    return session.fail(restoreStep, 'DP.SYSD.NO_PREVIOUS', `没有可还原的备份：${session.paths.backup} 不存在`, {
+    return session.fail(restoreStep, ERR.SYSD.NO_PREVIOUS, `没有可还原的备份：${session.paths.backup} 不存在`, {
       hint:
         '首次部署没有上一份 unit 可回滚，本包不会返回「回滚成功」这种假结果。' +
         '确实要撤掉这次部署的话，手动删除该 unit 后 daemon-reload —— 备份只在上一次替换时才产生',
@@ -643,7 +644,7 @@ export async function rollbackSystemd(input: SystemdExecInput): Promise<SystemdE
   session.begin(reloadStep)
   const reloaded = await session.exec(argvOf(reloadStep))
   if (reloaded.code !== 0) {
-    return session.fail(reloadStep, 'DP.SYSD.DAEMON_RELOAD_FAILED', `还原后 systemctl daemon-reload 失败（退出码 ${reloaded.code}）`, {
+    return session.fail(reloadStep, ERR.SYSD.DAEMON_RELOAD_FAILED, `还原后 systemctl daemon-reload 失败（退出码 ${reloaded.code}）`, {
       output: outputOf(reloaded),
       hint: (report) =>
         `${compensationSuffix(report)}${session.paths.file} 已还原成上一份，但 systemd 还没读到它。` +
@@ -657,7 +658,7 @@ export async function rollbackSystemd(input: SystemdExecInput): Promise<SystemdE
   session.begin(restartStep)
   const restarted = await session.exec(argvOf(restartStep))
   if (restarted.code !== 0) {
-    return session.fail(restartStep, 'DP.SYSD.RESTART_FAILED', `还原后 systemctl restart ${session.paths.unitName} 失败（退出码 ${restarted.code}）`, {
+    return session.fail(restartStep, ERR.SYSD.RESTART_FAILED, `还原后 systemctl restart ${session.paths.unitName} 失败（退出码 ${restarted.code}）`, {
       output: outputOf(restarted),
       hint:
         `unit 已还原成上一份并完成了 daemon-reload，只是服务还没起来。` +
@@ -672,7 +673,7 @@ export async function rollbackSystemd(input: SystemdExecInput): Promise<SystemdE
   const checked = await session.exec(argvOf(verifyStep))
   if (checked.code !== 0) {
     const state = excerptOutput(checked.stdout) || excerptOutput(checked.stderr) || '(无输出)'
-    return session.fail(verifyStep, 'DP.SYSD.NOT_ACTIVE', `回滚后 unit ${session.paths.unitName} 不是 active：${state}`, {
+    return session.fail(verifyStep, ERR.SYSD.NOT_ACTIVE, `回滚后 unit ${session.paths.unitName} 不是 active：${state}`, {
       output: outputOf(checked),
       hint:
         '回滚本身已经完成（unit 已是上一份、服务也重启过），只是它没活下来 —— ' +
@@ -689,7 +690,7 @@ export async function rollbackSystemd(input: SystemdExecInput): Promise<SystemdE
 function stepAt(plan: readonly Step[], id: string): Step {
   const found = plan.find((step) => step.id === id)
   if (found !== undefined) return found
-  throw new DpError('DP.SYSD.UNIT_INVALID', `计划里没有步骤 ${id}`, {
+  throw new DpError(ERR.SYSD.UNIT_INVALID, `计划里没有步骤 ${id}`, {
     hint: '改 target.ts 的步骤时必须同步改执行器：少走一步在这里的表现是「部署看起来成功了」',
   })
 }

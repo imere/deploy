@@ -1,4 +1,4 @@
-import { DpError, RELEASES_DIR_NAME, joinRemotePath, type Step, type Target, type TargetContext } from '@dp/ports'
+import { ERR, DpError, RELEASES_DIR_NAME, joinRemotePath, type Step, type Target, type TargetContext } from '@dp/ports'
 import { renderString } from '@dp/template'
 import { renderUnit } from './unit.js'
 import type { SystemdTargetConfig } from './types.js'
@@ -76,7 +76,7 @@ function resolveUnitName(ctx: TargetContext, config: SystemdTargetConfig): strin
     const project = config.render.project
     if (project === '') {
       throw new DpError(
-        'DP.SYSD.UNIT_INVALID',
+        ERR.SYSD.UNIT_INVALID,
         '未配置 unit 名，且渲染上下文里没有 project 可用来推导',
         {
           path: UNIT_PATH,
@@ -88,7 +88,7 @@ function resolveUnitName(ctx: TargetContext, config: SystemdTargetConfig): strin
   } else {
     name = renderString(config.unit, config.render, { usage: 'conf', path: UNIT_PATH }).trim()
     if (name === '') {
-      throw new DpError('DP.SYSD.UNIT_INVALID', 'unit 名是空白字符串', {
+      throw new DpError(ERR.SYSD.UNIT_INVALID, 'unit 名是空白字符串', {
       path: UNIT_PATH,
       hint: '删掉这个字段表示用默认值 `<项目名>.service`；写成空白等于要求一个没有名字的 unit 文件',
       })
@@ -96,13 +96,13 @@ function resolveUnitName(ctx: TargetContext, config: SystemdTargetConfig): strin
   }
 
   if (name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
-    throw new DpError('DP.SYSD.UNIT_INVALID', `unit 名不是单个文件名：${name}`, {
+    throw new DpError(ERR.SYSD.UNIT_INVALID, `unit 名不是单个文件名：${name}`, {
       path: UNIT_PATH,
       hint: '它会被拼到 unitDir 后面，带路径分隔符就意味着能写到 unitDir 之外。要写到别的目录请另开一个 target',
     })
   }
   if (!name.endsWith('.service')) {
-    throw new DpError('DP.SYSD.UNIT_INVALID', `unit 名必须以 .service 结尾：${name}`, {
+    throw new DpError(ERR.SYSD.UNIT_INVALID, `unit 名必须以 .service 结尾：${name}`, {
       path: UNIT_PATH,
       hint: '本包只管 service unit —— timer / socket / path 的生命周期语义各不相同，' +
         '套进同一套 install/activate/verify 只会得到看起来能跑、实则语义错的实现',
@@ -123,7 +123,7 @@ function resolveUnitName(ctx: TargetContext, config: SystemdTargetConfig): strin
 function assertUnitDir(path: string): void {
   const escaped = path.split('/').some((segment) => segment === '..')
   if (!escaped && path.startsWith('/')) return
-  throw new DpError('DP.SYSD.UNIT_INVALID', `unitDir 不是可信的目标机绝对路径：${path}`, {
+  throw new DpError(ERR.SYSD.UNIT_INVALID, `unitDir 不是可信的目标机绝对路径：${path}`, {
     path: UNIT_DIR_PATH,
     hint: '写以 / 开头的绝对路径且不含 `..`。它由上层从 layout 推导后注入，不是用户随手填的相对路径',
   })

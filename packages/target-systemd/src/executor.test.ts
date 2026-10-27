@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  ERR,
   DpError,
   type ExecResult,
   type Facts,
@@ -80,7 +81,7 @@ class FakeRunner implements Runner {
 
   async readFile(path: string): Promise<string> {
     const value = this.files.get(path)
-    if (value === undefined) throw new DpError('DP.PATH.NOT_WRITABLE', `不存在：${path}`)
+    if (value === undefined) throw new DpError(ERR.PATH.NOT_WRITABLE, `不存在：${path}`)
     return value
   }
 
@@ -102,7 +103,7 @@ class FakeRunner implements Runner {
   }
 
   async symlink(): Promise<void> {
-    throw new DpError('DP.PATH.NOT_WRITABLE', '不支持软链')
+    throw new DpError(ERR.PATH.NOT_WRITABLE, '不支持软链')
   }
 
   async readlink(): Promise<string | null> {
@@ -160,7 +161,7 @@ describe('systemd 执行器 · install', () => {
       () => installSystemd({ runner, ctx: makeCtx(), config: makeConfig() }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SYSD.TEST_FAILED')
+        assert.equal(err.code, ERR.SYSD.TEST_FAILED)
         assert.match(err.message, /退出码 1/)
         assert.ok(isSystemdExecFailure(err.cause))
         assert.equal(err.cause?.phase, 'install')
@@ -178,7 +179,7 @@ describe('systemd 执行器 · install', () => {
       () => installSystemd({ runner, ctx: makeCtx(), config: makeConfig() }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SYSD.UNIT_NOT_MANAGED')
+        assert.equal(err.code, ERR.SYSD.UNIT_NOT_MANAGED)
         assert.match(err.message, /不带 managed 标记/)
         return true
       },
@@ -256,7 +257,7 @@ describe('systemd 执行器 · activate', () => {
       () => activateSystemd({ runner, ctx: makeCtx(), config: makeConfig() }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SYSD.ENABLE_FAILED')
+        assert.equal(err.code, ERR.SYSD.ENABLE_FAILED)
         assert.match(String(err.hint ?? ''), /重启后/)
         return true
       },
@@ -282,7 +283,7 @@ describe('systemd 执行器 · activate', () => {
       () => activateSystemd({ runner, ctx: makeCtx(), config: makeConfig() }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SYSD.RESTART_FAILED')
+        assert.equal(err.code, ERR.SYSD.RESTART_FAILED)
         assert.ok(isSystemdExecFailure(err.cause))
         assert.equal(err.cause?.step, 'systemd.restart')
         return true
@@ -309,7 +310,7 @@ describe('systemd 执行器 · verify', () => {
       () => verifySystemd({ runner, ctx: makeCtx(), config: makeConfig() }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SYSD.NOT_ACTIVE')
+        assert.equal(err.code, ERR.SYSD.NOT_ACTIVE)
         assert.match(err.message, /failed/)
         return true
       },
@@ -324,7 +325,7 @@ describe('systemd 执行器 · rollback', () => {
       () => rollbackSystemd({ runner, ctx: makeCtx({ previousReleaseId: 'r1' }), config: makeConfig() }),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SYSD.NO_PREVIOUS')
+        assert.equal(err.code, ERR.SYSD.NO_PREVIOUS)
         return true
       },
     )

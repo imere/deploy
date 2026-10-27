@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { analyzeVerifyArgv, enableArgv, systemctlArgv, systemdTarget, unitPaths } from './target.js'
 import type { SystemdTargetConfig } from './types.js'
 
@@ -115,7 +115,7 @@ describe('systemd target · unit 名推导', () => {
       () => unitPaths(makeCtx(), makeConfig({ unit: '../evil.service' })),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SYSD.UNIT_INVALID')
+        assert.equal(err.code, ERR.SYSD.UNIT_INVALID)
         assert.equal(err.path, 'projects.*.target.systemd.unit')
         return true
       },
@@ -125,7 +125,7 @@ describe('systemd target · unit 名推导', () => {
   it('不是 `.service` 结尾 → 拒绝（本包只管 service unit）', () => {
     assert.throws(
       () => unitPaths(makeCtx(), makeConfig({ unit: 'api.timer' })),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.SYSD.UNIT_INVALID',
+      (err: unknown) => err instanceof DpError && err.code === ERR.SYSD.UNIT_INVALID,
     )
   })
 
@@ -134,7 +134,7 @@ describe('systemd target · unit 名推导', () => {
       () => unitPaths(makeCtx(), makeConfig({ unitDir: 'etc/systemd/system' })),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SYSD.UNIT_INVALID')
+        assert.equal(err.code, ERR.SYSD.UNIT_INVALID)
         assert.equal(err.path, 'projects.*.target.systemd.unitDir')
         return true
       },

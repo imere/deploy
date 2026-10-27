@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { MANAGED_MARKER, isManaged, renderUnit } from './unit.js'
 import type { SystemdTargetConfig } from './types.js'
 
@@ -87,7 +87,7 @@ describe('systemd unit 渲染', () => {
       () => render(makeConfig({ execStart: 'a\nb' })),
       (err: unknown) => {
         assert.ok(err instanceof DpError)
-        assert.equal(err.code, 'DP.SYSD.UNIT_INVALID')
+        assert.equal(err.code, ERR.SYSD.UNIT_INVALID)
         assert.equal(err.path, 'projects.*.target.systemd.execStart')
         return true
       },
@@ -104,7 +104,7 @@ describe('systemd unit 渲染', () => {
   it('extra 的行含控制字符 → 拒绝（那不是逃生舱，是指令注入口）', () => {
     assert.throws(
       () => render(makeConfig({ extra: ['ExecStart=/evil\nUser=root'] })),
-      (err: unknown) => err instanceof DpError && err.code === 'DP.SYSD.UNIT_INVALID',
+      (err: unknown) => err instanceof DpError && err.code === ERR.SYSD.UNIT_INVALID,
     )
   })
 })
