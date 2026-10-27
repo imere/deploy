@@ -1,4 +1,4 @@
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 
 /**
  * JSON Schema 的节点类型，只覆盖**编辑器提示用得到的那一小撮**字段。
@@ -95,7 +95,7 @@ export type InputShape<S extends Shape> = {
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 function fail(path: string, message: string, hint?: string): never {
-  throw new DpError('DP.CONFIG.INVALID', message, hint === undefined ? { path } : { path, hint })
+  throw new DpError(ERR.CONFIG.INVALID, message, hint === undefined ? { path } : { path, hint })
 }
 
 function typeName(v: unknown): string {

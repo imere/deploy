@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { DpError } from '@dp/ports'
+import { ERR, DpError } from '@dp/ports'
 import { defineHost } from './config.js'
 
 describe('hops[].port · 与 ssh 串里的端口互斥', () => {
@@ -22,7 +22,7 @@ describe('hops[].port · 与 ssh 串里的端口互斥', () => {
       assert.fail('应当抛错')
     } catch (err) {
       assert.ok(err instanceof DpError)
-      assert.equal(err.code, 'DP.CONFIG.INVALID')
+      assert.equal(err.code, ERR.CONFIG.INVALID)
       assert.equal(err.path, 'host.hops[0].port')
       assert.ok((err.hint ?? '').includes('留一个就行'))
     }

@@ -1,4 +1,5 @@
 import {
+  ERR,
   DpError,
   KNOWN_HOSTS_MODES,
   PROCESS_STOP_SIGNALS,
@@ -42,7 +43,7 @@ function unionOf<AOut, AIn, BOut, BIn>(
     parse(input, path) {
       if (a.matches(input)) return a.schema.parse(input, path)
       if (b.matches(input)) return b.schema.parse(input, path)
-      throw new DpError('DP.CONFIG.INVALID', `期望 ${a.shape} 或 ${b.shape}，实际是 ${describe(input)}`, {
+      throw new DpError(ERR.CONFIG.INVALID, `期望 ${a.shape} 或 ${b.shape}，实际是 ${describe(input)}`, {
         path,
         hint: `两种写法都可以：${a.shape}；${b.shape}`,
       })
@@ -72,7 +73,7 @@ const sourceRoot = constrained(
   (value, path) => {
     if (/[\\/]$/.test(value)) {
       throw new DpError(
-        'DP.CONFIG.INVALID',
+        ERR.CONFIG.INVALID,
         `源路径以分隔符结尾，语义有歧义：${value}`,
         {
           path,
@@ -109,7 +110,7 @@ export const becomeSchema = constrained(
   (value, path) => {
     if (value.type !== 'custom') {
       if (value.template !== undefined) {
-        throw new DpError('DP.CONFIG.INVALID', `become.type=${value.type} 时写 template 不生效`, {
+        throw new DpError(ERR.CONFIG.INVALID, `become.type=${value.type} 时写 template 不生效`, {
           path: `${path}.template`,
           hint: 'template 只有 type=custom 读得到。要自定义提权命令就把 type 改成 custom，或删掉 template',
         })
@@ -117,13 +118,13 @@ export const becomeSchema = constrained(
       return
     }
     if (value.template === undefined || value.template.trim() === '') {
-      throw new DpError('DP.CONFIG.INVALID', 'become.type=custom 必须写 template', {
+      throw new DpError(ERR.CONFIG.INVALID, 'become.type=custom 必须写 template', {
         path: `${path}.template`,
         hint: '模板形如 `dzdo -u root ${cmd}`；${cmd} 是占位，运行时替换成被提权那条命令',
       })
     }
     if (!value.template.includes('${cmd}')) {
-      throw new DpError('DP.CONFIG.INVALID', `become.template 缺少 \${cmd} 占位：${value.template}`, {
+      throw new DpError(ERR.CONFIG.INVALID, `become.template 缺少 \${cmd} 占位：${value.template}`, {
         path: `${path}.template`,
         hint: '没有占位的模板会把被提权的命令整条丢掉 —— 那表现成「提权成功了但什么都没发生」',
       })
@@ -135,7 +136,7 @@ export const becomeSchema = constrained(
     while (dollar !== -1) {
       if (!value.template.startsWith('${cmd}', dollar)) {
         throw new DpError(
-          'DP.CONFIG.INVALID',
+          ERR.CONFIG.INVALID,
           `become.template 在 \${cmd} 之外出现 \${：${value.template.slice(dollar, dollar + 12)}`,
           {
             path: `${path}.template`,
@@ -188,7 +189,7 @@ export const hopSchema = constrained(
     assertPortInRange(value.port, `${path}.port`)
     if (target.port !== undefined && target.port !== value.port) {
       throw new DpError(
-        'DP.CONFIG.INVALID',
+        ERR.CONFIG.INVALID,
         `这一跳给了两个互相矛盾的端口：ssh 串里是 ${target.port}，port 字段是 ${value.port}`,
         {
           path: `${path}.port`,
@@ -221,7 +222,7 @@ export const hostSchema = constrained(
     // 空数组按「没给」处理：hops: [] 与不写 hops 是同一件事，报「0 跳」只会让人
     const hopsGiven = value.hops !== undefined && value.hops.length > 0
     if (value.ssh !== undefined && hopsGiven) {
-      throw new DpError('DP.CONFIG.INVALID', 'ssh 与 hops 同时给了，二者只能选一个', {
+      throw new DpError(ERR.CONFIG.INVALID, 'ssh 与 hops 同时给了，二者只能选一个', {
         path: `${path}.ssh`,
         hint: '二选一：单跳写 ssh: user@host[:port]；多跳把整条链写进 hops（最后一跳就是目标机）。想同时表达会得到两条互相矛盾的连接路径',
       })
@@ -296,7 +297,7 @@ const reloadSchema = unionOf<readonly string[], readonly string[], false, false>
     schema: constrained(arr(str('reload 命令的 argv')), (value, path) => {
       for (let i = 0; i < value.length; i += 1) {
         if (value[i] === '') {
-          throw new DpError('DP.CONFIG.INVALID', 'reload 的参数里有空串', {
+          throw new DpError(ERR.CONFIG.INVALID, 'reload 的参数里有空串', {
             path: `${path}[${i}]`,
             hint: '删掉空串。空参数会让目标机的 execve 直接失败，报错还与真正的问题无关',
           })
@@ -333,7 +334,7 @@ const composeFilesSchema = constrained(
   (value, path) => {
     for (let i = 0; i < value.length; i += 1) {
       if (value[i] === '') {
-        throw new DpError('DP.CONFIG.INVALID', 'compose.files 的元素里有空串', {
+        throw new DpError(ERR.CONFIG.INVALID, 'compose.files 的元素里有空串', {
           path: `${path}[${i}]`,
           hint:
             '删掉这个空串。空路径拼进 `-f` 后面，目标机报的是 `no such file or directory`，' +
@@ -383,7 +384,7 @@ export const dockerSchema = obj(
 function nonBlank(label: string): Schema<string, string, false> {
   return constrained(str(label), (value, path) => {
     if (value.trim() !== '') return
-    throw new DpError('DP.CONFIG.INVALID', `${label} 是空白字符串`, {
+    throw new DpError(ERR.CONFIG.INVALID, `${label} 是空白字符串`, {
       path,
       hint: `删掉这个字段表示「用默认值」，写成空白表示「我要一个空的值」—— 后者在这里没有意义。${label} 不能为空`,
     })
@@ -399,7 +400,7 @@ function nonBlank(label: string): Schema<string, string, false> {
 function machinePath(label: string): Schema<string, string, false> {
   return constrained(nonBlank(label), (value, path) => {
     if (value.startsWith('/')) return
-    throw new DpError('DP.CONFIG.INVALID', `${label} 必须是目标机绝对路径：${value}`, {
+    throw new DpError(ERR.CONFIG.INVALID, `${label} 必须是目标机绝对路径：${value}`, {
       path,
       hint:
         '写以 / 开头的完整路径。相对路径的落点取决于目标机上 ssh 会话的 cwd，' +
@@ -505,13 +506,13 @@ export const targetSchema = constrained(
     )
     for (const kind of ['nginx', 'docker', 'systemd', 'process'] as const) {
       if (chain.includes(kind) && value[kind] === undefined) {
-        throw new DpError('DP.CONFIG.INVALID', `target.type 点名 ${kind} 却没有 ${kind} 段`, {
+        throw new DpError(ERR.CONFIG.INVALID, `target.type 点名 ${kind} 却没有 ${kind} 段`, {
           path: `${path}.${kind}`,
           hint: `写上 projects.<项目>.target.${kind}，或把 ${kind} 从 type 里去掉 —— 没有段就没有可执行的东西，跑下去只会静默按 static 部署`,
         })
       }
       if (explicit && value[kind] !== undefined && !chain.includes(kind)) {
-        throw new DpError('DP.CONFIG.INVALID', `给了 ${kind} 段，但 target.type 里没有 ${kind}`, {
+        throw new DpError(ERR.CONFIG.INVALID, `给了 ${kind} 段，但 target.type 里没有 ${kind}`, {
           path: `${path}.type`,
           hint: `把 ${kind} 加进 type，或删掉这一段 —— 两者不一致时实际跑的是段对应的执行器，type 就成了骗人的标签`,
         })
