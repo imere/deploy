@@ -14,7 +14,7 @@
     "test": "tsc -b && node -e \"require('fs').mkdirSync('build/coverage',{recursive:true})\" && node --test --experimental-test-coverage --test-coverage-include=packages/*/build/**/*.js --test-reporter=spec --test-reporter-destination=stderr --test-reporter=lcov --test-reporter-destination=stdout \"packages/*/build/**/*.test.js\" > build/coverage/lcov.info",
     "verify": "pnpm build && pnpm lint && pnpm test && pnpm run verify:gates",
     "integration": "node tests/integration/run.mjs",
-    "verify:gates": "node scripts/check-versions.mjs && node scripts/dead-code.mjs && node scripts/check-imports.mjs && node scripts/check-deps.mjs && node scripts/check-tests.mjs && node scripts/check-jsdoc.mjs && node scripts/check-coverage.mjs && node scripts/smoke.mjs",
+    "verify:gates": "node scripts/check-versions.mjs && node scripts/dead-code.mjs && node scripts/check-imports.mjs && node scripts/check-deps.mjs && node scripts/check-error-codes.mjs && node scripts/check-tests.mjs && node scripts/check-jsdoc.mjs && node scripts/check-coverage.mjs && node scripts/smoke.mjs",
     "verify:selfcheck": "node scripts/accept-gates.mjs",
     "verify:mutation": "node scripts/mutate.mjs --package schema --max all --fail-over 5 && node scripts/mutate.mjs --package core --max all --fail-over 5 && node scripts/mutate.mjs --package template --max all --fail-over 5",
     "build:bin": "pnpm build && node scripts/build-binary.mjs",

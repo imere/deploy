@@ -91,6 +91,9 @@ function prepareMirror() {
   // 对照组会直接红，而那红的是「副本没备齐」，不是门禁的结论
   copyTree(join(repoRoot, 'package.json'), join(MUT, 'package.json'))
   copyTree(join(repoRoot, 'build', 'coverage', 'lcov.info'), join(MUT, 'build', 'coverage', 'lcov.info'))
+  // docs/ 也要进副本：错误码门禁拿 failures.md 当「预留码」的白名单，
+  // 副本里缺了它对照组会直接红，而那红的是「副本没备齐」，不是门禁的结论
+  copyTree(join(repoRoot, 'docs'), join(MUT, 'docs'))
   linkNodeModules()
   log(`副本就绪：.tmp/gate-mut/  ${copied} 个包（package.json + src + build）+ scripts/ + build/coverage/lcov.info`)
   return copied
@@ -287,6 +290,29 @@ const mutJsdoc = () => {
 /**
  * 依赖声明：往一个**不依赖 local 的包**里塞一条 `import from '@dp/local'`。
  */
+/**
+ * 错误码硬编码：往一个源文件里塞一个登记表里没有的码字面量。
+ *
+ * 硬编的代价不是「不好看」：改一个码要同步几十处，漏一处就是报 A 断言 B。
+ * 这道门禁要抓的正是「谁又手打了一个 DP.*」。
+ */
+const mutErrorCodes = () => {
+  const file = 'packages/core/src/paths.ts'
+  if (!existsSync(join(MUT, file))) throw new Error(`找不到 ${file}`)
+  // 拼着写：整串写出来的话，「错误码硬编码」门禁会把**这个自检脚本自己**抓出来，
+  // 于是对照组成立不了 —— 门禁要抓的是实现里的漏网之鱼，不是它自己的测试用例
+  const code = ['DP.', 'ZZGATEMUT.NOT_REGISTERED'].join('')
+  return {
+    gate: 'check-error-codes.mjs',
+    file,
+    describe: `在 ${file} 追加一句抛出：码 ${code} 不在登记表里，字面量形式出现即违规`,
+    transform: (src) => {
+      if (src.includes(code)) return null
+      return `${src}\n\n// 门禁自检注入：登记表里没有这个码\nexport function zzGateMutCode(): string {\n  return '${code}'\n}\n`
+    },
+  }
+}
+
 const mutDeps = () => {
   const file = 'packages/core/src/detect.ts'
   if (!existsSync(join(MUT, file))) throw new Error(`找不到 ${file}`)
@@ -470,6 +496,7 @@ function collectMutations() {
     mutVersions(),
     mutImports(),
     mutDeps(),
+    mutErrorCodes(),
     mutJsdoc(),
     mutTests(),
     mutCoverageHit(),
