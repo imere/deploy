@@ -1,435 +1,183 @@
 # 决策清单
 
-格式：每条给**决策 / 理由 / 落点**。有实测依据的标注来源。
+每条给**决策 / 理由 / 落点**。
 
----
+## 0 · 永不交互（压过以下全部）
 
-## 0 · 永不交互（最高优先级，压过下面所有条）
+起因：push 用了不带 token 的 remote，触发凭据管理器弹 GUI 手点 —— 有弹窗即非自动化，CI 里即永久挂起。决策：不等人类输入。
 
-**起因**：一次 push 用了不含 token 的 remote，触发 Git Credential Manager 弹 GUI 让用户手点。这是不可接受的——**任何弹窗都意味着那次"自动化"根本不是自动化**，且在 CI 里会表现为永久挂起。
+|机制|落地|
+|---|---|
+|凭据带外|git / ssh（密钥与密码）凭据带外给足，不满足即报错；flag 见 `AGENTS.md` 铁律 0|
+|prompt 嗅探|远端吐出未预期提示符（密码 / sudo / 主机密钥确认三类，表可扩展）→ 杀进程报 `DP.INTERACTIVE_PROMPT_DETECTED`|
+|超时兜底|连接 / exec / 传输 / 验收 / hook 均带 `timeout`；挂起 = 失败|
 
-**决策**：deploy-kit 自身、以及本项目开发过程，**都不允许出现任何等待人类输入的行为**。
+推论：`sudo` 先 `sudo -n` 探免密，需密码用 `sudo -S -p ''` 投喂；主机密钥策略预置（`strict` / `accept-new`），不许 `yes/no` 确认。
 
-三条落地机制：
+## 3 · runtime profile × supervisor
 
-1. **凭据必须带外提供，绝不依赖交互提示**
-   - git：所有远程操作加 `GIT_TERMINAL_PROMPT=0` → 缺凭据时**立刻失败**而不是弹窗
-   - ssh 走密钥：`-o BatchMode=yes -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=0`
-   - ssh 走密码：`SSH_ASKPASS=<我们生成的助手> SSH_ASKPASS_REQUIRE=force` + stdin 重定向到 null
-   - 两者都不满足 → **直接报错，不去尝试提示**
+决策：正交的 runtime profile（画像）× supervisor（进程管理层）。`runtime`：`node`/`java`/`python`/`static`/`docker`/`other`，每 profile 给 detect 证据、build 命令、产物形态、健康检查、资源预算与 unit 模板默认值；`service.managers` 可多配，按探测激活实际存在的那个（CentOS 6 只有 sysvinit、Alpine 是 OpenRC、容器里可能都没有）。
 
-2. **远端命令的 prompt 嗅探**（这是产品级能力，不只是开发纪律）
-   远端若吐出提示符而我们没预期，`dp` 必须杀掉进程并报结构化错误，而不是一直等：
-   ```
-   DP.INTERACTIVE_PROMPT_DETECTED  匹配到 "Password:" / "[sudo] password" / "Are you sure you want to continue connecting"
-   ```
-   检测模式可由用户扩展（不同发行版 `su` 措辞不同，我们不穷举）。
+Java 检 `pom.xml`/`build.gradle`/`*.jar`，`MemoryMax=Xmx×1.35`；Python 检 `requirements.txt`/`pyproject.toml`/`Pipfile`/`poetry.lock`/`uv.lock`，venv + gunicorn/uvicorn 入口。
 
-3. **一切子进程必须有超时兜底**
-   连接、exec、传输、验收、hook 全部带 `timeout`。挂起 = 失败，不允许"可能一直在等"。
+落点：**未实现** —— `service.managers` 与 `@dp/target-service` 未落地；现状只到探测层：`@dp/core`/`@dp/local`/`@dp/ssh`，守护在 `@dp/target-systemd`/`@dp/target-process`。
 
-**推论**：`sudo` 一律先 `sudo -n` 探测是否免密，需要密码时用 `sudo -S -p ''` **主动投喂**，绝不等它问。主机密钥策略必须预置（`strict` 或显式 `accept-new`），不允许出现 `yes/no` 确认。
+## 4 · 每段一个 `define*`
 
----
+顶层段各有同名 `define*`（identity function，只给类型推导与可选即时校验），18 个名字见 `@dp/schema` 导出。落点：`dp schema --out` 出 JSON Schema。
 
-## 3 · Java / Python 部署；systemd 与 initrc 可同时设置
+## 5 · 传输偏好链与四个驱动
 
-**决策**：引入 **runtime profile（运行时画像）** 与 **supervisor（进程管理层）** 两个正交维度。
+`resolveChain(kind, candidates)` 也用于 jump / supervisor / runtime / target / lsm。四驱动：`rsync`（两端都要，增量，首选）/ `tar-ssh`（远端 tar/gzip，宿主无 rsync 时）/ `sftp`（需子系统，兜底）/ `scp`（**只需 exec 权限**，sftp 被禁时的最后手段）。
 
-- `runtime`：`node` / `java` / `python` / `static` / `docker` / `other`
-  每个 profile 提供：detect 证据、默认 build 命令、产物形态、默认健康检查、默认资源预算、unit 模板默认值。
-  - Java：检测 `pom.xml` / `build.gradle` / `*.jar`；`MemoryMax` 按 `Xmx × 1.35` 算，直接对症 OOM；单元默认 `ExecStart=java -jar`
-  - Python：检测 `requirements.txt` / `pyproject.toml` / `Pipfile` / `poetry.lock` / `uv.lock`；venv 路径、gunicorn/uvicorn 入口
-- `service.managers`：允许**同时配置多个**，运行时按探测结果激活实际存在的那个
+失败抛 `DP.PREF.UNSUPPORTED`（`path=transport.preferred`）：message 逐项列名与失败原因，`hint` 给可执行出路，`--json` 可读；已落地于传输协商。理由：多跳与抗量子都无法用单一实现覆盖。
 
-```ts
-service: defineService({
-  managers: ['systemd', 'sysvinit', 'openrc', 'supervisor'], // 偏好链：都探测不到时报逐项失败原因
-  // 全部会被渲染出来，只有探测到的那个被激活；其余作为 fallback 留在目标机上
-})
-```
+## 7 · 结构化日志与 OTel 对齐
 
-**理由**：老 CentOS 6 只有 sysvinit，Alpine 是 OpenRC，容器里可能什么都没有。同时写多个 = 一份配置走天下，且"写了但不激活"不会有任何副作用。
-
-**落点**：设计期条目，**预留（未实现）** —— `service.managers` 字段与 `@dp/target-service` 渲染层包都没落地（`docs/config.md` 没有 runtime 段）。现状只到探测层：init / supervisor 识别在 `@dp/core` / `@dp/local` / `@dp/ssh`，unit 与进程守护落在 `@dp/target-systemd` / `@dp/target-process`。
-
----
-
-## 4 · 每个配置段提供独立 `define*`
-
-**决策**：所有顶层段都有同名 `define*` 函数，全部是 identity function（运行时零成本），只提供类型推导与可选的即时校验。
-
-```
-defineConfig  defineHost  defineAuth  defineJump  defineTransport
-defineSource  defineBuild  defineRuntime  defineService  defineTarget
-defineNginx   defineDocker  defineVerify  defineHook  defineNotify
-defineEnv     defineResources  defineLsm
-```
-
-每个都支持跨文件复用：`export const prodHost = defineHost({...})`，配置里直接引用。
-
-**理由**：类型提示、可跳转、可组合。`define*` 不做事，所以不会成为性能或调试负担。
-
-**落点**：`@dp/schema` 导出全部 `define*`；`dp schema --out` 输出 JSON Schema。
-
----
-
-## 5 · 偏好链（preference chain）+ 链内不支持时的友好报错
-
-**决策**：统一抽象 `resolveChain(kind, candidates)`，应用于 transport / jump / transfer / supervisor / runtime / target / lsm。
-
-```ts
-transport: ['native-ssh', 'ssh2']   // 依次尝试
-jump:      ['direct-tcpip', 'nc', 'ssh-relay']
-transfer:  ['rsync', 'tar-ssh', 'sftp', 'scp']
-```
-
-全链失败时输出**结构化错误**（不是"failed"）。已落地的一处是传输协商，报 `DP.PREF.UNSUPPORTED`，message 逐项列出链上每一项的失败原因，`hint` 给出可执行的出路：
-
-```
-DP.PREF.UNSUPPORTED  path=transport.preferred
-
-没有可用的传输方式。逐项结论（偏好链：rsync-ssh > tar-ssh > sftp > scp）：
-  - rsync-ssh：rsync 需要两端都装：目标机未检测到 rsync（缺一端就退化成全量传输）
-  - tar-ssh：目标机没有 tar，无法解包归档流
-  - sftp：sftp 子系统被显式禁用
-```
-
-每项带：名称、失败原因，`hint` 带可执行建议（「本地装上其中之一即可恢复：…」）。机器可读（`--json`）。
-
-**理由**：这一条是被 spike 逼出来的（S1/S4）。多跳和抗量子都无法用单一实现覆盖。
-
----
-
-## 6 · CLI 支持指定配置文件
-
-```
-dp deploy -c ./deploy/prod.ts
-dp deploy --config ./deploy/prod.ts --env prod --target web-01
-DP_CONFIG=./deploy/prod.ts dp deploy
-```
-优先级：`-c` > `DP_CONFIG` > 自动发现（`deploy.config.ts|js|json` 向上冒泡）。`--config` 与自动发现冲突时明确报错，不静默。
-
----
-
-## 7 · 结构化日志 + 兼容 OpenTelemetry
-
-**决策**：`@dp/log` 输出 **JSONL**，核心**不依赖** OTel 包（保持零依赖），但字段设计对齐 OTel 语义约定，桥接由可选包提供。
-
-```jsonl
-{"ts":"...","level":"info","msg":"transfer.begin","deployId":"d-7f3a","host":"web-01","phase":"transfer","span":"s-2","attempt":1,"bytes":1048576}
-```
-
-- 固定字段：`ts / level / msg / deployId / host / phase / span / attempt`
-- **内置脱敏**：密码、私钥、token 按 key 名 + 值模式双重识别，命中即 `***`
-- `--log-format=json|pretty|logfmt`、`--log-level`、`--log-file`
-- OTel 桥接：`@dp/log-otel`（可选依赖）把 span 导出为 OTLP；不装则完全不加载
-
-**理由**：OTel 是重依赖，不能进核心；但字段现在就对齐，以后桥接零成本。
-
----
+`@dp/log` 输出 JSONL，核心不依赖 OTel 包但字段对齐其约定（`ts`/`level`/`msg`/`deployId`/`host`/`phase`/`span`/`attempt`），桥接交给 `@dp/log-otel`；脱敏：密码、私钥、token 按 key 名 + 值模式识别，命中即 `***`；`--log-format=json|pretty|logfmt`、`--log-level`、`--log-file`。理由：重依赖不进核心。
 
 ## 8 · 通知 / Hook 扩展
 
-**决策**：生命周期事件 + 驱动注册表。
+生命周期事件 + 驱动注册表，payload 是脱敏后的结构化事件。
 
-事件：`pre-resolve` `pre-connect` `post-connect` `pre-transfer` `post-transfer` `pre-activate` `post-activate` `on-verify` `on-promote` `on-failure` `on-rollback`
+|项|取值|
+|---|---|
+|事件|`pre-resolve` `pre-connect` `post-connect` `pre-transfer` `post-transfer` `pre-activate` `post-activate` `on-verify` `on-promote` `on-failure` `on-rollback`|
+|驱动|`exec`（本地命令）、`webhook`、`email(smtp)`、`js`（用户函数）|
+|必配|`onFailure: 'abort'|'warn'|'ignore'`（默认 `warn`）、`timeout`|
 
-驱动：`exec`（本地命令）、`webhook`、`email(smtp)`、`js`（用户函数）
+## 9 · 跨平台命令：wrapper + 覆盖
 
-每个 hook 必配：`onFailure: 'abort' | 'warn' | 'ignore'`、`timeout`。默认 `warn`（通知失败不该搞挂部署）。Hook 收到的 payload 是**脱敏后**的结构化事件。
-
----
-
-## 9 · 跨平台命令：wrapper + 用户覆盖
-
-**决策**：分三层。
-
-1. **抽象动作**：内置常见操作用动作名表示（`ensureDir` `setMode` `setOwner` `symlink` `remove` `serviceReload` `configTest`），由平台映射表翻译
-2. **shell 适配**：远端 shell 可能是 `sh/bash/zsh/powershell/cmd`——**引号规则按目标 shell 生成，不许手工拼串**（安全相关）
-3. **用户覆盖**：`commands.overrides.perPlatform: { linux, darwin, win32 }` 或按 `osFamily`/`distro` 细化
-
-```ts
-commands: {
-  configTest: { perPlatform: { linux: 'nginx -t', win32: 'nginx.exe -t' } }
-}
-```
-
-**理由**：你不可能猜对所有人环境；但内置常见操作能覆盖 90%，剩下 10% 用覆盖解决。
-
----
+|层|做法|
+|---|---|
+|抽象动作|常见操作用动作名表示（`ensureDir` `setMode` `setOwner` `symlink` `remove` `serviceReload` `configTest`），平台映射表翻译|
+|shell 适配|远端 shell 可能是 `sh/bash/zsh/powershell/cmd` —— 引号按目标 shell 生成，不许手工拼串（安全相关）|
+|用户覆盖|`commands.overrides.perPlatform: { linux, darwin, win32 }` 或按 `osFamily`/`distro` 细化|
 
 ## 10 · SELinux
 
-**决策**：`@dp/lsm` 包，驱动 `selinux` / `apparmor` / `none`。三个必须处理的点：
-
-1. **文件上下文**：新部署的文件 `cp` 过去后上下文不对 → nginx 读不了，**即使 chmod 0777 也没用**。部署后必须 `restorecon -R`（或 `chcon -t httpd_sys_content_t`）
-2. **端口上下文**：非标端口要 `semanage port -a -t http_port_t -p tcp 8080`，否则服务起不来
-3. **布尔值**：反代场景 `setsebool -P httpd_can_network_connect 1`
-
-预检查：`getenforce`、`ls -Z` 目标目录、`semanage port -l`。
-**`semanage` 不存在时给可执行建议，不静默跳过**——"看起来部署成功了但 403"是最难查的故障。
-
----
-
-## 11 · Node ≥ 24
-
-**决策**：`engines.node: ">=24"`，`.nvmrc` 写 `24`，CI 与 `dp doctor` 都校验。
-
-**修正一条之前的说法**：Node 版本**不是**抗量子的门槛（ssh2 根本没实现 PQC，与 Node 版本无关）。但 Node 24 仍然要，理由是语言/API 一致性（`import attributes`、测试运行器等）。
-
----
+`@dp/lsm` 包，驱动 `selinux`/`apparmor`/`none`。上下文不对 → nginx 读不了（**chmod 0777 也没用**），须 `restorecon -R`；非标端口 `semanage port -a -t http_port_t -p tcp 8080`；反代 `setsebool -P httpd_can_network_connect 1`。预检查 `getenforce`、`ls -Z`、`semanage port -l`；`semanage` 缺失须给建议。
 
 ## 12 · 支持 ssh_config
 
-**决策**：`@dp/ssh-config` 解析 `~/.ssh/config`（含 `Include`），映射：
-
-| ssh_config | 我们 |
-|---|---|
-| `Host` / `HostName` / `Port` / `User` | 直接映射 |
-| `IdentityFile` | privateKey |
-| `ProxyJump` | jump 链 |
-| `ProxyCommand` | 若形如 `ssh -W`/`nc`，转内部实现；否则 **显式报错不支持** |
-| `StrictHostKeyChecking` / `UserKnownHostsFile` | 主机密钥策略 |
-| `KexAlgorithms` / `Ciphers` | cryptoPolicy 合并 |
-
-**关键**：ssh_config 只在 `native-ssh` 驱动下能"原生透传"；`ssh2` 驱动下由我们自己解释，遇到不支持的指令必须报错而不是忽略。
-
----
-
-## 13 · scp（确实漏了，补上）
-
-**决策**：`@dp/transport` 四个驱动，scp 是最后一个：
-
-| 驱动 | 依赖 | 增量 | 何时用 |
-|---|---|---|---|
-| `rsync` | 本机 rsync + 远端 rsync | ✅ | 首选 |
-| `tar-ssh` | 远端 tar/gzip | ❌ | 本机无 rsync |
-| `sftp` | 远端 sftp 子系统 | ❌ | 通用兜底 |
-| `scp` | 远端 scp | ❌ | **只需 exec 权限**，sftp 子系统被禁时的最后手段 |
-
-注意：OpenSSH ≥9 的 `scp` 默认走 SFTP 协议，要兼容老目标需 `scp -O`（实测目标机支持 `-O`）。
-
----
+`@dp/ssh-config` 解析 `~/.ssh/config`（含 `Include`）：`Host`/`HostName`/`Port`/`User` 直映射；`IdentityFile`→privateKey；`ProxyJump`→jump 链；`ProxyCommand` 形如 `ssh -W`/`nc` 转内部实现，否则报错；`StrictHostKeyChecking`/`UserKnownHostsFile`→主机密钥策略；`KexAlgorithms`/`Ciphers`→cryptoPolicy。只在 `native-ssh` 透传；`ssh2` 下不支持的指令必须报错。
 
 ## 14 · 故障边界
 
-→ 见 **`docs/failures.md`**（已单独成文）。结论不是重写架构，而是加**护栏层** + 三机制：目标机状态日志、带租约的部署锁、两阶段激活 `trial→promote`。
-
----
+→ `docs/failures.md`。结论不是重写架构，而是加**护栏层** + 三机制：目标机状态日志、带租约的部署锁、两阶段激活 `trial→promote`。
 
 ## 15 · `./dist` 还是 `./dist/**`
 
-**决策**：**歧义靠拒绝，不靠默认值。** 尾斜杠写法直接报错。
+歧义靠拒绝，不靠默认值 —— 报错给出两种写法的预览差异。理由：rsync 的 `src` vs `src/` 是老陷阱，猜不如让它无法被误写。
 
-| 写法 | 语义 |
+|写法|语义|
 |---|---|
-| `"./dist"` | 目录本身 → 部署成 `<dest>/dist/...` |
-| `"./dist/**"` | 目录内容 → 部署成 `<dest>/...`（不含 dist 这层） |
-| `"./dist/*"` | 下一层内容（不含子目录递归） |
-| `"./dist/"` | ❌ **报错**：`DP.SOURCE.AMBIGUOUS`，提示改用上面两种 |
-| `"./dist/**/*.js"` | 递归匹配 .js |
+|`"./dist"`|目录本身 → `<dest>/dist/...`|
+|`"./dist/**"`|目录内容 → `<dest>/...`（不含 dist 这层）|
+|`"./dist/*"`|下一层内容（不递归）|
+|`"./dist/"`|❌ 报 `DP.SOURCE.AMBIGUOUS`，提示改用前两种|
+|`"./dist/**/*.js"`|递归匹配 .js|
 
-报错要给出两种写法的预览差异（"你会得到 `<dest>/dist/index.html`，如果改成 `./dist/**` 则是 `<dest>/index.html`"）。
+## 16 · 安全加固
 
-**理由**：rsync 的 `src` vs `src/` 是几十年的经典陷阱。与其猜，不如让它无法被误写。
+基线（同 `AGENTS.md` 铁律 3）：路径归一化 + allowlist、显式 `mode`（文件 `0640`、目录 `0750`，拒 `0777`/`0666`）、临时目录 `0700`、传输后 sha256、主机密钥默认 `strict`（`knownHosts: none` 须显式打开并被 `dp check --security` 列出）、凭据不进日志（`SSH_ASKPASS` 助手 `0700` 用完即删）。
 
----
-
-## 16 · 安全加固（路径 / 文件 / 权限信任）
-
-- **路径**：所有路径先 `realpath` 归一化，必须在允许根（allowlist）内；拒绝 `..` 逃逸、拒绝符号链接指向根外（`O_NOFOLLOW` 语义）
-- **TOCTOU**：校验与写入之间不允许重新解析路径——先 `open` 拿到 fd 再校验 fd
-- **权限**：显式 `mode`（默认文件 `0640`、目录 `0750`），**拒绝 `0777`/`0666`**；umask 显式设置；临时目录 `0700`
-- **完整性**：传输后校验 sha256，不匹配即整体作废（staging 丢弃，不动 current）
-- **凭据**：不落盘、不进日志（日志走统一脱敏出口）、SSH_ASKPASS 助手文件 `0700` 且用完即删
-- **主机密钥**：默认 `strict`，`knownHosts: none` 必须显式打开并被 `dp check --security` 列出
-- **目录链逐层校验**：不只看目标路径本身的 mode，要**从根逐级校验 owner + 可写性**，判定基准是「owner == **布局所有者**」（不是"是否为 root"—— 布局与提权方式按实测能力推导、不按身份推断，见 `openspec/specs/privilege-layout/spec.md`）。两处必检：① 带外脚本所在代码域（提权面，`DP.SEC.RESCUE_UNSAFE_PATH` → 拒绝）② 状态目录（伪造租约锁 = 可用性攻击）。**这是预检项，不是运行时警告**
-- **代码/数据分离**：被 root 定时执行的代码与可变数据**不得同目录**。状态文件取出的值只作引用过的参数 + allowlist 校验，永不 `eval`。
-
----
+|面|做法|
+|---|---|
+|TOCTOU|校验与写入间不重新解析路径：先 `open` 拿 fd 再校验 fd|
+|目录链|从根逐级校验 owner + 可写性，基准「owner == 布局所有者」而非 root（见 `openspec/specs/privilege-layout/spec.md`）；必检带外脚本所在代码域（`DP.SEC.RESCUE_UNSAFE_PATH`）与状态目录（伪造租约锁 = 可用性攻击）。**是预检项**|
+|代码/数据分离|被 root 定时执行的代码与可变数据不得同目录；状态值只作参数 + allowlist 校验，永不 `eval`|
 
 ## 17 · 测试全面性
 
-在纯函数夹具、真实 IO、错误路径断言这层单测之上，**再加三层**：
+纯函数夹具、真实 IO、错误路径断言之上**再加三层**；覆盖率 → `build/coverage/`。
 
-- **故障注入层**：用 podman 靶机真实注入——`AllowTcpForwarding no`、`busybox su`、磁盘写满、只读目录、服务 crash loop、网络中断
-- **契约层**：把 spike 的结论固化成回归测试——rsync `--rsh` argv 契约、`%h` 不替换、不经 shell、scp `-O` 兼容
-- **矩阵层**：`{linux, darwin, win32, freebsd} × {systemd, sysvinit, openrc, launchd, winsvc, none} × {rsync, tar-ssh, sftp, scp} × {become: sudo|su|none} × {layout: system|hybrid|user} × {release.root: 显式|推导}` —— 组合数大，但每一项都是注入 Facts 的纯函数，不需要真机器
+|层|做法|
+|---|---|
+|故障注入|`<容器运行时>` 靶机注入（`AllowTcpForwarding no`、`busybox su`、磁盘写满、只读目录、crash loop、断网）；`<容器运行时>` 按环境选 docker / podman 其一|
+|契约|固化 spike 结论：rsync `--rsh` argv 契约、`%h` 不替换、不经 shell、scp `-O` 兼容|
+|矩阵|六维全组合：`{linux,darwin,win32,freebsd}` × `{systemd,sysvinit,openrc,launchd,winsvc,none}` × `{rsync,tar-ssh,sftp,scp}` × `{sudo,su,none}` × `{system,hybrid,user}` × `{显式,推导}`，每项均注入 Facts|
 
-覆盖率产物 → `build/coverage/`。
+## 18 · CLI（配置指定 / 帮助 / 退出码）
 
----
+|要求|内容|
+|---|---|
+|配置文件|`-c` > `DP_CONFIG` > 自动发现（`deploy.config.ts|js|json` 向上冒泡），冲突时明确报错|
+|文档齐备|每个命令/子命令都有 `description`、`examples`、`exit codes`；`dp --help` / `dp deploy --help` / `dp deploy --help=config`；所有命令支持 `--json`|
+|exit code|`0` 成功 / `1` 未知错误（或失败且已回滚）/ `2` 用法错或验证失败且已回滚（`--json` 的 `error.code` 区分）/ `3` 配置错 / `4` 缺依赖|
+|`dp explain`|打印有效配置（含来源文件与行号）（未实现）|
 
-## 18 · CLI 帮助（对人 + 对 agent）
+## 19 · 产物目录与 scripts
 
-- 每个命令/子命令都有 `description`、`examples`（可直接复制）、`exit codes`
-- `--help` 分级：`dp --help` / `dp deploy --help` / `dp deploy --help=config`
-- **`--json`**：所有命令支持机器可读输出（agent 用）
-- **稳定 exit code**：`0` 成功 / `1` 未知错误（或部署失败且已完整回滚）/ `2` 用法/参数错或验证失败且已回滚（用 `--json` 的 error.code 区分）/ `3` 配置错 / `4` 环境缺依赖
-- `dp explain`：打印解析合并后的**有效配置**（含来源文件与行号）——排查"为什么这个值生效了"（未实现）
-- `dp schema --out <路径>`：导出 JSON Schema 为文件（不给 `--out` 则打印到 stdout），供编辑器提示
-
----
-
-## 19 · 产物统一进 build 目录
-
-```
-packages/<pkg>/build/   # 每个包的 tsc -b 编译产物（测试就在产物上跑）
-build/
-  coverage/             # 覆盖率（根 test script 产出 lcov）
-  bin/                  # 单文件可执行
-```
-包的 `files` 字段写 `["build"]`——发布包只收自己 `build/` 里的东西；根 `build/` 不进发布包，所以覆盖率与可执行文件放那里不会跟着出去。
-
----
+原则：能加 flag 就不新建脚本，该是测试的就写成测试；不设 dev/typecheck/format/doc/release 分身。布局：每包产物进 `packages/<pkg>/build/`（`files` 指到它），根 `build/` 只放 `coverage/` 与 `bin/`，不进发布包。
 
 ## 20 · 所有包统一版本
 
-`pnpm-workspace.yaml` + changesets **`fixed` 分组**，一次性 bump 全部包；`dp version` 可查看。
+`pnpm-workspace.yaml` + changesets **`fixed` 分组**一次性 bump 全部包；`dp version` 可查看。起始 `0.0.0-alpha`：包全 `private: true`，没上过 npm，从 `0.0.0` 起步等于声称已发正式版。
 
-**起始版本 `0.0.0-alpha`**：包全是 `private: true`，一个都没上过 npm，所以不能从 `0.0.0` 起步 ——
-那等于声称已经发过正式版。
+一致性由 `scripts/check-versions.mjs` 卡：所有包 `version` 须一致，不一致直接红。
 
-一致性由门禁 `scripts/check-versions.mjs` 卡（第一道，最便宜）：根与 `packages/` 下**所有包**的
-`version` 必须与根一致，不一致直接红（包数由门禁自己 readdir 得出，没有写死的数字）。
-光靠人同步一沓 package.json 一定会漏，漏了之后的表现是
-`dp --version` 报一个、某个包里报另一个 —— 而排查的人手边往往只有其中一个。
+## 22 · 仓库约定
 
----
+根目录 `AGENTS.md` 只收一手约定（仓库约定、命令、目录职责、提交规范）；`.agents/skills/` 只放可复用的操作流程。临时物一律进 `.tmp/`；提交节奏为 spike 结论落地即提交一次；凭据不入库：PAT 只在推送时用，随后把 remote URL 改回不带 token 的形式。
 
-## 21 · 精简 scripts
+## 24 · 运行时兼容：Node ≥24 与 deno / bun
 
-合并原则：能加 flag 的就不新建脚本；该是测试的就写成测试。
-
-```
-build  lint  test  integration  clean  build:bin  postinstall
-verify（= build + lint + test + verify:gates）与它的三个口径：
-  verify:gates  verify:selfcheck  verify:mutation
-```
-
-（不再设 dev / typecheck / format / doc / release 这类分身。）
-
----
-
-## 22 · AGENTS.md 与 agents/skills
-
-- 根目录 `AGENTS.md`：仓库约定、命令、目录职责、提交规范（只收一手约定，细节留给代码与契约）
-- `.agents/skills/`：**只放真正可复用的操作流程**（如 `subagent-dispatch` 派活与验收、`mutation-verify` 变异验证闭环），不堆积说明性文档
-
----
-
-## 23 · 临时文件与 Git
-
-- 所有临时物进 `.tmp/`（已在 `.gitignore`）
-- 仓库：https://github.com/imere/deploy.git
-- 提交节奏：spike 结论落地即提交一次，不等到大段完成
-- **凭据不入库**：PAT 只在推送时用，随后把 remote URL 改回不带 token 的形式
-
----
-
-## 24 · deno / bun 兼容
-
-**分层回答**：
-
-| 层面 | 结论 |
+|层面|结论|
 |---|---|
-| 我们自己的运行时 | **只承诺 Node ≥24**（用 node: 内建模块 + TS） |
-| 用户项目是 deno/bun | ✅ 支持：detector 识别 `deno.json` / `bun.lockb` / `bun.lock`，调用 `deno task build` / `bun run build` |
-| 部署产物 | 无论什么运行时，产物都是静态文件 → 后续链路完全一致 |
+|我们自己|只承诺 Node ≥24（`engines.node`、`.nvmrc`、`dp doctor` 校验；node: 内建模块 + TS）|
+|用户项目是 deno/bun|✅ 支持：detector 识别 `deno.json`/`bun.lockb`/`bun.lock`，调用 `deno task build`/`bun run build`|
+|部署产物|无论什么运行时都是静态文件 → 后续链路一致|
 
-**理由**：部署工具关心的是"产物"，不是"用什么构建"。识别 + 给正确的 build 命令就够了，成本极低。
-**做不到也不做的部分**：把 deploy-kit 自身跑在 deno/bun 上——不承诺。
-
----
+理由：部署工具关心「产物」而非构建工具；不承诺把 deploy-kit 自身跑在 deno/bun 上。Node 仍要 24 是为 API 一致性，不是抗量子门槛（ssh2 未实现 PQC）。
 
 ## 25 · release 目录推导与跨平台路径
 
-**推导，但规则明示**：
+推导但规则明示：候选序列是**导出常量**（文档列全），有序 `canWrite` 取首个通过者；plan 打印候选 + 跳过原因 + 最终选择；选定后写入状态索引沿用，**永不静默回退**；`release.root` 可覆盖且照样实证。
 
-- 候选序列是**导出常量**，文档列全 —— 不藏在实现里
-- 有序试探 `canWrite`，取首个通过者；plan 打印**候选 + 跳过原因 + 最终选择 + 理由**
-- 选定后写进状态索引，后续沿用，**永不静默回退**；`release.root` 可随时覆盖且覆盖后照样实证
+跨平台差异不止分隔符：大小写敏感性、Windows 保留名/非法字符/长度上限（260）、软链权限、SIP（macOS）、home/临时目录与服务定义位置。四条路径预检**在宿主环境就能查**（码见 `docs/failures.md`：`DP.PATH.CASE_COLLISION`/`RESERVED_NAME`/`TOO_LONG`/`ILLEGAL_CHAR`）；WSL `/mnt/<drive>` 同按 Windows 规则。
 
-**跨平台差异**不能简化成"换分隔符"。除路径分隔符外至少还有：大小写敏感性、Windows 保留名、非法字符集、路径长度上限（Windows 260）、软链权限、SIP（macOS）、home/临时目录位置、服务定义位置。
+## 26 · 单文件可执行产物
 
-**四条必须预检拦截**，且**本机就能查、不需要连目标机**：
+结论：用运行时自带的单文件可执行能力把命令行打成一个文件，目标机不必预装运行时。明确不做：压缩壳、反调试、塞依赖树 —— 那是分发工程。
 
-| 错误码 | 场景 |
-|---|---|
-| `DP.PATH.CASE_COLLISION` | 源里仅大小写不同的路径 → 在不敏感目标上静默互相覆盖 |
-| `DP.PATH.RESERVED_NAME` | Windows 保留名（`NUL` / `CON` / `aux.txt`）→ 落地即废 |
-| `DP.PATH.TOO_LONG` | 超目标平台长度上限 |
-| `DP.PATH.ILLEGAL_CHAR` | 含目标平台非法字符 |
-
-WSL 的 `/mnt/<drive>` 挂载点按 **Windows 规则**校验，与上面四条共用同一套预检。
-
----
-
-## 26 · 单文件可执行产物（二进制分发）
-
-**结论**：用运行时自带的单文件可执行能力把命令行打成一个文件，目标机不必预装运行时。
-
-| 问题 | 决定 | 理由 |
+|问题|决定|理由|
 |---|---|---|
-| 用第三方打包器吗 | **不用** | 运行时自带的能力跟着 Node 走，不会出现「Node 升到 24 而打包器不支持」的断档 |
-| 跨平台怎么出 | **各平台各出一次**（CI 矩阵：ubuntu-latest / windows-latest） | 跨注入要先拿到别的平台的运行时二进制并校验完整性，成本与风险都不划算；原生构建天然正确 |
-| 外部工具进包吗 | **不进** | ssh / rsync / tar / scp 由运行时从环境里找。它们进包就得跟着做版本与合规，且报不出「目标机没装」这个真实原因 |
-| 产物算构建成功吗 | **跑通自检才算** | 只生成文件就报成功，会把一个跑不起来的产物当交付物 |
-| 产物放哪、入库吗 | `build/bin/`，**不入库** | 与决策 19 一致：产物统一进 build，且二进制不进版本库 |
-| 注入时报「签名已损坏」 | **正常，不是失败** | 往二进制里塞一段 blob 必然让原签名失效；要签名就在注入之后重新签 |
-| 什么时候发 Release | **只有推 `v*` 标签** | 构建与发布在同一条流水线上，发出去的就是刚自检通过的那两个文件；Release 里不能有本地手搓的二进制。推 main 只留 artifact |
+|用第三方打包器吗|不用|自带能力跟着 Node 走，不会有版本断档|
+|跨平台怎么出|各平台各出一次（CI 矩阵）|跨注入要先取别家运行时二进制并验完整性|
+|外部工具进包吗|不进|ssh / rsync / tar / scp 由运行时找；进包要做版本合规|
+|产物算构建成功吗|跑通自检才算|只生成文件就成功会把跑不起来的产物当交付物|
+|产物放哪、入库吗|`build/bin/`，不入库|产物统一进 build|
+|注入时报「签名已损坏」|正常，不是失败|塞 blob 必使原签名失效；要签名就在注入后重签|
+|什么时候发 Release|只有推 `v*` 标签|构建与发布同一流水线，发出的即刚自检通过的产物|
 
-**明确不做的**：给产物加压缩壳、加反调试、把依赖树也塞进产物。这些都是分发工程，不是部署工具的事。
+## 27 · 依赖布局：junction 补链
 
----
+结论：`pnpm-workspace.yaml` 不写 `nodeLinker`（保持 isolated），缺的顶层链接由 `postinstall` 用 junction 补 —— 明细见 `AGENTS.md`。要点：这类环境 symlink 被写成 0 字节文件而 junction 可用；要补 workspace 包**和**根的直接依赖（只补 workspace 包时 eslint 链接仍消失）；已有链接不动；不写 `allowBuilds`。
 
-## 27 · 依赖布局：保持 isolated，链接缺口用 junction 补
+## 28 · 目标产物：值在渲染期烘进脚本
 
-**结论**：`pnpm-workspace.yaml` 里不写 `nodeLinker`，缺的顶层链接由 `postinstall` 补齐。
+结论：unit 与启停脚本里不出现运行期位置参数 —— 命令、参数、环境变量、工作目录、落点全在渲染期写死，执行时只跑 `sh <文件>`。
 
-| 问题 | 决定 | 理由 |
+|问题|决定|理由|
 |---|---|---|
-| 顶层链接静默缺失 | 用 **junction** 补，不改布局 | 这类环境里 symlink 会被写成 0 字节普通文件而 junction 可用；改 hoisted 等于丢掉 pnpm 严格依赖可见性的核心价值 |
-| 补哪些 | workspace 包 + **根的直接依赖** | 只补 workspace 包时 `node_modules/eslint` 仍然消失，构建链照样断；两者是同一个缺口 |
-| 已有链接 | **一律不动** | 好环境里这个脚本必须是空操作，否则它会变成另一个不确定性来源 |
-| 构建脚本白名单 | **不写 `allowBuilds`** | pnpm 默认阻断全部，不配就是最严的；写一个空表反而像「已审查过的白名单」，还给了后来人往里加名字的地方 |
+|命令与落点怎么传|渲染期烘进脚本|回滚要跑上一版**实际部署出去**的脚本；传位置参数 = 用新命令跑旧目录|
+|留位置参数吗|不留|运行期值覆盖渲染期值时无判据说哪个有效|
+|unitDir 从哪来|上层按 scope 实测可写性推导后注入|目标机路径不是配置项；推不出可写目录报 `DP.PERM.UNIT_DIR_NOT_WRITABLE`|
+|接 pm2 / supervisord 吗|不接|它们要进目标机依赖清单，「没装 pm2」会被报成「打包漏了东西」|
+|停止进程怎么算成功|信号 → 优雅期 → 强杀 → 再查一次|进程不可中断或 pid 被复用时 KILL 未必收走它|
+|systemd 的 restart 默认|`on-failure` 而非 `always`|正常退出（含 0）不该被无限重启|
+|覆盖范围|只管 service unit|timer / socket / path 各有生命周期语义|
 
----
+## 附 · 与 Terraform / Ansible 的关系
 
-## 28 · systemd / process 目标：值在渲染期烘进产物
-
-**结论**：unit 与启动/停止脚本里不出现运行期位置参数 —— 命令、参数、环境变量、工作目录、落点全在渲染期写死，执行时只跑 `sh <文件>`。
-
-| 问题 | 决定 | 理由 |
-|---|---|---|
-| 命令与落点怎么传给脚本 | **渲染期烘进脚本** | 回滚要跑的是上一版**实际部署出去**的那份脚本，而运行期手上只有当前配置；把 command 当位置参数传进去，回滚就变成「用当前配置的命令在上一版目录里跑一次」，那不是回滚 |
-| 为什么不留位置参数 | **不留** | 位置参数等于让运行期的值覆盖渲染期的值，两份值不一致时没有任何判据说哪个有效 |
-| unitDir 从哪来 | 上层按 scope 实测可写性推导后注入 | 目标机路径不是配置项；推导不出可写目录就报 `DP.PERM.UNIT_DIR_NOT_WRITABLE`，不挑一个「大概是」的落点 |
-| process 接不接 pm2 / supervisord | **不接** | 它们要进目标机依赖清单，于是「目标机没装 pm2」会在部署期被报成「打包漏了东西」，而真因是环境缺件 |
-| 停止进程怎么算成功 | 信号 → 优雅期 → 强杀 → **再查一次** | 只发 `KILL` 就当成功是这类脚本最常见的假成功：进程不可中断或 pid 被复用时 KILL 未必真收走了它 |
-| systemd 的 restart 默认 | `on-failure` 而不是 `always` | 正常退出（含 0）不该被无限重启 |
-| 覆盖范围 | 只管 service unit | timer / socket / path 各有自己的生命周期语义，套进同一套 install/activate/verify 只会得到看起来能跑、实则语义错的实现 |
-
----
-
-## 附 · 与 Ansible / Terraform 的关系
-
-| | Terraform | Ansible | **deploy-kit（本）** |
+||Terraform|Ansible|deploy-kit（本）|
 |---|---|---|---|
-| 干什么 | 供给基础设施 | 配置/编排主机状态 | **发布产物到已存在的机器** |
-| 模型 | 声明式 IaC，plan/apply | 声明期望状态，幂等 | 事务式发布，版本化 + 原子切换 |
-| 传输 | 不传文件 | 传文件（**无增量同步**） | rsync 增量 / 断点续传 |
-| 发布事务 | 无 | 无原生 release 概念 | release 目录 + 原子切换 + 回滚点 |
-| 类型安全 | HCL | YAML | **TS 类型 + define\* 提示** |
-| 依赖 | 云端 API | Python + SSH | 零目标端依赖（tar/sftp/scp 兜底） |
+|干什么|供给基础设施|配置/编排主机状态|发布产物到已存在的机器|
+|模型|声明式 IaC，plan/apply|声明期望状态，幂等|事务式发布，版本化 + 原子切换|
+|传输|不传文件|传文件（无增量同步）|rsync 增量 / 断点续传|
+|发布事务|无|无原生 release 概念|release 目录 + 原子切换 + 回滚点|
+|类型安全|HCL|YAML|TS 类型 + `define*` 提示|
+|依赖|云端 API|Python + SSH|零目标端依赖（tar/sftp/scp 兜底）|
 
-**结论：不是同一层的东西，不冲突，是上下游。**
-Terraform 造机器 → Ansible 装环境 → **deploy-kit 发应用**。可以协作：Terraform 的 output 直接喂给 deploy-kit 的 hosts。
-
-**明确借鉴**：
-- Terraform 的 `plan` / `apply` 两段式 → 我们的 `dp plan` / `dp deploy`
-- Ansible 的 `--check`（dry-run）、`--limit`、`handler/notify`、`vault` 加密凭据、`tags`
-- Ansible 我们**不借鉴**的：目标端必须装 Python。我们坚持零目标端依赖。
-
-**我们补上 Ansible 没做好的**：增量传输、发布事务性、资源护栏注入、两阶段激活、抗量子协商策略。
+是上下游：Terraform 造机器 → Ansible 装环境 → deploy-kit 发应用；output 可直接喂 hosts。借鉴：两段式 plan/apply → `dp plan`/`dp deploy`；`--check`、`--limit`、`handler/notify`、`vault`、`tags`。不借鉴目标端装 Python。补 Ansible 没做好的：增量传输、事务性发布、护栏注入、两阶段激活、抗量子协商策略。
