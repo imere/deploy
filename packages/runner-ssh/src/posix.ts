@@ -1,14 +1,14 @@
 import { quoteArg } from './argv.js'
 
-export const OP_STAT = 'stat'
-export const OP_LIST = 'list'
-export const OP_MKDIR = 'mkdir'
-export const OP_WRITE = 'write'
-export const OP_READ = 'read'
-export const OP_REMOVE = 'remove'
-export const OP_RENAME = 'rename'
-export const OP_SYMLINK = 'symlink'
-export const OP_READLINK = 'readlink'
+const OP_STAT = 'stat'
+const OP_LIST = 'list'
+const OP_MKDIR = 'mkdir'
+const OP_WRITE = 'write'
+const OP_READ = 'read'
+const OP_REMOVE = 'remove'
+const OP_RENAME = 'rename'
+const OP_SYMLINK = 'symlink'
+const OP_READLINK = 'readlink'
 export const OP_REALPATH = 'realpath'
 
 /**

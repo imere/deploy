@@ -8,11 +8,11 @@
   "engines": {
     "node": ">=24"
   },
-  "main": "./build/index.js",
-  "types": "./build/index.d.ts",
-  "exports": { ".": { "types": "./build/index.d.ts", "default": "./build/index.js" } },
-  "bin": { "dp": "./build/bin.js" },
-  "files": ["build"],
+  "main": "./dist/lib/index.js",
+  "types": "./dist/lib/index.d.ts",
+  "exports": { ".": { "types": "./dist/lib/index.d.ts", "default": "./dist/lib/index.js" } },
+  "bin": { "dp": "./dist/lib/bin.js" },
+  "files": ["dist"],
   "scripts": {
     "build": "tsc -b"
   },

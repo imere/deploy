@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "description": "测试辅助共用件：内存 Runner、Facts 构造器、错误捕获助手。只服务测试，不进运行时依赖。",
-  "main": "./build/index.js",
-  "types": "./build/index.d.ts",
-  "exports": { ".": { "types": "./build/index.d.ts", "default": "./build/index.js" } },
-  "files": ["build"],
+  "main": "./dist/lib/index.js",
+  "types": "./dist/lib/index.d.ts",
+  "exports": { ".": { "types": "./dist/lib/index.d.ts", "default": "./dist/lib/index.js" } },
+  "files": ["dist"],
   "scripts": {
     "build": "tsc -b"
   },

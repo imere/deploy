@@ -22,9 +22,9 @@ import {
   type DpErrorCode,
 } from './index.js'
 
-/** build/index.test.js → 仓库根/openspec/specs/failure-recovery/spec.md */
+/** dist/lib/index.test.js → 仓库根/openspec/specs/failure-recovery/spec.md */
 const FAILURES_DOC = new URL(
-  '../../../openspec/specs/failure-recovery/spec.md',
+  '../../../../openspec/specs/failure-recovery/spec.md',
   import.meta.url,
 )
 

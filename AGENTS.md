@@ -15,18 +15,18 @@ pnpm 单仓多包，包名前缀 `@dp/*`。**Node ≥ 24**。
 2. **歧义靠拒绝，不靠默认值。** source 路径写法、多 target 命中 —— 无法判定时报错并给出可选写法，绝不猜。
 3. **安全不让步**：路径归一化 + 允许根校验、显式 mode、传输后哈希校验、主机密钥默认 strict、凭据不进日志。
 4. **临时文件一律进 `.tmp/`**，不得散落仓库。
-5. **编译产物在 `packages/<pkg>/build`**（`tsc -b` 产出，包的 `files` 指到它）；根 `build/` 只放跨包的汇总物（覆盖率 `build/coverage/`、单文件可执行 `build/bin/`），不手塞别的东西进去。
+5. **编译产物在 `packages/<pkg>/dist/lib`**（`tsc -b` 产出，包的 `files` 指到它）；根 `dist/` 只放跨包的汇总物（覆盖率 `dist/coverage/`、单文件可执行 `dist/bin/`），不手塞别的东西进去。
 6. **文档保持精炼**，改代码顺手改对应文档，不新增说明性 markdown。
 
 ## 命令
 
 ```
-pnpm build                # tsc -b，产物 packages/<pkg>/build
-pnpm test                 # 构建 + node --test + 覆盖率 → build/coverage/lcov.info
+pnpm build                # tsc -b，产物 packages/<pkg>/dist/lib
+pnpm test                 # 构建 + node --test + 覆盖率 → dist/coverage/lcov.info
 pnpm run integration      # 真机集成测试：podman 靶机 + 真 ssh，见 tests/integration/
 pnpm verify               # build + lint + test + 门禁链（verify:gates）
 pnpm run verify:mutation  # 变异测试（每个变异都要整包跑一遍测试，慢，常规交给 CI 周跑）
-pnpm run build:bin        # 单文件可执行程序 → build/bin/dp-<platform>-<arch>
+pnpm run build:bin        # 单文件可执行程序 → dist/bin/dp-<platform>-<arch>
 pnpm clean                # tsc -b --clean
 ```
 
@@ -38,17 +38,17 @@ pnpm clean                # tsc -b --clean
 Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：它依赖的 esbuild 平台二进制在部分环境装不上，
 而 Node 24 内置测试运行器够用且零依赖。
 
-测试文件与源码同目录（`src/*.test.ts`），经 `tsc -b` 落到 `build/` 后由 `node --test` 执行；
-覆盖率只统计 `packages/*/build/**`。写新能力时同步补三样：纯函数夹具测试、真实 IO 测试、一条能指导下一步的错误路径断言。
+测试文件与源码同目录（`src/*.test.ts`），经 `tsc -b` 落到 `dist/lib/` 后由 `node --test` 执行；
+覆盖率只统计 `packages/*/dist/lib/**`。写新能力时同步补三样：纯函数夹具测试、真实 IO 测试、一条能指导下一步的错误路径断言。
 
 某些环境下 pnpm 的顶层链接会静默缺失（软链被写成 0 字节普通文件），`postinstall` 的
-`scripts/link-workspace.mjs` 用 junction 补齐 —— workspace 包与根的直接依赖都补。
+`tools/link-workspace.mjs` 用 junction 补齐 —— workspace 包与根的直接依赖都补。
 **不要为绕这个坑改成 hoisted**：那等于丢掉 pnpm 的核心价值。
 
 ## 目录
 
 ```
-packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / target-docker / target-systemd / target-process / cli 均已接线；testkit 是测试公共件，不进部署链）
+packages/       @dp/* 各包（ports / schema / core / runner-local / log / runner-ssh / target-static / transport / template / target-nginx / target-docker / target-systemd / target-process / cli 均已接线；testkit 是测试公共件，不进部署链）
 tests/          真机集成测试：容器靶机（sshd / nginx / systemd）+ 跑构建产物的客户端
 openspec/        行为契约（source of truth）：specs/<capability>/spec.md
 tools/           变异测试（mutate.mjs）、单文件产物（build-binary）、junction 补链（link-workspace）、本地 eslint 规则（eslint-plugin-dp，RuleTester 自测）
@@ -61,7 +61,7 @@ tools/           变异测试（mutate.mjs）、单文件产物（build-binary�
                  fake-test-audit（假测试与假门禁审查）
                  dp-conventions（本仓编码约定）
 .tmp/           临时物（已 gitignore）
-build/          覆盖率产物所在根目录（已 gitignore）
+dist/          产物目录：包内 dist/lib，根下 coverage 与 bin（已 gitignore）
 ```
 
 ## 派发子代理（mcode）
@@ -69,7 +69,7 @@ build/          覆盖率产物所在根目录（已 gitignore）
 大块实现交给子代理，但**派发与验收都在这里**。方法见 `.agents/skills/subagent-dispatch/SKILL.md`。三条不能省：
 
 1. **必读清单写进 prompt 第一节**，并强制先读：`AGENTS.md` + `packages/ports/src/index.ts`（Runner 只有 `exec(argv[])`）
-   + 同层参照实现（写 ssh 就看 `local/src/{exec,probe,runner}.ts`）+ 对应契约 `openspec/specs/<capability>/spec.md`。
+   + 同层参照实现（写 ssh 就看 `runner-local/src/{exec,probe,runner}.ts`）+ 对应契约 `openspec/specs/<capability>/spec.md`。
    不给清单 → 它瞎猜，还会把读过的东西复述一遍烧你的 token。
 2. **边界写死**：不许跑 git、不许改 `openspec/`、不许加依赖；改 `ports/src/index.ts` 只能末尾追加。
    源码只许修**被测试暴露的真 bug**，且不许为过测而放宽断言。

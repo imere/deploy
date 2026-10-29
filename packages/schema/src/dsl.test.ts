@@ -68,7 +68,7 @@ describe('record · 非对象输入', () => {
 
   it('null 被拒：obj 有这条，record 没有就守不住', () => {
     // 与 obj 那条不是重复：两处各写了一份 `input === null` 判据，obj 那条挡不住
-    // record 这里的翻转（全池变异实测：build/dsl.js:231 存活，179 被杀）。
+    // record 这里的翻转（全池变异实测：dist/lib/dsl.js:231 存活，179 被杀）。
     // 去掉 null 这一项，null 会掉进 object 分支摊成一个空对象 —— 不报错。
     const err = caught(() => record(str()).parse(null, 'env'))
     assert.equal(err.code, ERR.CONFIG.INVALID)
@@ -96,7 +96,7 @@ describe('原子与数组 · 类型不符时报出实际类型', () => {
 
 describe('num · 非有限数不算数字', () => {
   // `num` 的判据是 `typeof v === 'number' && Number.isFinite(v)`，两个条件都得分开站住：
-  // 全池变异实测把 `&&` 翻成 `||` 之后 build/dsl.js:65 存活 —— 说明当时只测了「类型不对」，
+  // 全池变异实测把 `&&` 翻成 `||` 之后 dist/lib/dsl.js:65 存活 —— 说明当时只测了「类型不对」，
   // 没测「类型对但值不是有限数」。翻成 `||` 后 NaN 与 Infinity 都能靠 `typeof` 那半边蒙过。
   it('NaN 被拒', () => {
     const err = caught(() => num().parse(Number.NaN, 'projects.web.release.keep'))
@@ -150,7 +150,7 @@ describe('复合类型的 toJsonSchema', () => {
 
 describe('oneOf · 合法值必须真的放行', () => {
   // 判据是 `typeof input !== 'string' || !values.includes(input)`，两个条件各守一头。
-  // 全池变异实测 build/dsl.js:94 存活：当时只喂了非法值，翻转后非法值照样被拒，
+  // 全池变异实测 dist/lib/dsl.js:94 存活：当时只喂了非法值，翻转后非法值照样被拒，
   // 于是「合法值被一起拒掉」这一侧从来没人测过。
   it('白名单内的字面量原样返回', () => {
     const schema = oneOf(['static', 'nginx'] as const)

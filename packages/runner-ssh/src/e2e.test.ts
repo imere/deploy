@@ -7,7 +7,7 @@
  * ```
  * DP_SSH_E2E=1 \
  * DP_SSH_HOST=127.0.0.1 DP_SSH_USER=dpuser DP_SSH_PORT=2222 \
- * node --test packages/runner-ssh/build/e2e.test.js
+ * node --test packages/runner-ssh/dist/lib/e2e.test.js
  * ```
  *
  * 它补的是假驱动**覆盖不到**的那一层：posix.ts 生成的脚本体是否真能在

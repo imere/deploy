@@ -337,7 +337,7 @@ async function dp(argv) {
   // 的真因就在那条命令里。日志走 stderr，不影响 stdout 上的 JSON。
   const r = await execIn(
     CLIENT,
-    `node /opt/dp/packages/cli/build/bin.js ${[...argv, '--log-level=debug'].join(' ')}`,
+    `node /opt/dp/packages/cli/dist/lib/bin.js ${[...argv, '--log-level=debug'].join(' ')}`,
     { timeoutMs: 180_000 },
   )
   let json
@@ -381,7 +381,7 @@ async function dp(argv) {
  * 那样跑出来的结论是「环境允不允许」，不是「dp 对不对」。
  */
 async function dpHost(argv) {
-  const r = await run(process.execPath, [join(ROOT, 'packages/cli/build/bin.js'), ...argv, '--log-level=debug'], {
+  const r = await run(process.execPath, [join(ROOT, 'packages/cli/dist/lib/bin.js'), ...argv, '--log-level=debug'], {
     timeoutMs: 180_000,
   })
   let json
@@ -993,7 +993,7 @@ async function startContainers() {
   if (links.code !== 0) {
     throw new Error(`容器里补 @dp 链接失败：${(links.stderr || links.stdout).trim()}`)
   }
-  const selfcheck = await execIn(CLIENT, 'node /opt/dp/packages/cli/build/bin.js --version')
+  const selfcheck = await execIn(CLIENT, 'node /opt/dp/packages/cli/dist/lib/bin.js --version')
   if (selfcheck.code !== 0) {
     throw new Error(`产物在容器里跑不起来：${selfcheck.stderr}（先跑 pnpm build）`)
   }
@@ -1001,7 +1001,7 @@ async function startContainers() {
 }
 
 /**
- * 只把**运行时需要的形状**打进容器：每个 workspace 包的 package.json + build/。
+ * 只把**运行时需要的形状**打进容器：每个 workspace 包的 package.json + dist/lib/。
  * 整棵 packages/ 直接 cp 会把宿主侧的 node_modules 一并扫进去 —— Windows 上那是手工
  * junction，podman 的 tar 头直接报 unknown file mode，整条 cp 失败；测试产物（*.test.js、
  * fixtures）对跑部署没有意义，带上只会让传输量与排查时的噪声一起膨胀。
@@ -1014,13 +1014,13 @@ function stagePackages() {
     if (name === 'testkit') continue // 测试公共件，不在部署链里，进容器只是多余噪声
     const from = join(srcRoot, name)
     if (statSync(from).isDirectory() === false) continue
-    if (existsSync(join(from, 'build')) === false) {
-      throw new Error(`${name}/build 不存在 —— 先 pnpm build 再跑集成`)
+    if (existsSync(join(from, 'dist', 'lib')) === false) {
+      throw new Error(`${name}/dist/lib 不存在 —— 先 pnpm build 再跑集成`)
     }
     const dst = join(stage, name)
     mkdirSync(dst, { recursive: true })
     cpSync(join(from, 'package.json'), join(dst, 'package.json'))
-    cpSync(join(from, 'build'), join(dst, 'build'), { recursive: true })
+    cpSync(join(from, 'dist', 'lib'), join(dst, 'dist', 'lib'), { recursive: true })
   }
   return stage
 }

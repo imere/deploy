@@ -23,7 +23,7 @@ const TPL_CODES = Object.values(ERR.TPL)
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const ROOT = resolve(HERE, '..', '..')
-const BIN = join(ROOT, 'packages/cli/build/bin.js')
+const BIN = join(ROOT, 'packages/cli/dist/lib/bin.js')
 const TMP = join(ROOT, '.tmp', 'it')
 
 mkdirSync(TMP, { recursive: true })

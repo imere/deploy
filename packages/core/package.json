@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "description": "纯编排：plan() / 布局推导 / 发布目录推导 / 跨平台路径校验。零 IO。",
-  "main": "./build/index.js",
-  "types": "./build/index.d.ts",
+  "main": "./dist/lib/index.js",
+  "types": "./dist/lib/index.d.ts",
   "exports": {
-    ".": { "types": "./build/index.d.ts", "default": "./build/index.js" }
+    ".": { "types": "./dist/lib/index.d.ts", "default": "./dist/lib/index.js" }
   },
-  "files": ["build"],
+  "files": ["dist"],
   "scripts": {
     "build": "tsc -b"
   },

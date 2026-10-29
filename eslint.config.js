@@ -55,7 +55,7 @@ const PUBLIC_API_FILES = [...publicApi.keys()].sort()
 
 export default defineConfig([
   {
-    ignores: ['**/build/**', '**/dist/**', '**/node_modules/**', '.tmp/**', 'docs/**', 'build/**'],
+    ignores: ['**/dist/**', '**/node_modules/**', '.tmp/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

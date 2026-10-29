@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** 从 `dp schema` 那份 JSON Schema 反查字段树，给 docs/config.md 的速查表用（不手工抄字段）。 */
-import { configJsonSchema } from '../packages/schema/build/config.js'
+import { configJsonSchema } from '../packages/schema/dist/lib/config.js'
 
 const root = configJsonSchema()
 const out = []

@@ -5,9 +5,7 @@
 .workbuddy/
 
 # 产物
-build/
 dist/
-coverage/
 *.tsbuildinfo
 
 # 编译输出绝不能洒进源码目录（曾经 outDir 没生效时发生过）

@@ -94,7 +94,7 @@ describe('probe.ts 用的探测脚本没有第二个实现', () => {
   })
 
   it('posix.ts 源码里也不再有这两个函数（不只是没导出）', () => {
-    const src = readFileSync(new URL('../src/posix.ts', import.meta.url), 'utf8')
+    const src = readFileSync(new URL('../../src/posix.ts', import.meta.url), 'utf8')
     assert.equal(src.includes('probeScript'), false)
     assert.equal(src.includes('bindProbeScript'), false)
     assert.equal(src.includes('$RANDOM'), false, '那段非 POSIX 的探针脚本也该一起消失')
@@ -197,13 +197,13 @@ describe('ssh2 路径也用同一个转义出口', () => {
   }
 
   it('ssh2.ts 不再有裸的 argv.join 拼远端命令', () => {
-    const src = codeOnly('../src/ssh2.ts')
+    const src = codeOnly('../../src/ssh2.ts')
     assert.equal(src.includes("req.argv.join(' ')"), false, '裸 join 是远端注入面')
     assert.ok(src.includes('buildRemoteCommand'), '必须走 argv.ts 的转义出口')
   })
 
   it('native.ts 不再往子进程环境里塞 DP_ENV_，而是把 env 交给 argv 构造器', () => {
-    const src = codeOnly('../src/native.ts')
+    const src = codeOnly('../../src/native.ts')
     assert.equal(src.includes('DP_ENV_'), false)
     // 真实代码路径：exec 把 req.env 传给 sshArgvBase，由它展开成 -o SetEnv=K=V
     // （argv.test.ts 里有 setEnvOptions 的行为断言；这里守的是"驱动确实传了"）
@@ -211,6 +211,6 @@ describe('ssh2 路径也用同一个转义出口', () => {
   })
 
   it('native.ts 不再有那个没人读的 warnIfOff 死代码', () => {
-    assert.equal(codeOnly('../src/native.ts').includes('warnIfOff'), false)
+    assert.equal(codeOnly('../../src/native.ts').includes('warnIfOff'), false)
   })
 })

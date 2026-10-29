@@ -11,14 +11,12 @@
         "report"
       ],
       "ignore": [
-        ".claude/**",
-        ".omp/**",
-        "openspec/**"
+        ".claude/**"
       ]
     },
     "packages/*": {
       "entry": [
-        "build/index.js"
+        "dist/lib/index.js"
       ],
       "project": [
         "src/**/*.ts",
@@ -27,13 +25,9 @@
     },
     "packages/cli": {
       "entry": [
-        "build/bin.js",
-        "build/index.js"
+        "dist/lib/bin.js",
+        "dist/lib/index.js"
       ]
     }
-  },
-  "ignoreDependencies": [
-    "postject",
-    "c8"
-  ]
+  }
 }

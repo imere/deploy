@@ -111,14 +111,14 @@ function listPackages() {
   } catch {
     return []
   }
-  return pkgs.filter((n) => existsSync(join(PKGS_ROOT, n, 'build'))).sort()
+  return pkgs.filter((n) => existsSync(join(PKGS_ROOT, n, 'dist', 'lib'))).sort()
 }
 
 /** 真产物的指纹：只要「有没有多/少文件」或「任何一个文件字节数变了」就说明被污染。 */
 function fingerprint(scope) {
   const map = new Map()
   for (const pkg of scope) {
-    for (const f of walkFiles(join(PKGS_ROOT, pkg, 'build'))) {
+    for (const f of walkFiles(join(PKGS_ROOT, pkg, 'dist', 'lib'))) {
       try {
         map.set(f, statSync(f).size)
       } catch {
@@ -158,7 +158,7 @@ function linkDir(target, link) {
 }
 
 /**
- * 副本与 junction 的分工（这条决定了跑一次的开销）：- 目标包：真正复制 build（只留 .js —— .map/.d.ts 不参与执行，带上它们会让临时文件数翻三倍，而删一个临时文件的成本远高于复制它）+ src（ssh 的 hygiene 用例要回头读源码）+ package.json；- 非目标包、以及仓库根的其余条目：用 junction 指到真目录，只读、零复制。
+ * 副本与 junction 的分工（这条决定了跑一次的开销）：- 目标包：真正复制 dist/lib（只留 .js —— .map/.d.ts 不参与执行，带上它们会让临时文件数翻三倍，而删一个临时文件的成本远高于复制它）+ src（ssh 的 hygiene 用例要回头读源码）+ package.json；- 非目标包、以及仓库根的其余条目：用 junction 指到真目录，只读、零复制。
  */
 const COPY_FILTER = (p) => !/\.(map|d\.ts)$/.test(p)
 
@@ -172,7 +172,7 @@ function prepareWorkspace(pkgs, targets) {
       linkDir(src, dst)
       continue
     }
-    cpSync(join(src, 'build'), join(dst, 'build'), { recursive: true, filter: COPY_FILTER })
+    cpSync(join(src, 'dist', 'lib'), join(dst, 'dist', 'lib'), { recursive: true, filter: COPY_FILTER })
     cpSync(join(src, 'package.json'), join(dst, 'package.json'))
     if (existsSync(join(src, 'src'))) cpSync(join(src, 'src'), join(dst, 'src'), { recursive: true })
   }
@@ -221,7 +221,7 @@ const tailOf = (text, n = 12) => {
 }
 
 function runPackageTests(pkg) {
-  const files = walkFiles(join(TMP_PKGS, pkg, 'build')).filter((p) => p.endsWith('.test.js')).sort()
+  const files = walkFiles(join(TMP_PKGS, pkg, 'dist', 'lib')).filter((p) => p.endsWith('.test.js')).sort()
   if (files.length === 0) return { ok: null, reason: '没有测试文件', detail: '' }
   const r = runNode(['--test', '--test-reporter=dot', ...files], TEST_TIMEOUT_MS)
   if (r.error?.code === 'ETIMEDOUT') return { ok: false, reason: 'timeout', detail: '' }
@@ -406,7 +406,7 @@ function main() {
 
   const allPkgs = listPackages()
   if (allPkgs.length === 0) {
-    err('[mutate] packages/*/build 不存在，先构建再跑本脚本')
+    err('[mutate] packages/*/dist/lib 不存在，先构建再跑本脚本')
     return { exitCode: 2 }
   }
   if (opts.pkg && !allPkgs.includes(opts.pkg)) {
@@ -447,7 +447,7 @@ function main() {
     }
 
     const queues = usable.map((pkg) => {
-      const buildDir = join(TMP_PKGS, pkg, 'build')
+      const buildDir = join(TMP_PKGS, pkg, 'dist', 'lib')
       const files = walkFiles(buildDir).filter((p) => p.endsWith('.js') && !p.endsWith('.test.js')).sort()
       const cands = []
       for (const f of files) {
@@ -609,9 +609,9 @@ function main() {
     const evidence = opts.json ? err : out
     if (!opts.json) evidence('')
     evidence(`临时目录已清理：${cleaned}（.tmp/mutate）`)
-    evidence(`产物自检：packages 各包 build ${beforeMeasure.files} 个文件 / ${beforeMeasure.bytes} 字节 → ${afterMeasure.files} 个文件 / ${afterMeasure.bytes} 字节`)
+    evidence(`产物自检：packages 各包 dist/lib ${beforeMeasure.files} 个文件 / ${beforeMeasure.bytes} 字节 → ${afterMeasure.files} 个文件 / ${afterMeasure.bytes} 字节`)
     if (dirty > 0) {
-      err('[mutate] 红线被踩：packages/*/build 在本次运行前后不一致')
+      err('[mutate] 红线被踩：packages/*/dist/lib 在本次运行前后不一致')
       for (const p of d.added) err(`  + ${label(p)}`)
       for (const p of d.removed) err(`  - ${label(p)}`)
       for (const p of d.changed) err(`  ~ ${label(p)}`)

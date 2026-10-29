@@ -8,16 +8,16 @@
   "engines": {
     "node": ">=24"
   },
-  "main": "build/index.js",
-  "types": "build/index.d.ts",
+  "main": "./dist/lib/index.js",
+  "types": "./dist/lib/index.d.ts",
   "exports": {
     ".": {
-      "types": "./build/index.d.ts",
-      "default": "./build/index.js"
+      "types": "./dist/lib/index.d.ts",
+      "default": "./dist/lib/index.js"
     }
   },
   "files": [
-    "build"
+    "dist"
   ],
   "scripts": {},
   "dependencies": {

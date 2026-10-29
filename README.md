@@ -85,10 +85,10 @@ pnpm install
 pnpm verify        # build + lint + test + 门禁链（版本/死码/覆盖率/凭据/冒烟）
 pnpm run integration        # 真机集成测试（需要容器运行时）
 pnpm run verify:mutation    # 变异测试
-pnpm run build:bin # 打成单文件可执行程序 → build/bin/dp-<platform>-<arch>
+pnpm run build:bin # 打成单文件可执行程序 → dist/bin/dp-<platform>-<arch>
 ```
 
-Node ≥ 24。产物落各包 `build/`，测试跑的是产物不是源码；lcov 在 `build/coverage/`。
+Node ≥ 24。产物落各包 `dist/lib/`，测试跑的是产物不是源码；lcov 在 `dist/coverage/`。
 
 单文件产物：把编译产物嵌进运行时二进制，启动时落到缓存目录再按 ESM 原样加载
 （不打包、不转换模块格式，所以不存在「源码跑得对、产物跑不对」这条分叉）。

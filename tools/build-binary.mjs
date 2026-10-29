@@ -5,11 +5,11 @@
  * （esbuild 等）恰恰靠 postinstall 去装平台二进制 —— 装不上，且给它开口子与
  * 供应链立场冲突。所以这里反过来做：**不打包**，把编译产物整棵作为资源嵌进
  * 运行时二进制，启动时落到缓存目录再按 ESM 原样加载。代价是首次启动要落一次盘，
- * 换来的产物行为与 `node packages/cli/build/bin.js` 完全一致 —— 没有第二套
+ * 换来的产物行为与 `node packages/cli/dist/lib/bin.js` 完全一致 —— 没有第二套
  * 模块解析规则，也就不存在「源码跑得对、打包后跑不对」这种分叉。
  *
- * 用法：node scripts/build-binary.mjs [--target <platform>-<arch>]
- * 产物：build/bin/dp-<platform>-<arch>[.exe]
+ * 用法：node tools/build-binary.mjs [--target <platform>-<arch>]
+ * 产物：dist/bin/dp-<platform>-<arch>[.exe]
  */
 import { createHash } from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -27,8 +27,8 @@ import { pathToFileURL } from 'node:url'
 import { inject } from 'postject'
 
 const ROOT = resolve(import.meta.dirname, '..')
-const WORK = join(ROOT, 'build', 'bin-work')
-const OUT_DIR = join(ROOT, 'build', 'bin')
+const WORK = join(ROOT, 'dist', 'bin-work')
+const OUT_DIR = join(ROOT, 'dist', 'bin')
 
 /**
  * 从运行时二进制里读出 SEA 哨兵，而不是写死一个常量。
@@ -106,20 +106,20 @@ async function main() {
     )
   }
 
-  const { VERSION } = await import(pathToFileURL(join(ROOT, 'packages/cli/build/index.js')).href)
+  const { VERSION } = await import(pathToFileURL(join(ROOT, 'packages/cli/dist/lib/index.js')).href)
 
   const packages = []
   for (const entry of await readdir(join(ROOT, 'packages'), { withFileTypes: true })) {
     if (!entry.isDirectory()) continue
     const dir = join(ROOT, 'packages', entry.name)
     const name = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).name
-    const files = (await stat(join(dir, 'build')).catch(() => null)) === null
+    const files = (await stat(join(dir, 'dist', 'lib')).catch(() => null)) === null
       ? []
-      : await collect(join(dir, 'build'))
+      : await collect(join(dir, 'dist', 'lib'))
     if (files.length === 0) continue
     packages.push({ name, dir, files })
   }
-  if (packages.length === 0) throw new Error('packages/*/build 是空的，先跑 pnpm build')
+  if (packages.length === 0) throw new Error('packages/*/dist/lib 是空的，先跑 pnpm build')
 
   const entryName = '@dp/cli'
   if (!packages.some((p) => p.name === entryName)) throw new Error(`找不到 ${entryName} 的编译产物`)
@@ -129,8 +129,8 @@ async function main() {
   const hash = createHash('sha256')
   for (const pkg of packages) {
     for (const file of pkg.files) {
-      const inBuild = relative(join(pkg.dir, 'build'), file).split('\\').join('/')
-      const key = `node_modules/${pkg.name}/build/${inBuild}`
+      const inBuild = relative(join(pkg.dir, 'dist', 'lib'), file).split('\\').join('/')
+      const key = `node_modules/${pkg.name}/dist/lib/${inBuild}`
       assets[key] = file
       hash.update(key).update(readFileSync(file))
     }
@@ -139,7 +139,7 @@ async function main() {
   const manifest = {
     version: VERSION,
     hash: hash.digest('hex'),
-    entry: `node_modules/${entryName}/build/bin.js`,
+    entry: `node_modules/${entryName}/dist/lib/bin.js`,
     packages: packages.map((p) => p.name),
   }
   assets['dp-manifest.json'] = join(WORK, 'dp-manifest.json')
@@ -197,7 +197,7 @@ const { homedir, tmpdir } = require('node:os')
 const { pathToFileURL } = require('node:url')
 
 if (!isSea()) {
-  process.stderr.write('这个入口只在单文件产物内部运行；源码模式请直接用 node packages/cli/build/bin.js\\n')
+  process.stderr.write('这个入口只在单文件产物内部运行；源码模式请直接用 node packages/cli/dist/lib/bin.js\\n')
   process.exit(1)
 }
 
@@ -252,7 +252,7 @@ if (!existsSync(join(dir, '.dp-ok'))) {
         name: name,
         version: manifest.version,
         type: 'module',
-        exports: { '.': { default: './build/index.js' } },
+        exports: { '.': { default: './dist/lib/index.js' } },
       }),
     )
   }

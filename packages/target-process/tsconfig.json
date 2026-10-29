@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "build"
+    "outDir": "dist/lib"
   },
   "include": ["src/**/*.ts"],
   "references": [{ "path": "../ports" }, { "path": "../template" }, { "path": "../testkit" }]

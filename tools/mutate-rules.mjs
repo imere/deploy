@@ -22,7 +22,7 @@ export function validateExemptions(data) {
       return
     }
     if (typeof raw.file !== 'string' || !isBuildArtifactPath(raw.file)) {
-      problems.push(`${at}：file 需要是产物路径（packages/<pkg>/build/... 下的相对路径）`)
+      problems.push(`${at}：file 需要是产物路径（packages/<pkg>/dist/lib/... 下的相对路径）`)
       return
     }
     if (!Number.isInteger(raw.line) || raw.line < 1) {
@@ -62,7 +62,7 @@ export function isBuildArtifactPath(p) {
 /**
  * 一条清单（或一处变异）属于哪个包。
  *
- * @param {string} p 产物相对路径（packages/<pkg>/build/...）
+ * @param {string} p 产物相对路径（packages/<pkg>/dist/lib/...）
  * @returns {string | null} 包名；路径不是产物路径时返回 null
  */
 export function pkgOfArtifactPath(p) {
