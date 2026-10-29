@@ -1,8 +1,7 @@
-import { EXIT_CODE_ROWS } from './output.js'
 
 export type OpsCommand = 'status' | 'verify' | 'rollback'
 
-export interface OpsError {
+interface OpsError {
   readonly code: string
   readonly message: string
   readonly path?: string
@@ -122,4 +121,4 @@ export function renderOpsPretty(command: OpsCommand, result: OpsResult): string 
   return lines.join('\n')
 }
 
-export { EXIT_CODE_ROWS }
+

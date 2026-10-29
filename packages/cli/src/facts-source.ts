@@ -4,12 +4,12 @@ import { existsSync, promises as fs } from 'node:fs'
 import { ERR, DpError, type Facts, type Platform, type Runner, assertPortInRange, parseSshTarget } from '@dp/ports'
 import type { HostConfig } from '@dp/schema'
 import type { Logger } from '@dp/log'
-import { probeLocalFacts, probeWritable } from '@dp/local'
-import { connectSsh, probeCreatableRemote, type AuthConfig, type HopSpec, type SshConnectionOptions } from '@dp/ssh'
+import { probeLocalFacts, probeWritable } from '@dp/runner-local'
+import { connectSsh, probeCreatableRemote, type AuthConfig, type HopSpec, type SshConnectionOptions } from '@dp/runner-ssh'
 import { RELEASE_ROOT_CANDIDATES, expandTemplate } from '@dp/core'
 import { becomeFor } from './become.js'
 
-export const DEFAULT_CONNECT_TIMEOUT_MS = 30_000
+const DEFAULT_CONNECT_TIMEOUT_MS = 30_000
 
 /**
  * 展开某个项目名在**当前平台的所有布局**下的发布根候选。
@@ -89,7 +89,7 @@ export function nearestExistingDir(path: string): string {
 /**
  * 探测「能不能把发布根建出来」。
  */
-export async function probeCreatable(
+async function probeCreatable(
   paths: readonly string[],
   /** 已经测过的目录 → 结论。重复建文件去测同一个目录纯属浪费（每次都是真实 IO） */
   known: Readonly<Record<string, boolean>> = {},

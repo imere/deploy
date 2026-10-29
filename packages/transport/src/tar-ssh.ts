@@ -1,7 +1,7 @@
 import { ERR, DpError } from '@dp/ports'
-import { quoteArg, wrapCommand } from '@dp/ssh'
+import { quoteArg, wrapCommand } from '@dp/runner-ssh'
 import { runProcess, summarizeFailure } from './proc.js'
-import { buildRshArgv, rshValueForRsync } from './rsh.js'
+import { buildRshArgv } from './rsh.js'
 import type { TransferRequest, TransferResult, SpawnImpl } from './types.js'
 import type { RshOptions } from './rsh.js'
 
@@ -171,4 +171,3 @@ function countEntries(pair: TarArgvPair): number {
   return i === -1 ? 0 : pair.local.length - i - 1
 }
 
-export { rshValueForRsync }

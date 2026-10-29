@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import { ERR, DpError } from '@dp/ports'
 import type { Facts, TargetContext } from '@dp/ports'
 import { defaultFacts } from '@dp/testkit'
-import { createLocalRunner, listSourceEntries, normalizeSourceSpec } from '@dp/local'
+import { createLocalRunner, listSourceEntries, normalizeSourceSpec } from '@dp/runner-local'
 import { deploy, rollback } from './index.js'
 
 let sourceRoot = ''

@@ -233,7 +233,7 @@ export const ERR = {
   TIMEOUT: {
     EXEC: 'DP.TIMEOUT.EXEC',
   },
-  // ↓ SSH 远端 Runner（@dp/ssh）追加的这一组
+  // ↓ SSH 远端 Runner（@dp/runner-ssh）追加的这一组
   SSH: {
     CONNECT_FAILED: 'DP.SSH.CONNECT_FAILED',
     AUTH_FAILED: 'DP.SSH.AUTH_FAILED',
@@ -578,7 +578,7 @@ export interface Logger {
   flush(): Promise<void>
 }
 
-// 提权 —— 由 @dp/ssh 的 become.ts 落地包装
+// 提权 —— 由 @dp/runner-ssh 的 become.ts 落地包装
 
 /**
  * 提权方式的**运行期**形状。

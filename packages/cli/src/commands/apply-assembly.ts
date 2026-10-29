@@ -3,7 +3,7 @@
  *
  * 只做「配置 → 运行形态」的翻译，不做任何编排：步骤顺序与失败处理在 apply.ts。
  */
-import type { SourceSpec } from '@dp/local'
+import type { SourceSpec } from '@dp/runner-local'
 import { ERR, DpError, type SourceEntry, type TargetContext } from '@dp/ports'
 import { dirname, sep } from 'node:path'
 import type { HostConfig, ProjectConfig } from '@dp/schema'
@@ -93,7 +93,7 @@ const KIND_ALIASES: Readonly<Record<string, TransportKind>> = {
   local: 'local-copy',
 }
 
-export function transportPreference(hostConfig: HostConfig, path: string): TransportPreference | undefined {
+function transportPreference(hostConfig: HostConfig, path: string): TransportPreference | undefined {
   const strategy = hostConfig.transport?.strategy
   if (strategy === undefined) return undefined
   const mapped: TransportKind[] = []

@@ -1,5 +1,5 @@
 import { deriveLayout, pickReleaseRoot } from '@dp/core'
-import { createLocalRunner } from '@dp/local'
+import { createLocalRunner } from '@dp/runner-local'
 import { ERR, DpError, type Facts, type Runner } from '@dp/ports'
 import { DEFAULT_KEEP, type HostConfig, type ProjectConfig } from '@dp/schema'
 import type { ApplyDeps } from './deps.js'

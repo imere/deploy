@@ -1,0 +1,39 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "tests/**/*.test.mjs",
+        "tools/**/*.mjs"
+      ],
+      "ignoreBinaries": [
+        "gitleaks",
+        "report"
+      ],
+      "ignore": [
+        ".claude/**",
+        ".omp/**",
+        "openspec/**"
+      ]
+    },
+    "packages/*": {
+      "entry": [
+        "build/index.js"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "!src/**/*.test.ts"
+      ]
+    },
+    "packages/cli": {
+      "entry": [
+        "build/bin.js",
+        "build/index.js"
+      ]
+    }
+  },
+  "ignoreDependencies": [
+    "postject",
+    "c8"
+  ]
+}

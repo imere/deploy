@@ -117,7 +117,7 @@ interface UndoEntry {
   readonly run: () => Promise<void>
 }
 
-export interface UnwindReport {
+interface UnwindReport {
   readonly done: readonly string[]
   readonly errors: readonly string[]
 }

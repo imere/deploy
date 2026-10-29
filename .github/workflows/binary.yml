@@ -78,7 +78,7 @@ jobs:
       # 显式带 --target：跑错机器就直接红，而不是产出一个挂着别家平台名的文件。
       # 脚本自带自检（真跑一次 --version 与 --help），跑不起来就是构建失败
       - name: Package single-file binary
-        run: node scripts/build-binary.mjs --target ${{ matrix.target }}
+        run: node tools/build-binary.mjs --target ${{ matrix.target }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

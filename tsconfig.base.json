@@ -14,7 +14,10 @@
 
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true,
+    // 覆盖率门禁（c8 --check-coverage）按 .js 产物行判定；产物若带 source map，
+    // v8-to-istanbul 会把行重映射回 .ts，跨行语句的行归属与 V8 原始块错位，
+    // 凭空多出永远补不上的「未覆盖行」，门禁就失去了与测试结果的一致性。
+    "sourceMap": false,
     "composite": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true

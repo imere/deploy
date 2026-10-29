@@ -160,7 +160,7 @@ export function analyzeVerifyArgv(paths: UnitPaths, candidate: string): readonly
  * @param config systemd 段
  * @returns true 表示要 `systemctl enable`
  */
-export function shouldEnable(config: SystemdTargetConfig): boolean {
+function shouldEnable(config: SystemdTargetConfig): boolean {
   return config.enabled !== false
 }
 

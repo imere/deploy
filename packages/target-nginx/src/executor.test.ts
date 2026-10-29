@@ -6,7 +6,7 @@
  *     上一轮影子目录的候选」会真的报 conflicting server name，而不是靠字符串比对蒙混过关；
  *  2. **跨文件系统的 rename 报 EXDEV** —— 影子目录配到 confd 之外时，
  *     「把候选直接 rename 过去」会真的失败；
- *  3. **readFile 对不存在的文件抛错、writeFile 要求父目录存在** —— 与 @dp/local 一致，
+ *  3. **readFile 对不存在的文件抛错、writeFile 要求父目录存在** —— 与 @dp/runner-local 一致，
  *     于是「忘了建影子目录」「把读失败当成不存在」这两类错改法会当场露出来。
  */
 import assert from 'node:assert/strict'

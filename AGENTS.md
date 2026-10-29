@@ -24,8 +24,7 @@ pnpm 单仓多包，包名前缀 `@dp/*`。**Node ≥ 24**。
 pnpm build                # tsc -b，产物 packages/<pkg>/build
 pnpm test                 # 构建 + node --test + 覆盖率 → build/coverage/lcov.info
 pnpm run integration      # 真机集成测试：podman 靶机 + 真 ssh，见 tests/integration/
-pnpm verify               # build + lint + test + 九项静态门禁（verify:gates）
-pnpm run verify:selfcheck # 门禁自检：注入违规看它们是否还拦得住
+pnpm verify               # build + lint + test + 门禁链（verify:gates）
 pnpm run verify:mutation  # 变异测试（每个变异都要整包跑一遍测试，慢，常规交给 CI 周跑）
 pnpm run build:bin        # 单文件可执行程序 → build/bin/dp-<platform>-<arch>
 pnpm clean                # tsc -b --clean
@@ -52,6 +51,9 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：它依赖的 esbuild 平台�
 packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / target-docker / target-systemd / target-process / cli 均已接线；testkit 是测试公共件，不进部署链）
 tests/          真机集成测试：容器靶机（sshd / nginx / systemd）+ 跑构建产物的客户端
 openspec/        行为契约（source of truth）：specs/<capability>/spec.md
+tools/           变异测试（mutate.mjs）、单文件产物（build-binary）、junction 补链（link-workspace）、本地 eslint 规则（eslint-plugin-dp，RuleTester 自测）
+.claude/         hooks：编辑落盘后自动 eslint --fix + 约定扫描（PostToolUse）
+.omp/rules/      TTSR 流式规则：DP 字面量 / 本机 / 章节号引用 / 工具钉死 / 分号 import
 .github/        CI：verify（门禁 + 覆盖率）与 binary（各平台各出一次产物）
 .agents/skills/ 可复用流程（与本项目无关，可整体搬到别处）：
                  subagent-dispatch（派活与验收）
@@ -98,7 +100,7 @@ build/          覆盖率产物所在根目录（已 gitignore）
   （告警标记 —— 只进 warnings 与告警文案，不进 `DpError.code`，所以 failures.md 里查不到）。
   源码与测试一律写 `ERR.PROC.START_FAILED`，不写 `'DP.PROC.START_FAILED'`；
   字面量散在各包里时，改一个码要同步几十处，漏一处就是「报的是 A、断言的是 B」。
-  门禁 `check-error-codes` 盯着这条（文档里登记过、尚未实现的预留码豁免：它们没有常量可引）；
+  eslint 的 DP.* 字面量禁令盯着这条（文档里登记过、尚未实现的预留码豁免：它们没有常量可引）；
   `ERR` 里的码又必须在 `openspec/specs/failure-recovery/spec.md` 有处置说明 —— 那条由 `@dp/ports` 的断言盯着
 - **目标探测（`@dp/core/detect.ts`）**：源清单与 `package.json` 的 scripts **都由调用方注入**
   （它零 IO，否则 `makePlan()` 那套纯函数断言就不成立了）。仲裁比探测更保守：
@@ -109,7 +111,7 @@ build/          覆盖率产物所在根目录（已 gitignore）
 - **护栏层**：目标机状态日志 + 带租约的部署锁 + 两阶段激活 `trial→promote`；unit 必须注入 `MemoryMax`/`StartLimitBurst`/`Restart=on-failure`
 - **抗量子**：ssh2 **不支持**，只能靠 `native-ssh` 驱动；密码登录用 `SSH_ASKPASS`（不需要 sshpass）
 - **日志**：一律走 `@dp/log`，脱敏在 sink 出口统一做，禁止单点 `console.log`；日志抛错绝不上抛
-- **远端**：`@dp/ssh` 驱动偏好链 `native-ssh` → `ssh2`（ssh2 运行时可选加载，未安装即表现为不可用）
+- **远端**：`@dp/runner-ssh` 驱动偏好链 `native-ssh` → `ssh2`（ssh2 运行时可选加载，未安装即表现为不可用）
 - **多跳**：`hosts.*.hops`（与 `ssh` 互斥）已接通，语义是**最后一跳就是目标机**。
   两个消费者都得按这条来：native 把它排除在 `-J` 之外（写进去就成了
   `ssh -J jump,target target`，在目标机上再连一次自己），`@dp/transport` 的 rsh 同理。
@@ -127,7 +129,7 @@ build/          覆盖率产物所在根目录（已 gitignore）
   目标机路径（`confd`）**不是配置项**，由实测能力推导后注入：显式 `target.confd` > 按 platform
   取候选里第一个 `canWrite === true` 的 > 都没有报 `DP.PERM.CONFD_NOT_WRITABLE`。
   `canWrite` 里没有那个键就是不可写 —— 当成「可能可写」去猜是这类 bug 的标准形状。
-  两份 facts 来源（`@dp/ssh` 与 `@dp/local`）的探测候选**必须一致**，否则同一份配置会
+  两份 facts 来源（`@dp/runner-ssh` 与 `@dp/runner-local`）的探测候选**必须一致**，否则同一份配置会
   在远端目标推得出来、本地目标推不出来
 - **docker**：compose 的每条 argv **只在 `compose.ts` 里写一次**，plan 与执行器各写一份 =
   计划说一套、真跑另一套。校验覆盖面按「值被拼进什么」数：进 argv 的都要过
@@ -174,5 +176,5 @@ build/          覆盖率产物所在根目录（已 gitignore）
 断言读的是机器（文件内容、HTTP 响应、`systemctl is-active`），不读 dp 自己的报告。
 没有容器运行时时它**退 4 并明说没跑**，不假装跑过 —— 本机跑不了就交给 CI。
 
-单元层的 `@dp/ssh` 另有真机用例，默认跳过，用 `DP_SSH_E2E=1` 加 `DP_SSH_HOST` /
+单元层的 `@dp/runner-ssh` 另有真机用例，默认跳过，用 `DP_SSH_E2E=1` 加 `DP_SSH_HOST` /
 `DP_SSH_USER` 打开并指向一台手动起的靶机。

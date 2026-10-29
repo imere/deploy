@@ -2,7 +2,7 @@
  * rsync 计划与退出码映射。
  *
  * 三个重点：
- *  1. 计划里远端 path 必须过 `@dp/ssh` 的 `quoteArg`（唯一转义出口）
+ *  1. 计划里远端 path 必须过 `@dp/runner-ssh` 的 `quoteArg`（唯一转义出口）
  *  2. 嵌套条目按父目录分组：rsync 的「多源一目的」只保 basename，混在一组会把路径拍平
  *  3. 23/24 是**部分传输**，必须变成 warning 而不是成功
  */
@@ -149,7 +149,7 @@ describe('buildRsyncPath · 提权包装', () => {
     assert.equal(buildRsyncPath({ type: 'doas' }), 'doas -n -- rsync')
   })
 
-  test('custom 模板必须含 ${cmd}，否则 @dp/ssh 直接拒', () => {
+  test('custom 模板必须含 ${cmd}，否则 @dp/runner-ssh 直接拒', () => {
     assert.throws(
       () => buildRsyncPath({ type: 'custom', template: 'dzdo rsync' }),
       (err: unknown) => err instanceof DpError && err.code === ERR.CONFIG.INVALID,

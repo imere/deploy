@@ -1,5 +1,5 @@
 import { ERR, DpError } from '@dp/ports'
-import { quoteArg, wrapCommand } from '@dp/ssh'
+import { quoteArg } from '@dp/runner-ssh'
 import { runProcess, summarizeFailure } from './proc.js'
 import { sshOptionsForCopyTool } from './copy-opts.js'
 import { buildSshMkdirArgv, ensureRemoteDirs, groupByParentDir, nestedDirs } from './groups.js'
@@ -181,4 +181,3 @@ export async function runScpPlan(
   }
 }
 
-export { wrapCommand }

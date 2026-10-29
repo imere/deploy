@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { promises as fs } from 'node:fs'
-import { existsSync, readdirSync } from 'node:fs'
+import { promises as fs, existsSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { deriveLayout, pickReleaseRoot } from '@dp/core'

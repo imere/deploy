@@ -6,7 +6,7 @@
  * 唯一安全的时刻就是现在。
  */
 import { makePlan, type Plan } from '@dp/core'
-import { listSourceEntries, normalizeSourceSpec } from '@dp/local'
+import { listSourceEntries, normalizeSourceSpec } from '@dp/runner-local'
 import type { LoadedConfig } from '../config-file.js'
 import { defaultApplyDeps } from '../deps.js'
 import { readFactsFile } from '../facts-source.js'

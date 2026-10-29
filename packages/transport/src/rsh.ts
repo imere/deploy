@@ -4,7 +4,7 @@ import {
   rshOptionValue,
   type KnownHostsMode,
   type SshAuthKind,
-} from '@dp/ssh'
+} from '@dp/runner-ssh'
 
 /**
  * 多跳的两种形态。
@@ -29,7 +29,7 @@ export interface RshOptions {
   /** 本地 ssh 可执行文件的绝对路径（来自 facts.tools.ssh） */
   readonly sshPath: string
   /**
-   * 认证方式。key/agent 才会带 `BatchMode=yes` —— 密码类不能带，因为 BatchMode 会关掉 SSH_ASKPASS 靠的那个询问（@dp/ssh argv.ts 注释）。
+   * 认证方式。key/agent 才会带 `BatchMode=yes` —— 密码类不能带，因为 BatchMode 会关掉 SSH_ASKPASS 靠的那个询问（@dp/runner-ssh argv.ts 注释）。
    */
   readonly authKind: SshAuthKind
 

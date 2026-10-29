@@ -82,9 +82,8 @@ openspec/        行为契约（source of truth）
 
 ```bash
 pnpm install
-pnpm verify        # build + lint + test + 九项静态门禁
+pnpm verify        # build + lint + test + 门禁链（版本/死码/覆盖率/凭据/冒烟）
 pnpm run integration        # 真机集成测试（需要容器运行时）
-pnpm run verify:selfcheck   # 门禁自检：注入违规看它们是否还拦得住
 pnpm run verify:mutation    # 变异测试
 pnpm run build:bin # 打成单文件可执行程序 → build/bin/dp-<platform>-<arch>
 ```
@@ -104,7 +103,7 @@ Node ≥ 24。产物落各包 `build/`，测试跑的是产物不是源码；lco
 git tag v0.0.0-alpha && git push origin v0.0.0-alpha   # 触发构建 + 发布
 ```
 
-九项门禁：`check-versions` → `dead-code` → `check-imports` → `check-deps` → `check-error-codes` → `check-tests` → `check-jsdoc` → `check-coverage` → `smoke`。纯逻辑包（`schema` / `core` / `template`）要求覆盖率 100%。
+门禁链（verify:gates）：版本一致（内联比对）→ knip 死码 → c8 覆盖率（纯逻辑包 100%，V8 精细口径）→ gitleaks 产物凭据 → 产物冒烟（node --test）。静态类规则全部收敛在 eslint：层级分区、依赖声明、DP.* 字面量、JSDoc 公共面、测试质量（零断言/恒等断言），每条本地规则带 RuleTester 测试。
 
 ---
 

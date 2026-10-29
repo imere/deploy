@@ -9,10 +9,10 @@
   "references": [
     { "path": "../ports" },
     { "path": "../core" },
-    { "path": "../local" },
+    { "path": "../runner-local" },
     { "path": "../log" },
     { "path": "../schema" },
-    { "path": "../ssh" },
+    { "path": "../runner-ssh" },
     { "path": "../target-static" },
     { "path": "../target-nginx" },
     { "path": "../target-docker" },

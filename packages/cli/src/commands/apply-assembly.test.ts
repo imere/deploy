@@ -8,7 +8,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
-import type { SourceSpec } from '@dp/local'
+import type { SourceSpec } from '@dp/runner-local'
 import type { SourceEntry } from '@dp/ports'
 import { sourceBaseFor, withParentDirs } from './apply-assembly.js'
 

@@ -1,5 +1,5 @@
 import { ERR, DpError } from '@dp/ports'
-import { quoteArg, wrapCommand } from '@dp/ssh'
+import { quoteArg, wrapCommand } from '@dp/runner-ssh'
 import { redact } from '@dp/log'
 import { runProcess, summarizeFailure, type RunProcessResult } from './proc.js'
 import { buildRshArgv, rshValueForRsync, type RshOptions } from './rsh.js'
@@ -86,7 +86,7 @@ export function buildRsyncPlan(
   const rshValue = rshValueForRsync(buildRshArgv(options.rsh))
   const rsyncPathOpt = buildRsyncPath(req.become)
 
-  // 源是本地路径；远端写成 `host:path`，path 走 @dp/ssh 的 quoteArg（唯一转义出口）
+  // 源是本地路径；远端写成 `host:path`，path 走 @dp/runner-ssh 的 quoteArg（唯一转义出口）
   const src = `${req.localRoot.replace(/\/+$/, '')}/`
   const destRoot = req.remoteRoot.endsWith('/') ? req.remoteRoot : `${req.remoteRoot}/`
 

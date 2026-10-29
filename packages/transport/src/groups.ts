@@ -1,5 +1,5 @@
 import type { BecomeConfig } from '@dp/ports'
-import { quoteArg, wrapCommand } from '@dp/ssh'
+import { quoteArg, wrapCommand } from '@dp/runner-ssh'
 import { runProcess, type RunProcessResult } from './proc.js'
 import { buildRshArgv, type RshOptions } from './rsh.js'
 import type { SpawnImpl } from './types.js'

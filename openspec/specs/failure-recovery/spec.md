@@ -120,10 +120,10 @@
 |`DP.RESOURCE.OOM_KILLED`|运行期|否|不 abort：护栏兜底 + 通知||
 |`DP.GUARD.TRIAL_EXPIRED`|运行期|否|不 abort：自动停用 + 切回||
 |`DP.DISK.FULL_RUNTIME`|运行期|否|不 abort：通知 + 可选 prune||
-|`DP.INTERACTIVE_PROMPT_DETECTED`|任意|是|立即杀进程|`@dp/local` / `@dp/transport` / `@dp/ssh`|
+|`DP.INTERACTIVE_PROMPT_DETECTED`|任意|是|立即杀进程|`@dp/runner-local` / `@dp/transport` / `@dp/runner-ssh`|
 |`DP.TIMEOUT.EXEC`|任意|否|挂起=失败||
-|`DP.PATH.ILLEGAL_CHAR`|源校验|是|零副作用：还没传第一个字节|`@dp/core` / `@dp/ssh`|
-|`DP.PATH.NOT_WRITABLE`|发布根|否|实证写入得知，不靠 uid 推断；列全部候选授权其一|`@dp/core` / `@dp/local` / `@dp/ssh`|
+|`DP.PATH.ILLEGAL_CHAR`|源校验|是|零副作用：还没传第一个字节|`@dp/core` / `@dp/runner-ssh`|
+|`DP.PATH.NOT_WRITABLE`|发布根|否|实证写入得知，不靠 uid 推断；列全部候选授权其一|`@dp/core` / `@dp/runner-local` / `@dp/runner-ssh`|
 |`DP.CONFIG.INVALID`|配置|是|歧义靠拒绝：列候选与排除办法，不猜默认值|`@dp/schema` / `@dp/core` / `@dp/cli`|
 |`DP.PERM.CONFD_NOT_WRITABLE`|装配|是|零写入即退，不猜路径（nginx confd）|`@dp/cli`|
 |`DP.PERM.UNIT_DIR_NOT_WRITABLE`|装配|是|零写入即退（unitDir 按 scope 分候选）||
@@ -165,7 +165,7 @@
 |`DP.LINK.UNAVAILABLE`|激活|否|软链不可用，原子切换无从谈起|`@dp/target-static`|
 |`DP.PREF.UNSUPPORTED`|传输协商|是|不静默降级：不可用就直说，暗换等于改行为|`@dp/transport`|
 |`DP.SOURCE.EMPTY`|源枚举|是|连目标机之前就知道，此时零代价|`@dp/transport` / `@dp/cli`|
-|`DP.SSH.CONNECT_FAILED`|连接|否|零副作用|`@dp/ssh`|
+|`DP.SSH.CONNECT_FAILED`|连接|否|零副作用|`@dp/runner-ssh`|
 |`DP.SSH.AUTH_FAILED`|认证|否|含 `SSH_ASKPASS` 取密码失败||
 |`DP.SSH.HOST_KEY_UNKNOWN`|主机密钥|否|绝不静默接受未知主机密钥 —— 那是 MITM 的入口||
 |`DP.SSH.HOST_KEY_MISMATCH`|主机密钥|否|要么真换机器要么被劫持，都不能自动放过||

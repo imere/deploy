@@ -9,6 +9,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { ERR, DpError } from '@dp/ports'
+import { caught } from '@dp/testkit'
 import { collectVars, KNOWN_VARS, validateVars } from './vars.js'
 import { renderString } from './render.js'
 import type { RenderContext } from './context.js'
@@ -182,5 +183,36 @@ describe('golden · nginx server 块', () => {
     assert.equal(a, b)
     assert.equal(a.split('\n').length, expected.split('\n').length)
     assert.equal(a.endsWith('}\n'), true)
+  })
+})
+
+describe('resolveVar 的错误分支（c8 精细口径下逐分支钉住）', () => {
+  it('${env.A.B} 多段变量名 → UNKNOWN_VAR，hint 指出只能一段', () => {
+    const err = caught(() => renderString('${env.DEPLOY_KEY.EXTRA}', ctx), DpError)
+    assert.equal(err.code, ERR.TPL.UNKNOWN_VAR)
+    assert.match(err.message, /env\.DEPLOY_KEY\.EXTRA/)
+    assert.match(err.hint ?? '', /只能是一段/)
+  })
+
+  it('${git.foo} 非法字段 → UNKNOWN_VAR', () => {
+    const err = caught(() => renderString('${git.foo}', ctx), DpError)
+    assert.equal(err.code, ERR.TPL.UNKNOWN_VAR)
+    assert.match(err.message, /git\.foo/)
+  })
+
+  it('${release.foo} 非法字段 → UNKNOWN_VAR', () => {
+    const err = caught(() => renderString('${release.foo}', ctx), DpError)
+    assert.equal(err.code, ERR.TPL.UNKNOWN_VAR)
+    assert.match(err.message, /release\.foo/)
+  })
+
+  it('release 值缺失：current 与 id 各给对应出路', () => {
+    const noCurrent = caught(() => renderString('${release.current}', { ...ctx, release: { id: 'r1' } }), DpError)
+    assert.equal(noCurrent.code, ERR.TPL.MISSING_VALUE)
+    assert.match(noCurrent.hint ?? '', /尚未部署过/)
+
+    const noId = caught(() => renderString('${release.id}', { ...ctx, release: { current: '/srv/web/current' } }), DpError)
+    assert.equal(noId.code, ERR.TPL.MISSING_VALUE)
+    assert.match(noId.hint ?? '', /release\.id/)
   })
 })

@@ -164,11 +164,11 @@ export interface TransportDeps {
   /** 显式偏好链。给了就按它选，不可用则抛 DP.PREF.UNSUPPORTED */
   readonly preferred?: TransportPreference
   /** 主机密钥策略。缺省 strict（铁律 3） */
-  readonly knownHostsMode?: import('@dp/ssh').KnownHostsMode
+  readonly knownHostsMode?: import('@dp/runner-ssh').KnownHostsMode
   /** sftp 子系统是否可用，缺省 true */
   readonly sftpAvailable?: boolean
   /**
    * 认证方式。缺省由 `identityFile` 推断：给了就是 key，否则 agent。
    */
-  readonly identityFileKind?: import('@dp/ssh').SshAuthKind
+  readonly identityFileKind?: import('@dp/runner-ssh').SshAuthKind
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { ERR, DpError, type Facts, type Runner } from '@dp/ports'
-import type { DriverExecResult, ExecRequest, SshDriver } from '@dp/ssh'
+import type { DriverExecResult, ExecRequest, SshDriver } from '@dp/runner-ssh'
 import { linuxFacts } from '@dp/testkit'
 import {
   acquireFacts,
@@ -184,7 +184,7 @@ describe('facts-source · 认证绝不继承', () => {
       type: 'key',
       identityFile: 'target-only',
     })
-    // 拒绝发生在 @dp/ssh 的 planHopChain（那里才有逐跳的 auth 校验，且不是公开导出）。
+    // 拒绝发生在 @dp/runner-ssh 的 planHopChain（那里才有逐跳的 auth 校验，且不是公开导出）。
     // 本包该保证的只有一件事：**不替它补 auth**。补了就是把目标机的钥匙递到跳板上，
     // 而 planHopChain 之后再也查不出这件事发生过。
     const chain = got.hops!

@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { promises as fs } from 'node:fs'
-import { existsSync } from 'node:fs'
+import { promises as fs, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { main } from './index.js'

@@ -9,7 +9,7 @@ const rel = (root: string, relativePath: string): string => join(root, ...relati
  *
  * @param req 传输声明。`entries` 为空直接报 DP.SOURCE.EMPTY —— 空清单会让
  * 「部署成功」变成一句无法证伪的话
- * @param runner 落盘通道，由调用方注入（本包零依赖 @dp/local，只认 ports 的 Runner 接口）
+ * @param runner 落盘通道，由调用方注入（本包零依赖 @dp/runner-local，只认 ports 的 Runner 接口）
  * @returns 复制结果。`command` 是一行**给人看的说明**，不是 argv —— 本地没有 argv
  * @throws DpError DP.SOURCE.EMPTY；写失败由注入的 Runner 抛（DP.PATH.NOT_WRITABLE）
  */

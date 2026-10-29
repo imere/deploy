@@ -1,4 +1,4 @@
-import { probeLocalFacts } from '@dp/local'
+import { probeLocalFacts } from '@dp/runner-local'
 import { transfer } from '@dp/transport'
 import type { TransferRequest, TransferResult } from '@dp/transport'
 import { acquireFacts, type FactsRequest, type FactsResult } from './facts-source.js'

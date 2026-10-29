@@ -24,7 +24,7 @@
     "@dp/ports": "workspace:*"
   },
   "devDependencies": {
-    "@dp/local": "workspace:*",
+    "@dp/runner-local": "workspace:*",
     "@dp/testkit": "workspace:*",
     "typescript": "^5.9.0"
   }

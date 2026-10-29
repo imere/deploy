@@ -1,5 +1,5 @@
 import { ERR, DpError, type Step, type Target, type TargetContext } from '@dp/ports'
-import { pullArgv, psArgv, releaseDir, resolveCompose, upArgv, type ResolvedCompose } from './compose.js'
+import { pullArgv, psArgv, releaseDir, resolveCompose, upArgv } from './compose.js'
 import type { DockerTargetConfig } from './types.js'
 
 const CONFIG_PATH = 'projects.*.target.docker'
@@ -157,4 +157,3 @@ export const dockerTarget: Target<DockerTargetConfig> = {
 }
 
 /** 导出给执行器：解析结果是唯一事实来源，计划与执行不许各算一遍 */
-export type { ResolvedCompose }

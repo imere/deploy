@@ -1,6 +1,6 @@
 import { spawn as nodeSpawn } from 'node:child_process'
 import { ERR, DpError } from '@dp/ports'
-import { detectPrompt, killProcessTree } from '@dp/ssh'
+import { detectPrompt, killProcessTree } from '@dp/runner-ssh'
 import type { SpawnImpl, SpawnedProcess } from './types.js'
 
 /**

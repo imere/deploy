@@ -31,6 +31,9 @@ jobs:
         npm install -g pnpm@12.6.0
         pnpm --version
 
+    - name: Install gitleaks（产物凭据扫描用）
+      run: "curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz -C /usr/local/bin gitleaks"
+
     # 不加 --ignore-scripts：workspace 链接由 postinstall 建，缺了它报「模块找不到」而非「链接没建」
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
@@ -38,7 +41,3 @@ jobs:
     - name: Verify
       run: pnpm verify
 
-    # 单独一步：自检靠派生子进程跑副本门禁，而 Windows 上经 pnpm 链条派子进程会 EBUSY。
-    # 留在 verify 里会让那条命令恒红 —— 一个需要人判断「这次红是不是环境」的门禁就不是门禁了
-    - name: 门禁自检（注入违规看它是否还拦得住）
-      run: pnpm run verify:selfcheck

@@ -5,7 +5,7 @@
  * 代价是既没有增量，也删不掉目标上多出来的文件（这两件事都被明确拒绝，不静默）。
  */
 import { ERR, DpError } from '@dp/ports'
-import { buildSftpBatch, sftpQuote } from '@dp/ssh'
+import { buildSftpBatch, sftpQuote } from '@dp/runner-ssh'
 import { runProcess, summarizeFailure } from './proc.js'
 import { buildRshArgv } from './rsh.js'
 import { sshOptionsForCopyTool } from './copy-opts.js'

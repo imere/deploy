@@ -1,6 +1,6 @@
 import type { SpawnImpl, SpawnedProcess } from './types.js'
 
-export interface FakeProcessRecord {
+interface FakeProcessRecord {
   readonly file: string
   readonly args: readonly string[]
   readonly killed: readonly string[]

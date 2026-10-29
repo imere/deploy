@@ -149,7 +149,7 @@
 
 ### Requirement: 支持 ssh_config 的受控子集
 
-系统 SHALL 由 `@dp/ssh-config` 解析 `~/.ssh/config`（含 `Include`），按以下映射落进内部配置：`Host` / `HostName` / `Port` / `User` 直映射；`IdentityFile` → privateKey；`ProxyJump` → jump 链；`ProxyCommand` 形如 `ssh -W` / `nc` 的转内部实现，否则报错；`StrictHostKeyChecking` / `UserKnownHostsFile` → 主机密钥策略；`KexAlgorithms` / `Ciphers` → cryptoPolicy。
+系统 SHALL 由 `@dp/runner-ssh-config` 解析 `~/.ssh/config`（含 `Include`），按以下映射落进内部配置：`Host` / `HostName` / `Port` / `User` 直映射；`IdentityFile` → privateKey；`ProxyJump` → jump 链；`ProxyCommand` 形如 `ssh -W` / `nc` 的转内部实现，否则报错；`StrictHostKeyChecking` / `UserKnownHostsFile` → 主机密钥策略；`KexAlgorithms` / `Ciphers` → cryptoPolicy。
 
 #### Scenario: 配置文件里有 Include
 

@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Facts } from '@dp/ports'
 import { defineProject } from '@dp/schema'
-import { createLocalRunner, listSourceEntries, normalizeSourceSpec } from '@dp/local'
+import { createLocalRunner, listSourceEntries, normalizeSourceSpec } from '@dp/runner-local'
 import { deploy } from '@dp/target-static'
 import { makePlan } from '@dp/core'
 

@@ -1,6 +1,6 @@
 import { ERR, DpError, type Facts } from '@dp/ports'
 import { createLogger, type Logger } from '@dp/log'
-import { hostTarget, type KnownHostsMode, type SshAuthKind } from '@dp/ssh'
+import { hostTarget, type KnownHostsMode, type SshAuthKind } from '@dp/runner-ssh'
 import { chooseTransport } from './availability.js'
 import { copyLocal } from './local-copy.js'
 import { buildRsyncPlan, runRsyncPlan } from './rsync.js'
@@ -71,7 +71,7 @@ export async function transfer(
   const remoteFacts = deps.remoteFacts ?? deps.localFacts
   if (req.kind === 'remote' && deps.remoteFacts === undefined) {
     throw new DpError(ERR.CONFIG.INVALID, '远程传输需要 remoteFacts', {
-      hint: '用 @dp/ssh 的 probeFacts 探测目标机；--facts 夹具只能用于 local 主机',
+      hint: '用 @dp/runner-ssh 的 probeFacts 探测目标机；--facts 夹具只能用于 local 主机',
     })
   }
 
@@ -112,7 +112,7 @@ async function runLocal(
 ): Promise<TransferResult> {
   if (deps.localRunner === undefined) {
     throw new DpError(ERR.CONFIG.INVALID, 'local 传输需要注入 localRunner', {
-      hint: '本包不依赖 @dp/local：调用方用 createLocalRunner(facts) 建好 Runner 传进来，本地只有一个真相来源',
+      hint: '本包不依赖 @dp/runner-local：调用方用 createLocalRunner(facts) 建好 Runner 传进来，本地只有一个真相来源',
     })
   }
   log.info('transfer.local', { entries: req.entries.length, remoteRoot: req.remoteRoot })

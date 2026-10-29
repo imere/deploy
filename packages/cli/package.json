@@ -19,10 +19,10 @@
   "dependencies": {
     "@dp/ports": "workspace:*",
     "@dp/core": "workspace:*",
-    "@dp/local": "workspace:*",
+    "@dp/runner-local": "workspace:*",
     "@dp/log": "workspace:*",
     "@dp/schema": "workspace:*",
-    "@dp/ssh": "workspace:*",
+    "@dp/runner-ssh": "workspace:*",
     "@dp/target-static": "workspace:*",
     "@dp/target-nginx": "workspace:*",
     "@dp/target-docker": "workspace:*",

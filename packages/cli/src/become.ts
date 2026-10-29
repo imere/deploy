@@ -26,7 +26,7 @@ export function becomeFor(hostConfig: HostConfig, path: string): BecomeConfig | 
       return { type: 'none' }
     case 'sudo': {
       // stdin / pty 意味着「sudo 要问密码」。传输层没有密码通道（passwordRef 是
-      // schema 的事，BecomeConfig 里根本没有承载它的字段），而 @dp/ssh 对
+      // schema 的事，BecomeConfig 里根本没有承载它的字段），而 @dp/runner-ssh 对
       // nonInteractive=false 的处理是**直接拒绝**（become.ts：铁律 0 不许等 stdin）。
       // 与其让它在深处抛一句看不懂的 refusal，不如在这里说清「没接」。
       if (b.method === 'stdin' || b.method === 'pty') {

@@ -10,7 +10,7 @@
  * ./apply-reports.ts，失败文案在 ./apply-failures.ts。
  */
 import { makePlan } from '@dp/core'
-import { listSourceEntries, normalizeSourceSpec } from '@dp/local'
+import { listSourceEntries, normalizeSourceSpec } from '@dp/runner-local'
 import { ERR, DpError, type Step, type TargetContext } from '@dp/ports'
 import type { Config } from '@dp/schema'
 import { activateDocker, installDocker, verifyDocker, type DockerExecResult } from '@dp/target-docker'
