@@ -94,3 +94,78 @@
 
 - **WHEN** 实测表明提权需要交互输入
 - **THEN** 报出该情况并终止，不发起会等待输入的调用
+
+### Requirement: LSM 驱动按实测选择
+
+系统 SHALL 通过 `@dp/lsm` 以 `selinux` / `apparmor` / `none` 三种驱动对接目标机的安全模块，驱动由实测而非平台推断选择。
+
+#### Scenario: 目标机无 LSM
+
+- **WHEN** 目标机实测没有启用任何 LSM
+- **THEN** 以 none 驱动工作，不做任何 LSM 修补动作
+
+#### Scenario: SELinux 上下文不对
+
+- **WHEN** 目标机启用 SELinux 且文件上下文不匹配，导致服务（如 nginx）读不了文件
+- **THEN** 处置是 `restorecon -R` 修上下文；chmod 0777 不是解法，MUST NOT 用放宽权限冒充修复
+
+#### Scenario: SELinux 非标端口
+
+- **WHEN** 服务要监听 SELinux 未放行的端口
+- **THEN** 处置是 `semanage port -a -t http_port_t -p tcp <端口>`；反代出网场景用 `setsebool -P httpd_can_network_connect 1`
+
+#### Scenario: 预检与建议
+
+- **WHEN** 目标机疑似启用 SELinux
+- **THEN** 预检执行 `getenforce`、`ls -Z`、`semanage port -l`；`semanage` 缺失时报错附上安装建议
+
+### Requirement: 安全加固基线固定
+
+系统 SHALL 执行以下基线：路径归一化加 allowlist 校验；显式设置 mode（文件 `0640`、目录 `0750`，拒绝 `0777` / `0666`）；临时目录 `0700`；传输完成后做 sha256 校验；主机密钥默认 `strict`，`knownHosts: none` 须显式打开并被 `dp check --security` 列出；凭据不进日志（`SSH_ASKPASS` 助手文件 `0700`、用完即删）。
+
+#### Scenario: 配置请求宽松权限
+
+- **WHEN** 配置把文件或目录权限写成 `0777` / `0666`
+- **THEN** 校验拒绝，说明基线不允许
+
+#### Scenario: 关闭主机密钥校验
+
+- **WHEN** 用户显式设置 `knownHosts: none`
+- **THEN** 该选择生效，但 `dp check --security` 会把它列为风险项
+
+#### Scenario: 凭据助手用完即删
+
+- **WHEN** 一次需要口令的执行结束
+- **THEN** `SSH_ASKPASS` 助手文件被删除，不留含凭据的文件
+
+### Requirement: 校验与写入之间不重新解析路径
+
+系统 SHALL 防 TOCTOU：先 `open` 拿到 fd 再对 fd 校验，MUST NOT 在校验与写入之间重新解析路径。
+
+#### Scenario: 路径在校验后被替换
+
+- **WHEN** 校验通过后、写入前，该路径被符号链接指向别处
+- **THEN** 写入仍落在已校验的 fd 上，不被引到别处
+
+### Requirement: 目录链逐级校验属主
+
+系统 SHALL 从根逐级校验 owner 与可写性，判定基准是「owner == 布局推导的所有者」而非 root；预检 MUST 覆盖带外脚本所在的代码域（`DP.SEC.RESCUE_UNSAFE_PATH`）与状态目录（伪造租约锁属于可用性攻击）。
+
+#### Scenario: 状态目录被他人可写
+
+- **WHEN** 预检发现状态目录对布局所有者以外的账号可写
+- **THEN** 报错拦下部署——那意味着租约锁可被伪造
+
+#### Scenario: 带外脚本落在危险位置
+
+- **WHEN** 带外脚本所在目录不满足代码域要求
+- **THEN** 报 `DP.SEC.RESCUE_UNSAFE_PATH`，不执行该脚本
+
+### Requirement: 被提权执行的代码与可变数据分离且永不 eval
+
+系统 SHALL 保证被 root 定时或提权执行的代码与可变数据不同目录；状态值只作为参数传入并经 allowlist 校验，MUST NOT 进 eval 或等价构造。
+
+#### Scenario: 状态值混进命令串
+
+- **WHEN** 某处想把状态文件里的值拼进待执行字符串
+- **THEN** 被拒绝：值只能作为参数传递并过 allowlist

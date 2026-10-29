@@ -5,7 +5,7 @@
  *  ① 共享常量：它们的全部价值就是「全仓只有一份」，所以必须钉住字面值。
  *     改默认值应当是一次有意识的、会让测试变红的动作；否则「顺手改个数字」
  *     的代价是 plan 说一套、prune 做另一套，而两边都不报错。
- *  ② 错误码表：`docs/failures.md` 与 `DP_ERROR_CODES` 是同一份知识的两个副本。
+ *  ② 错误码表：`openspec/specs/failure-recovery/spec.md` 与 `DP_ERROR_CODES` 是同一份知识的两个副本。
  *     只加进数组、没登记进文档 = 出错了查不到处置办法（这个坑已经栽过四次）；
  *     所以这里把「每个码都在册」做成自动断言，不再靠人 grep。
  */
@@ -22,8 +22,11 @@ import {
   type DpErrorCode,
 } from './index.js'
 
-/** build/index.test.js → 仓库根/docs/failures.md */
-const FAILURES_DOC = new URL('../../../docs/failures.md', import.meta.url)
+/** build/index.test.js → 仓库根/openspec/specs/failure-recovery/spec.md */
+const FAILURES_DOC = new URL(
+  '../../../openspec/specs/failure-recovery/spec.md',
+  import.meta.url,
+)
 
 /**
  * 文档里登记的是**族**（`DP.CONN.*`、`DP.TIMEOUT.*`）—— 那是设计期先写下的分类骨架。
@@ -48,7 +51,7 @@ function coveredBy(codes: ReadonlySet<string>, code: string): boolean {
 function failureTable(): string {
   const lines = readFileSync(FAILURES_DOC, 'utf8').split('\n')
   const start = lines.findIndex((l) => l.startsWith('#') && l.includes('故障分类表'))
-  assert.notEqual(start, -1, 'docs/failures.md 里找不到「故障分类表」这一节')
+  assert.notEqual(start, -1, 'openspec/specs/failure-recovery/spec.md 里找不到「故障分类表」这一节')
   let end = lines.length
   for (let i = start + 1; i < lines.length; i++) {
     if (lines[i]?.startsWith('#') === true) {
@@ -121,13 +124,13 @@ describe('共享常量', () => {
 })
 
 describe('错误码登记表', () => {
-  it('每个能抛出的码都在 docs/failures.md 里有处置办法', () => {
+  it('每个能抛出的码都在 openspec/specs/failure-recovery/spec.md 里有处置办法', () => {
     const documented = codesInDocs()
     const missing = DP_ERROR_CODES.filter((c) => !coveredBy(documented, c))
     assert.deepEqual(
       missing,
       [],
-      `这些码能抛出来但文档里查不到处置办法，逐个登记进 docs/failures.md：${missing.join(', ')}`,
+      `这些码能抛出来但文档里查不到处置办法，逐个登记进 openspec/specs/failure-recovery/spec.md：${missing.join(', ')}`,
     )
   })
 

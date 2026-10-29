@@ -146,3 +146,26 @@
 
 - **WHEN** 主机密钥与已记录的不一致
 - **THEN** 错误里说明可能的原因，而不是笼统的连接失败
+
+### Requirement: 支持 ssh_config 的受控子集
+
+系统 SHALL 由 `@dp/ssh-config` 解析 `~/.ssh/config`（含 `Include`），按以下映射落进内部配置：`Host` / `HostName` / `Port` / `User` 直映射；`IdentityFile` → privateKey；`ProxyJump` → jump 链；`ProxyCommand` 形如 `ssh -W` / `nc` 的转内部实现，否则报错；`StrictHostKeyChecking` / `UserKnownHostsFile` → 主机密钥策略；`KexAlgorithms` / `Ciphers` → cryptoPolicy。
+
+#### Scenario: 配置文件里有 Include
+
+- **WHEN** `~/.ssh/config` 含 `Include` 指令
+- **THEN** 被包含的文件按序解析合并
+
+#### Scenario: ProxyCommand 写了无法内化的命令
+
+- **WHEN** `ProxyCommand` 不是 `ssh -W` / `nc` 这类可内化的形态
+- **THEN** 报错说明不支持该写法，不静默忽略
+
+### Requirement: ssh_config 只在 native-ssh 透传
+
+ssh_config 的解析结果 SHALL 只在 native-ssh 驱动下透传；ssh2 驱动下遇到其不支持的指令时 MUST 报错，MUST NOT 静默丢弃。
+
+#### Scenario: ssh2 遇到不支持的指令
+
+- **WHEN** 解析出的 ssh_config 指令在 ssh2 驱动下没有对应实现
+- **THEN** 报错列出该指令，用户可改配置或换驱动

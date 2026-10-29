@@ -168,3 +168,40 @@
 
 - **WHEN** 在建立连接阶段就失败
 - **THEN** 错误标识出失败发生在连接阶段，不被归并成执行阶段失败
+
+### Requirement: 偏好链解析器跨域复用
+
+系统 SHALL 用同一个偏好链解析器处理所有域的「候选按序取首个可用」决策——传输方式、跳板驱动、进程管理器、运行时画像、目标类型、LSM 驱动共用一套 `resolveChain(kind, candidates)` 语义，MUST NOT 每个域各写一套仲裁。
+
+#### Scenario: 各域的解析行为一致
+
+- **WHEN** 任一域给出有序候选
+- **THEN** 取首个实测可用者、全部不可用时报 `DP.PREF.UNSUPPORTED`，行为与传输域一致
+
+#### Scenario: 域间互不污染
+
+- **WHEN** 两个域同时解析各自的候选链
+- **THEN** 彼此的候选、结论与降级说明互不影响
+
+### Requirement: 四种传输驱动各有明确定位
+
+系统 SHALL 提供四种传输驱动并按此定位排序：rsync（两端都要有，增量传输，首选）、tar-ssh（远端 tar/gzip 打包，宿主环境无 rsync 时）、sftp（需要服务端子系统，兜底）、scp（只需 exec 权限，sftp 被禁时的最后手段）。
+
+#### Scenario: 宿主环境没有 rsync
+
+- **WHEN** 本地实测无 rsync 而两端都有 tar
+- **THEN** 退到 tar-ssh 并留痕，不因缺 rsync 整体失败
+
+#### Scenario: sftp 子系统被禁
+
+- **WHEN** 服务端禁用了 sftp 子系统
+- **THEN** 退到 scp——它只需要 exec 权限
+
+### Requirement: 偏好链耗尽的报错自带出路
+
+偏好链全部不可用时，系统 SHALL 抛 `DP.PREF.UNSUPPORTED`（`path=transport.preferred`），message 逐项列出每个候选名与其失败原因，`hint` 给出可执行的出路，且在 `--json` 模式下可被程序读取。
+
+#### Scenario: 全链不可用
+
+- **WHEN** 四种驱动逐项实测都不可用
+- **THEN** 报错逐项列出驱动名与各自失败原因，并给出装上或放开哪一项即可继续

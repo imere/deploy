@@ -99,3 +99,65 @@
 
 - **WHEN** 带结构化参数运行同一命令
 - **THEN** 输出可被程序消费的结构化结果
+
+### Requirement: 永不交互，压过其它一切行为
+
+系统 MUST 在任何路径下都不等待人类输入：不弹凭据窗、不等 stdin。凭据一律带外给足（git / ssh 的密钥与密码），不满足即报错。远端吐出未预期提示符——密码、sudo、主机密钥确认三类，清单可扩展——时，系统 MUST 立即杀掉该进程并报 `DP.INTERACTIVE_PROMPT_DETECTED`。连接、exec、传输、验收、hook 均带 `timeout`，挂起即失败。
+
+#### Scenario: 凭据没有带外给足
+
+- **WHEN** 某一步需要凭据而环境里没有
+- **THEN** 直接报错缺凭据，不弹任何窗口或提示等待输入
+
+#### Scenario: 远端索要 sudo 密码
+
+- **WHEN** 远端命令输出中出现 sudo 密码提示符
+- **THEN** 该进程被立即杀掉，报 `DP.INTERACTIVE_PROMPT_DETECTED`
+
+#### Scenario: 提权需要密码
+
+- **WHEN** `sudo` 需要密码
+- **THEN** 先用 `sudo -n` 探免密，需密码时以 `sudo -S -p ''` 从受控通道投喂，不开终端提示
+
+#### Scenario: 主机密钥确认
+
+- **WHEN** 目标主机密钥未知
+- **THEN** 依赖预置的主机密钥策略（`strict` / `accept-new`）裁决，MUST NOT 出现 `yes/no` 交互确认
+
+### Requirement: 配置文件按固定优先级指定
+
+系统 SHALL 按 `-c` > `DP_CONFIG` > 自动发现（`deploy.config.ts|js|json` 向上冒泡）的优先级确定配置文件，来源冲突时明确报错。
+
+#### Scenario: 同时给了 -c 与 DP_CONFIG
+
+- **WHEN** 两种来源同时存在
+- **THEN** 取 `-c` 指定的那份，结果里能看出来源
+
+#### Scenario: 自动发现到多个候选
+
+- **WHEN** 目录冒泡发现多个配置文件
+- **THEN** 报错说明冲突，不暗选一个
+
+### Requirement: 帮助信息齐备
+
+系统 SHALL 为每个命令与子命令提供 `description`、`examples` 与 exit codes 说明，支持 `dp --help`、`dp deploy --help`、`dp deploy --help=config`，且所有命令支持 `--json`。
+
+#### Scenario: 查子命令用法
+
+- **WHEN** 运行 `dp deploy --help=config`
+- **THEN** 输出该子命令的说明、示例与退出码表
+
+### Requirement: 退出码取值固定
+
+系统 SHALL 按以下取值退出：`0` 成功；`1` 未知错误（或失败且已回滚）；`2` 用法错、或验证失败且已回滚（`--json` 输出的 `error.code` 区分两者）；`3` 配置错；`4` 缺依赖。
+
+#### Scenario: 验证失败已回滚
+
+- **WHEN** 部署验证失败且系统已完成回滚
+- **THEN** 退出码为 2，`--json` 下 `error.code` 指明是验证失败
+
+### Requirement: dp explain 打印有效配置来源
+
+系统 SHALL 提供 `dp explain`，打印生效配置及每项的来源文件与行号。
+
+状态：未实现，属设计承诺。

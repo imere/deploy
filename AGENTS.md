@@ -52,8 +52,6 @@ Node ≥ 24（见 `.nvmrc`）。**不用 Vitest**：它依赖的 esbuild 平台�
 packages/       @dp/* 各包（ports / schema / core / local / log / ssh / target-static / transport / template / target-nginx / target-docker / target-systemd / target-process / cli 均已接线；testkit 是测试公共件，不进部署链）
 tests/          真机集成测试：容器靶机（sshd / nginx / systemd）+ 跑构建产物的客户端
 openspec/        行为契约（source of truth）：specs/<capability>/spec.md
-docs/           三份参考：config.md（配置字段）、decisions.md（决策与理由）、failures.md（故障分类表）
-scripts/        构建与九道门禁；build-binary.mjs 出单文件产物，link-workspace.mjs 补 pnpm 链接
 .github/        CI：verify（门禁 + 覆盖率）与 binary（各平台各出一次产物）
 .agents/skills/ 可复用流程（与本项目无关，可整体搬到别处）：
                  subagent-dispatch（派活与验收）
@@ -71,7 +69,7 @@ build/          覆盖率产物所在根目录（已 gitignore）
 1. **必读清单写进 prompt 第一节**，并强制先读：`AGENTS.md` + `packages/ports/src/index.ts`（Runner 只有 `exec(argv[])`）
    + 同层参照实现（写 ssh 就看 `local/src/{exec,probe,runner}.ts`）+ 对应契约 `openspec/specs/<capability>/spec.md`。
    不给清单 → 它瞎猜，还会把读过的东西复述一遍烧你的 token。
-2. **边界写死**：不许跑 git、不许改 `openspec/` 与 `docs/`、不许加依赖；改 `ports/src/index.ts` 只能末尾追加。
+2. **边界写死**：不许跑 git、不许改 `openspec/`、不许加依赖；改 `ports/src/index.ts` 只能末尾追加。
    源码只许修**被测试暴露的真 bug**，且不许为过测而放宽断言。
 3. **验收自己来做**：`tsc -b` + 全量 `node --test` + 一份独立验收脚本断言行为（不采信它的测试）
    + grep 禁项（`console.log` / `execShell` / 纯包里的 `node:fs`）+ grep 私有环境。
@@ -101,7 +99,7 @@ build/          覆盖率产物所在根目录（已 gitignore）
   源码与测试一律写 `ERR.PROC.START_FAILED`，不写 `'DP.PROC.START_FAILED'`；
   字面量散在各包里时，改一个码要同步几十处，漏一处就是「报的是 A、断言的是 B」。
   门禁 `check-error-codes` 盯着这条（文档里登记过、尚未实现的预留码豁免：它们没有常量可引）；
-  `ERR` 里的码又必须在 `docs/failures.md` 有处置说明 —— 那条由 `@dp/ports` 的断言盯着
+  `ERR` 里的码又必须在 `openspec/specs/failure-recovery/spec.md` 有处置说明 —— 那条由 `@dp/ports` 的断言盯着
 - **目标探测（`@dp/core/detect.ts`）**：源清单与 `package.json` 的 scripts **都由调用方注入**
   （它零 IO，否则 `makePlan()` 那套纯函数断言就不成立了）。仲裁比探测更保守：
   0 命中报错（列出它看到了哪些文件，不假装 static）、未实现的类型报错而不降级、

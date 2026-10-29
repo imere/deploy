@@ -2,7 +2,7 @@ name: 版本
 
 # 只做「由 changeset 推导版本号并开 PR」，**不发布**。
 #
-# 为什么不发：packages/ 下 12 个包目前全是 `private: true`（docs/packaging.md 里写明了
+# 为什么不发：packages/ 下 12 个包目前全是 `private: true`（openspec/specs/packaging/spec.md 里写明了
 # 「包尚未发布到 npm」）。private 包 `changeset publish` 会直接跳过，而真要发布还得先
 # 摘掉 private、再有一个 npm token —— 这两件都还没发生。先把「版本从哪来」这一步
 # 接上：changeset 文件逼每个改动声明影响范围，版本号由此推导，CHANGELOG 自动生成。

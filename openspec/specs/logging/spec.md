@@ -88,3 +88,26 @@
 
 - **WHEN** 命令以结构化输出模式运行
 - **THEN** 日志不出现在承载结构化结果的那条输出流上
+
+### Requirement: 默认输出是 JSONL 且字段固定
+
+系统 SHALL 以 JSONL（每行一个 JSON 对象）输出日志，字段名固定为 `ts` / `level` / `msg` / `deployId` / `host` / `phase` / `span` / `attempt`。核心不依赖 OTel 包，字段对齐其约定；与 OTel 的桥接交给 `@dp/log-otel`，MUST NOT 把重依赖引进日志核心。
+
+#### Scenario: 采集端逐行消费
+
+- **WHEN** 采集端逐行读取日志流
+- **THEN** 每行都是独立可解析的 JSON 对象，含上述固定字段
+
+#### Scenario: 桥接 OTel
+
+- **WHEN** 需要把日志送进 OTel 生态
+- **THEN** 由 `@dp/log-otel` 做桥接，核心包不新增依赖
+
+### Requirement: 日志参数可从命令行控制
+
+系统 SHALL 支持 `--log-format=json|pretty|logfmt`、`--log-level` 与 `--log-file`，分别控制序列化格式、级别阈值与落盘位置。
+
+#### Scenario: 指定落盘
+
+- **WHEN** 运行时给定 `--log-file <路径>`
+- **THEN** 日志写入该文件，仍遵守格式与级别设置

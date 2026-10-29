@@ -97,3 +97,36 @@
 
 - **WHEN** 源清单展开后没有任何条目
 - **THEN** 报错指出源为空，并提示可能是构建产物为空或被过滤规则排除
+
+### Requirement: 发布根候选序列是导出常量且推导全程留痕
+
+系统 SHALL 把发布根候选序列作为导出常量对外可见，按序对每个候选做实测可写性探测、取首个通过者；`dp plan` 打印候选、逐个跳过原因与最终选择。选定后写入状态索引沿用，MUST NOT 静默回退到别的候选；`release.root` 显式指定时同样要过实测。
+
+#### Scenario: 第二个候选被选中
+
+- **WHEN** 首个候选实测不可写而第二个可写
+- **THEN** 采用第二个，且计划输出里能查到第一个被跳过的原因
+
+#### Scenario: 选定后重跑
+
+- **WHEN** 同一部署再次执行
+- **THEN** 沿用状态索引里记录的发布根，不重新漂移到别的候选
+
+#### Scenario: 显式指定的发布根不可写
+
+- **WHEN** `release.root` 指定了路径而实测写不进
+- **THEN** 报错列出全部候选授权其一，不悄悄换位置
+
+### Requirement: 跨平台路径差异在宿主环境即可预检
+
+系统 SHALL 在连接目标机之前完成以下路径预检（宿主环境就能查）：大小写冲突（`DP.PATH.CASE_COLLISION`）、Windows 保留名（`DP.PATH.RESERVED_NAME`）、超平台路径上限（`DP.PATH.TOO_LONG`）、非法字符（`DP.PATH.ILLEGAL_CHAR`）。WSL 下 `/mnt/<drive>` 路径同按 Windows 规则校验。其余跨平台差异——软链权限、SIP（macOS）、home / 临时目录与服务定义位置——由实测能力推导。
+
+#### Scenario: 两个源条目仅大小写不同
+
+- **WHEN** 源清单里出现仅大小写不同的两条路径
+- **THEN** 预检报 `DP.PATH.CASE_COLLISION`——在 Windows 上它们是同一个文件
+
+#### Scenario: 路径超长
+
+- **WHEN** 某条目拼合后超过平台路径上限（如 Windows 的 260）
+- **THEN** 预检报 `DP.PATH.TOO_LONG`，不等到传到一半才失败

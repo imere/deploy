@@ -55,3 +55,25 @@
 
 - **WHEN** 过滤之后没有任何条目
 - **THEN** 报错指出源为空，并说明可能是构建产物为空或被规则排除
+
+### Requirement: 源根写法歧义靠拒绝而非默认值
+
+系统 SHALL 按下表解释源根写法，歧义写法 MUST 报 `DP.SOURCE.AMBIGUOUS` 并给出两种合法写法的预览差异，MUST NOT 替用户猜一个（rsync 的 `src` 与 `src/` 是老陷阱，让它无法被误写）：
+
+| 写法 | 语义 |
+| --- | --- |
+| `"./dist"` | 目录本身 → `<dest>/dist/...` |
+| `"./dist/**"` | 目录内容 → `<dest>/...`（不含 dist 这层） |
+| `"./dist/*"` | 下一层内容（不递归） |
+| `"./dist/"` | 不合法：报 `DP.SOURCE.AMBIGUOUS`，提示改用前两种 |
+| `"./dist/**/*.js"` | 递归匹配 .js |
+
+#### Scenario: 尾随分隔符的源根
+
+- **WHEN** 源根写成 `"./dist/"`
+- **THEN** 报 `DP.SOURCE.AMBIGUOUS`，附 `./dist` 与 `./dist/**` 各自落点的预览
+
+#### Scenario: 两种合法写法的落点差异
+
+- **WHEN** 分别以 `"./dist"` 与 `"./dist/**"` 部署同一目录
+- **THEN** 前者目标多出 dist 这一层，后者直接是内容，可从计划预览看出差异

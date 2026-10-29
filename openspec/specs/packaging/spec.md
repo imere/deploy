@@ -121,3 +121,50 @@
 
 - **WHEN** 产物运行中某个可选依赖不可用
 - **THEN** 报错说明产物形态下装不进它，并给出该形态下真能走的路；MUST NOT 建议去安装依赖
+
+### Requirement: 单文件产物只用运行时自带能力
+
+系统 SHALL 用运行时自带的单文件可执行能力打包，MUST NOT 引入第三方打包器；明确不做压缩壳、反调试、塞依赖树——那是分发工程不是发布工具的职责。
+
+#### Scenario: 评估第三方打包器
+
+- **WHEN** 有人提议换第三方打包器
+- **THEN** 拒绝：自带能力跟着运行时走，不会出现打包器与运行时的版本断档
+
+#### Scenario: 产物被注入额外内容
+
+- **WHEN** 向产物注入 blob 后运行，报「签名已损坏」
+- **THEN** 属预期：塞入内容必使原签名失效，不是缺陷；需要签名就在注入后重签
+
+### Requirement: 全部包统一版本
+
+系统 SHALL 以 changesets 的 `fixed` 分组让所有包一次 bump 到同一版本，`dp version` 可查看；仓库门禁（`scripts/check-versions.mjs`）卡所有包 `version` 一致，不一致即红。包从 `0.0.0-alpha` 起步且全部 `private: true`——没上过 npm 的包从 `0.0.0` 起步等于声称已发正式版。
+
+#### Scenario: 某包版本落后
+
+- **WHEN** 某个包的 version 与其它包不一致
+- **THEN** 版本一致性检查失败，合并被拦下
+
+#### Scenario: 一次发版
+
+- **WHEN** 走 changesets 发版
+- **THEN** 全部包在同一次变更里 bump 到同一版本
+
+### Requirement: 只承诺 Node ≥ 24，用户项目可用 deno / bun
+
+系统自身 SHALL 只承诺 Node ≥ 24（`engines.node`、`.nvmrc`，`dp doctor` 校验；实现基于 node: 内建模块 + TS）。用户项目用 deno / bun 时 SHALL 支持：探测层识别 `deno.json` / `bun.lockb` / `bun.lock`，构建调用 `deno task build` / `bun run build`；部署产物无论什么运行时都是静态文件，后续链路一致。系统 MUST NOT 承诺把 deploy-kit 自身跑在 deno / bun 上。
+
+#### Scenario: 用户项目是 deno
+
+- **WHEN** 源里检出 `deno.json`
+- **THEN** 按 deno 画像出构建计划，产物照常走静态文件链路
+
+#### Scenario: 用户项目是 bun
+
+- **WHEN** 源里检出 `bun.lockb` 或 `bun.lock`
+- **THEN** 构建计划调用 `bun run build`
+
+#### Scenario: 运行环境 Node 版本不足
+
+- **WHEN** 运行 `dp doctor` 时 Node 低于 24
+- **THEN** 报环境不满足——要求 24 是为 API 一致性，不是抗量子门槛（ssh2 未实现 PQC）

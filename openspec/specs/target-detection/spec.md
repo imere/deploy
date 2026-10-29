@@ -103,3 +103,53 @@
 
 - **WHEN** 报错源于某个文件被误判为证据
 - **THEN** 报错里说明可以把它排除出源清单或改名
+
+### Requirement: 证据到候选的置信度档位固定
+
+系统 SHALL 按固定的证据-置信度表给候选打分，档位表是导出常量而非随手赋值：
+
+| 证据 | 置信度 | 候选 |
+| --- | --- | --- |
+| compose 文件 | 90 | docker |
+| `nginx.conf` | 80 | nginx |
+| `*.service` | 60 | systemd |
+| `ecosystem.config.js` | 60 | pm2 |
+| `Dockerfile` | 50 | 单镜像 |
+| `Caddyfile` | 45 | caddy |
+| `scripts.deploy` | 40 | delegate |
+| k8s 清单 | 30 | k8s |
+| 静态文件 | 20 | static |
+| 无证据 | — | process（仅可显式指定） |
+
+pm2 / 单镜像 / caddy / k8s / delegate 是可探测到的候选，但不在 `target.type` 可取值里（只认 static / nginx / docker / systemd / process）。零命中报错并列出看到的文件（超 10 条截断）；一命中直接采用；多命中按仲裁规则（见上）。
+
+#### Scenario: 只有 compose 文件
+
+- **WHEN** 源清单里只出现 compose 编排文件
+- **THEN** 以 90 档置信度给出 docker 候选
+
+#### Scenario: systemd 与 pm2 证据同时存在
+
+- **WHEN** 源里既有 `*.service` 又有 `ecosystem.config.js`
+- **THEN** 两候选同档并列，按仲裁规则处理（并列即报错，未实现候选不参与取最高）
+
+### Requirement: 运行时画像与进程管理器正交
+
+系统 SHALL 把 runtime profile（画像）与 supervisor（进程管理层）作为两个正交维度：profile 取 `node` / `java` / `python` / `static` / `docker` / `other`，每个 profile 定义 detect 证据、build 命令、产物形态、健康检查、资源预算与 unit 模板默认值；`service.managers` 可多配，按探测激活实际存在的那个（CentOS 6 只有 sysvinit、Alpine 是 OpenRC、容器里可能都没有）。
+
+#### Scenario: Java 项目画像
+
+- **WHEN** 源里检出 `pom.xml` / `build.gradle` / `*.jar`
+- **THEN** 判为 java 画像，unit 内存预算按 `MemoryMax=Xmx×1.35` 推导
+
+#### Scenario: Python 项目画像
+
+- **WHEN** 源里检出 `requirements.txt` / `pyproject.toml` / `Pipfile` / `poetry.lock` / `uv.lock`
+- **THEN** 判为 python 画像，入口按 venv + gunicorn/uvicorn 推导
+
+#### Scenario: 多个进程管理器候选
+
+- **WHEN** 目标机同时存在多个受支持的进程管理器
+- **THEN** 按探测结果激活实际在用的那个，不按配置顺序硬选
+
+状态：`service.managers` 与对应执行器未实现，现状只到探测层。
