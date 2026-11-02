@@ -1,6 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "outDir": "dist/lib", "rootDir": "src" },
+  "compilerOptions": { "outDir": "dist/lib",
+    "tsBuildInfoFile": "dist/lib/.tsbuildinfo", "rootDir": "src" },
   "include": ["src/**/*.ts"],
   "references": [{ "path": "../ports" }]
 }
