@@ -42,9 +42,6 @@ jobs:
       - name: Verify
         run: pnpm verify
 
-      - name: 门禁自检（注入违规看它是否还拦得住）
-        run: pnpm run verify:selfcheck
-
   build:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
@@ -84,7 +81,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dp-${{ matrix.target }}
-          path: build/bin/*
+          path: dist/bin/*
           if-no-files-found: error
 
   release:

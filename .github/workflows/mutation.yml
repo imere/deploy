@@ -67,7 +67,7 @@ jobs:
     # 所以不为它改脚本，而是让它在没有垫片的 runner 上跑。runner 上没有那个限制。
     #
     # 存活率超过阈值即失败。存活 = 把实现改坏了测试却还绿 = 假测试的藏身处。
-    # 脚本只改 .tmp/mutate 下的副本，并在跑之前之后对 packages/*/build 做文件数+字节数快照，
+    # 脚本只改 .tmp/mutate 下的副本，并在跑之前之后对 packages/*/dist/lib 做文件数+字节数快照，
     # 不一致就判红线被踩（退出非 0）—— 所以这里不需要额外的「确认没污染产物」步骤。
     - name: Mutate
       run: pnpm run verify:mutation

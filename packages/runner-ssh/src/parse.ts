@@ -219,8 +219,13 @@ export function parseSudoList(stdout: string, stderr = ''): string[] {
   const out = new Set<string>()
   for (const raw of stdout.split(/\r?\n/)) {
     const line = raw.trim()
-    // 锚定 + [^()]：不带锚的 \(.*?\) 在长括号串上是平方级回溯，sudo -l 的输出长度不可控
-    const m = /^\([^()]*\)\s+NOPASSWD:\s*(.+)$/.exec(line)
+    // sudo -l 白名单行形如 `(runas) NOPASSWD: cmd,…`。不用 `\(…\)\s+NOPASSWD` 一把抓：
+    // `[^()]*` 与 `\s+` 都能吃空白，两个可变量词相邻，在 `()` 后跟长 \t 串的行上互为
+    // 歧义、平方级（CodeQL 实测抓过）。切到第一个 `)` 再匹配，语义相同且线性。
+    if (!line.startsWith('(')) continue
+    const close = line.indexOf(')')
+    if (close === -1) continue
+    const m = /^\s+NOPASSWD:\s*(.+)$/.exec(line.slice(close + 1))
     if (m === null) continue
     const list = m[1]!.trim()
     if (list === 'ALL') {
