@@ -200,6 +200,9 @@ export function parseLinger(stdout: string): boolean {
 
 // sudo -n -l
 
+// 行内空白只有空格与 \t（行已经 trim 过、按 \n 切开）
+const isWs = (c: number): boolean => c === 32 || c === 9
+
 /**
  * 解析 `sudo -n -l`。
  *
@@ -219,15 +222,21 @@ export function parseSudoList(stdout: string, stderr = ''): string[] {
   const out = new Set<string>()
   for (const raw of stdout.split(/\r?\n/)) {
     const line = raw.trim()
-    // sudo -l 白名单行形如 `(runas) NOPASSWD: cmd,…`。不用 `\(…\)\s+NOPASSWD` 一把抓：
-    // `[^()]*` 与 `\s+` 都能吃空白，两个可变量词相邻，在 `()` 后跟长 \t 串的行上互为
-    // 歧义、平方级（CodeQL 实测抓过）。切到第一个 `)` 再匹配，语义相同且线性。
+    // sudo -l 白名单行形如 `(runas) NOPASSWD: cmd,…`。不用正则一把抓：
+    // `\(…\)\s+`、`\s+…\s*(.+)` 这类相邻可变量词在 `()` 后跟长 \t 串的行上互为
+    // 歧义、平方级，CodeQL 连抓两条（#41/#42）。全字符串扫描，语义与原正则相同
+    // 且线性：`)` 后必须先是一段空白再紧跟 `NOPASSWD:`，值取到行尾。
     if (!line.startsWith('(')) continue
     const close = line.indexOf(')')
     if (close === -1) continue
-    const m = /^\s+NOPASSWD:\s*(.+)$/.exec(line.slice(close + 1))
-    if (m === null) continue
-    const list = m[1]!.trim()
+    const tail = line.slice(close + 1)
+    let at = 0
+    while (at < tail.length && isWs(tail.charCodeAt(at))) at++
+    // `)` 与 NOPASSWD 之间至少一个空白；`(x)NOPASSWD:` 不算白名单行
+    if (at === 0 || !tail.startsWith('NOPASSWD:', at)) continue
+    let from = at + 'NOPASSWD:'.length
+    while (from < tail.length && isWs(tail.charCodeAt(from))) from++
+    const list = tail.slice(from).trim()
     if (list === 'ALL') {
       out.add('ALL')
       continue
