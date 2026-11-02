@@ -1,7 +1,7 @@
 import { existsSync, promises as fs } from 'node:fs'
 import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { ERR, DpError } from '@dp/ports'
+import { ERR, DpError, stripTrailingSeparators } from '@dp/ports'
 import { configSchema, type Config, type ProjectConfig } from '@dp/schema'
 
 /** 自动发现的文件名，顺序即优先级（ts > js > json：前者能写逻辑，后者最通用） */
@@ -90,7 +90,7 @@ export function resolveConfigPath(input: ResolveConfigInput): ConfigLocation | u
 
 /** Windows 大小写不敏感；`realpath` 之外的兜底，避免同文件被判成两个 */
 function samePath(a: string, b: string): boolean {
-  const norm = (p: string): string => resolvePath(p).replace(/[\\/]+$/, '')
+  const norm = (p: string): string => stripTrailingSeparators(resolvePath(p))
   const x = norm(a)
   const y = norm(b)
   return process.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y

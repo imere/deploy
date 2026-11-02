@@ -4,7 +4,7 @@
  * 它成立的条件最松 —— 只要 sshd 开了 sftp 子系统，不要求目标机装 rsync 或 tar；
  * 代价是既没有增量，也删不掉目标上多出来的文件（这两件事都被明确拒绝，不静默）。
  */
-import { ERR, DpError } from '@dp/ports'
+import { ERR, DpError, stripTrailingSlashes } from '@dp/ports'
 import { buildSftpBatch, sftpQuote } from '@dp/runner-ssh'
 import { runProcess, summarizeFailure } from './proc.js'
 import { buildRshArgv } from './rsh.js'
@@ -73,8 +73,8 @@ export function buildSftpPlan(req: TransferRequest, options: SftpArgvOptions): S
     })
   }
 
-  const localRoot = req.localRoot.replace(/\/+$/, '')
-  const remoteRoot = req.remoteRoot.replace(/\/+$/, '')
+  const localRoot = stripTrailingSlashes(req.localRoot)
+  const remoteRoot = stripTrailingSlashes(req.remoteRoot)
 
   const commands: string[] = []
   for (const dir of remoteDirs(remoteRoot, req.entries)) {

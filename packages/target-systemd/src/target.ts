@@ -1,4 +1,4 @@
-import { ERR, DpError, RELEASES_DIR_NAME, joinRemotePath, type Step, type Target, type TargetContext } from '@dp/ports'
+import { ERR, DpError, RELEASES_DIR_NAME, joinRemotePath, type Step, type Target, type TargetContext, stripTrailingSlashes } from '@dp/ports'
 import { renderString } from '@dp/template'
 import { renderUnit } from './unit.js'
 import type { SystemdTargetConfig } from './types.js'
@@ -43,8 +43,8 @@ export interface UnitPaths {
 export function unitPaths(ctx: TargetContext, config: SystemdTargetConfig): UnitPaths {
   assertUnitDir(config.unitDir)
   const unitName = resolveUnitName(ctx, config)
-  const file = joinRemotePath(config.unitDir.replace(/\/+$/, ''), unitName)
-  const releaseDir = joinRemotePath(ctx.root.replace(/\/+$/, ''), RELEASES_DIR_NAME, ctx.releaseId)
+  const file = joinRemotePath(stripTrailingSlashes(config.unitDir), unitName)
+  const releaseDir = joinRemotePath(stripTrailingSlashes(ctx.root), RELEASES_DIR_NAME, ctx.releaseId)
   const shadowRoot = joinRemotePath(releaseDir, '.dp')
   return {
     unitName,

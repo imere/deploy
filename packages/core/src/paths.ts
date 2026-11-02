@@ -1,4 +1,4 @@
-import { ERR, DpError, type Facts, type Layout, type Platform } from '@dp/ports'
+import { ERR, DpError, type Facts, type Layout, type Platform, stripTrailingSeparators } from '@dp/ports'
 
 // 模板展开
 
@@ -22,7 +22,7 @@ export interface TemplateContext {
  * @returns 展开后的路径；未识别的 token 原样保留（不报错，交由后续的实证去否定它）
  */
 export function expandTemplate(tpl: string, ctx: TemplateContext): string {
-  const home = ctx.homedir.replace(/[\\/]+$/, '')
+  const home = stripTrailingSeparators(ctx.homedir)
   const table: ReadonlyArray<readonly [string, string]> = [
     ['$XDG_DATA_HOME', ctx.env.XDG_DATA_HOME ?? `${home}/.local/share`],
     ['$XDG_STATE_HOME', ctx.env.XDG_STATE_HOME ?? `${home}/.local/state`],

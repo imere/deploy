@@ -1,4 +1,5 @@
 import type { BecomeConfig } from '@dp/ports'
+import { stripTrailingSlashes } from '@dp/ports'
 import { quoteArg, wrapCommand } from '@dp/runner-ssh'
 import { runProcess, type RunProcessResult } from './proc.js'
 import { buildRshArgv, type RshOptions } from './rsh.js'
@@ -36,7 +37,7 @@ export function groupByParentDir(entries: readonly string[]): readonly EntryGrou
  * 缺的只是中间层，而 `mkdir -p` 一条命令补齐全部。
  */
 export function nestedDirs(input: { readonly entries: readonly string[]; readonly remoteRoot: string }): readonly string[] {
-  const root = input.remoteRoot.replace(/\/+$/, '')
+  const root = stripTrailingSlashes(input.remoteRoot)
   return [
     ...new Set(
       groupByParentDir(input.entries)

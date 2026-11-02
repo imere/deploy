@@ -1,4 +1,4 @@
-import { ERR, DpError, type BecomeConfig, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner } from '@dp/ports'
+import { ERR, DpError, type BecomeConfig, type ExecOptions, type ExecResult, type Facts, type FileStat, type Runner, stripTrailingSlashes } from '@dp/ports'
 import { checkSourcePaths } from '@dp/core'
 import type { SshDriver } from './driver.js'
 import { DEFAULT_MAX_OUTPUT_BYTES, resolveTimeoutMs } from './driver.js'
@@ -173,7 +173,7 @@ export function normalizeRemotePath(path: string, options: PathGuardOptions): st
  * @returns `child === root` 或 `child` 以 `root + "/"` 开头时才为 true
  */
 export function isUnder(child: string, root: string): boolean {
-  const c = root === '/' ? '/' : root.replace(/\/+$/, '')
+  const c = root === '/' ? '/' : stripTrailingSlashes(root)
   if (c === '/') return child.startsWith('/')
   return child === c || child.startsWith(`${c}/`)
 }

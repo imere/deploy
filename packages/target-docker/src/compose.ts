@@ -1,4 +1,4 @@
-import { ERR, DpError, RELEASES_DIR_NAME, joinRemotePath, type TargetContext } from '@dp/ports'
+import { ERR, DpError, RELEASES_DIR_NAME, joinRemotePath, type TargetContext, stripTrailingSlashes } from '@dp/ports'
 import { renderString } from '@dp/template'
 import type { DockerCompose, DockerMode, DockerTargetConfig } from './types.js'
 
@@ -11,7 +11,7 @@ import type { DockerCompose, DockerMode, DockerTargetConfig } from './types.js'
  * @returns 绝对路径，末尾不带 `/`。它会成为 compose 的项目目录与 cwd，所以一律用 `/` 分隔
  */
 export function releaseDir(ctx: TargetContext, releaseId: string): string {
-  return joinRemotePath(ctx.root.replace(/\/+$/, ''), RELEASES_DIR_NAME, releaseId)
+  return joinRemotePath(stripTrailingSlashes(ctx.root), RELEASES_DIR_NAME, releaseId)
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   type Runner,
   type Step,
   type TargetContext,
+  stripTrailingSlashes,
 } from '@dp/ports'
 import { assertOverwritable, type OverwriteDecision } from './ownership.js'
 import { renderShadowMainConf } from './render.js'
@@ -328,7 +329,7 @@ class Session {
  * 要以 exec-session 基件为前提，本包暂不收
  */
 async function mkdirTracked(session: Session, dir: string): Promise<void> {
-  const confd = session.config.confd.replace(/\/+$/, '')
+  const confd = stripTrailingSlashes(session.config.confd)
   const chain: string[] = []
   let cur = ''
   for (const part of dir.split('/').filter((p) => p !== '')) {
@@ -366,7 +367,7 @@ function overwriteOptions(session: Session): { force?: boolean; path: string } {
  * 影子主配置要 include 的清单 = confd 的真实内容，减去四样东西。
  */
 async function collectIncludes(runner: Runner, confd: string, L: Layout): Promise<readonly string[]> {
-  const trailing = confd.replace(/\/+$/, '')
+  const trailing = stripTrailingSlashes(confd)
   const includes: string[] = []
   for (const name of await runner.listDir(trailing)) {
     const path = `${trailing}/${name}`

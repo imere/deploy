@@ -702,3 +702,35 @@ export const PROBE_TOOLS_SHARED: readonly string[] = [
   'node',
   'java',
 ]
+
+/**
+ * 去掉结尾的连续 `/`（远程路径口径）。
+ *
+ * 用线性扫描而不是 `/\/+$/` 正则：后者在「长斜杠串后跟非斜杠」的输入上，
+ * 每个起点都要把整段斜杠回溯一遍再失败，平方级。路径来自配置与远端输出，
+ * 长度不可控，这条复杂度不允许进库。
+ *
+ * @param path 远程路径
+ * @returns 剥掉尾斜杠后的串；无尾斜杠时原引用返回
+ */
+export function stripTrailingSlashes(path: string): string {
+  let end = path.length
+  while (end > 0 && path.charCodeAt(end - 1) === 47 /* / */) end--
+  return end === path.length ? path : path.slice(0, end)
+}
+
+/**
+ * 同 stripTrailingSlashes，但 `\` 一起去（Windows 本地路径口径：homedir、盘符路径）。
+ *
+ * @param path 本地路径
+ * @returns 剥掉尾部分隔符后的串；无尾分隔符时原引用返回
+ */
+export function stripTrailingSeparators(path: string): string {
+  let end = path.length
+  while (end > 0) {
+    const c = path.charCodeAt(end - 1)
+    if (c !== 47 /* / */ && c !== 92 /* \ */) break
+    end--
+  }
+  return end === path.length ? path : path.slice(0, end)
+}

@@ -1,4 +1,4 @@
-import { ERR, DpError } from '@dp/ports'
+import { ERR, DpError, stripTrailingSlashes } from '@dp/ports'
 import { quoteArg } from '@dp/runner-ssh'
 import { runProcess, summarizeFailure } from './proc.js'
 import { sshOptionsForCopyTool } from './copy-opts.js'
@@ -67,7 +67,7 @@ export function buildScpPlan(req: TransferRequest, options: ScpArgvOptions): Scp
   // 选项片段来自 ssh，但 scp 的 -p 是「保留时间戳」、端口是大写 -P —— 照搬会把
   // 端口号当成源文件名。改写见 copy-opts.ts。
   const copyOpts = sshOptionsForCopyTool(buildRshArgv(options.rsh).slice(1))
-  const src = `${req.localRoot.replace(/\/+$/, '')}/`
+  const src = `${stripTrailingSlashes(req.localRoot)}/`
   const destRoot = req.remoteRoot.endsWith('/') ? req.remoteRoot : `${req.remoteRoot}/`
 
   const argvs = groupByParentDir(req.entries).map((group) => {

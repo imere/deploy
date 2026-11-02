@@ -1,4 +1,4 @@
-import { CURRENT_LINK_NAME, DpError, type TargetContext } from '@dp/ports'
+import { CURRENT_LINK_NAME, DpError, type TargetContext, stripTrailingSlashes } from '@dp/ports'
 import { assertSafe } from './unsafe.js'
 import { resolveVar, scan } from './vars.js'
 import type { RenderContext, RenderOptions } from './context.js'
@@ -90,7 +90,7 @@ function walk(value: unknown, ctx: RenderContext, options: RenderOptions | undef
  * @returns `release.id` 为本次版本号，`release.current` 为 current 软链的绝对路径
  */
 export function releaseVars(ctx: TargetContext): { 'release.id': string; 'release.current': string } {
-  const root = ctx.root.replace(/\/+$/, '')
+  const root = stripTrailingSlashes(ctx.root)
   return {
     'release.id': ctx.releaseId,
     'release.current': `${root}/${CURRENT_LINK_NAME}`,

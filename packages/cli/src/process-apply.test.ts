@@ -526,7 +526,7 @@ describe('process 失败时的收场', () => {
         const warnings = (result['warnings'] as string[]).join('\n')
         assert.match(warnings, /空窗/, '必须说清不是「还在跑旧的」')
         assert.match(warnings, /EADDRINUSE/, '子进程的原话要带出来')
-        assert.match(warnings, new RegExp(PID_FILE.replace(/\//g, '\\/')), '要说清 pidfile 在哪，人才能自己看')
+        assert.ok(warnings.includes(PID_FILE), '要说清 pidfile 在哪，人才能自己看')
       },
       { process: true },
     )

@@ -1,4 +1,4 @@
-import { ERR, DpError, joinRemotePath, type Step, type Target, type TargetContext } from '@dp/ports'
+import { ERR, DpError, joinRemotePath, type Step, type Target, type TargetContext, stripTrailingSlashes } from '@dp/ports'
 import { renderString } from '@dp/template'
 import { renderConf } from './render.js'
 import type { NginxTargetConfig } from './types.js'
@@ -25,8 +25,8 @@ export interface Layout {
 
 export function layout(ctx: TargetContext, config: NginxTargetConfig): Layout {
   const name = resolveFilename(ctx, config)
-  const confd = config.confd.replace(/\/+$/, '')
-  const shadowRoot = (config.shadowDir ?? joinRemotePath(confd, '.dp-shadow')).replace(/\/+$/, '')
+  const confd = stripTrailingSlashes(config.confd)
+  const shadowRoot = stripTrailingSlashes(config.shadowDir ?? joinRemotePath(confd, '.dp-shadow'))
   const file = joinRemotePath(confd, name)
   return {
     file,

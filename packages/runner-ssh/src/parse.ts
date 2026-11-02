@@ -219,7 +219,8 @@ export function parseSudoList(stdout: string, stderr = ''): string[] {
   const out = new Set<string>()
   for (const raw of stdout.split(/\r?\n/)) {
     const line = raw.trim()
-    const m = /\(.*?\)\s+NOPASSWD:\s*(.+)$/.exec(line)
+    // 锚定 + [^()]：不带锚的 \(.*?\) 在长括号串上是平方级回溯，sudo -l 的输出长度不可控
+    const m = /^\([^()]*\)\s+NOPASSWD:\s*(.+)$/.exec(line)
     if (m === null) continue
     const list = m[1]!.trim()
     if (list === 'ALL') {

@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { ERR, DpError, type Runner } from '@dp/ports'
+import { ERR, DpError, type Runner, stripTrailingSlashes } from '@dp/ports'
 import type { TransferRequest, TransferResult } from './types.js'
 
 const rel = (root: string, relativePath: string): string => join(root, ...relativePath.split('/'))
@@ -51,7 +51,7 @@ export async function copyLocal(
 
   for (const entry of req.entries) {
     if (entry.endsWith('/')) {
-      await ensureDir(entry.replace(/\/+$/, ''))
+      await ensureDir(stripTrailingSlashes(entry))
       continue
     }
     const parts = entry.split('/')

@@ -1,4 +1,4 @@
-import { ERR, DpError, RELEASES_DIR_NAME, joinRemotePath, type Step, type Target, type TargetContext } from '@dp/ports'
+import { ERR, DpError, RELEASES_DIR_NAME, joinRemotePath, type Step, type Target, type TargetContext, stripTrailingSlashes } from '@dp/ports'
 import { renderString, type RenderContext } from '@dp/template'
 import { ALIVE_SCRIPT, START_SCRIPT_NAME, STOP_SCRIPT_NAME, graceSecondsOf } from './script.js'
 import type { ProcessTargetConfig } from './types.js'
@@ -20,7 +20,7 @@ export const DEFAULT_STOP_TIMEOUT_MS = 10_000
  * @returns 该版本的目录绝对路径
  */
 export function releaseDirOf(ctx: TargetContext, releaseId: string): string {
-  return joinRemotePath(ctx.root.replace(/\/+$/, ''), RELEASES_DIR_NAME, releaseId)
+  return joinRemotePath(stripTrailingSlashes(ctx.root), RELEASES_DIR_NAME, releaseId)
 }
 
 /**
@@ -78,8 +78,8 @@ export function processPaths(
     scriptDir: joinRemotePath(releaseDir, '.dp'),
     startScript: joinRemotePath(releaseDir, '.dp', START_SCRIPT_NAME),
     stopScript: joinRemotePath(releaseDir, '.dp', STOP_SCRIPT_NAME),
-    pidFile: joinRemotePath(ctx.root.replace(/\/+$/, ''), normalizeRelative(config.pidFile ?? DEFAULT_PID_FILE, 'pidFile')),
-    stdoutLog: joinRemotePath(ctx.root.replace(/\/+$/, ''), normalizeRelative(config.stdoutLog ?? DEFAULT_STDOUT_LOG, 'stdoutLog')),
+    pidFile: joinRemotePath(stripTrailingSlashes(ctx.root), normalizeRelative(config.pidFile ?? DEFAULT_PID_FILE, 'pidFile')),
+    stdoutLog: joinRemotePath(stripTrailingSlashes(ctx.root), normalizeRelative(config.stdoutLog ?? DEFAULT_STDOUT_LOG, 'stdoutLog')),
     // usage 用 'shell'：这两个值最终的落点是 exec(argv[]) 的元素。
     // 'path' 会把 `|` `<` `>` 一律拒掉，而它们是命令参数里的合法字符；
     // 真正的注入在这里由 `script.ts` 的单引号 + 控制字符闸门锁住

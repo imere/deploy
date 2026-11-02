@@ -19,6 +19,8 @@ import {
   INCOMING_SUFFIX,
   POSIX_WRITE_CANDIDATES,
   RELEASES_DIR_NAME,
+  stripTrailingSeparators,
+  stripTrailingSlashes,
   type DpErrorCode,
 } from './index.js'
 
@@ -166,5 +168,31 @@ describe('错误码登记表', () => {
       false,
       '登记表里不该出现这个野码',
     )
+  })
+})
+
+describe('stripTrailingSlashes / stripTrailingSeparators（线性剥尾斜杠）', () => {
+  it('无尾斜杠原样返回（同一个引用，不复制）', () => {
+    assert.equal(stripTrailingSlashes('/srv/app'), '/srv/app')
+    assert.equal(stripTrailingSeparators('C:\\srv'), 'C:\\srv')
+    assert.equal(stripTrailingSlashes(''), '')
+  })
+
+  it('单个与连续尾斜杠都剥干净', () => {
+    assert.equal(stripTrailingSlashes('/srv/app/'), '/srv/app')
+    assert.equal(stripTrailingSlashes('/srv/app///'), '/srv/app')
+    assert.equal(stripTrailingSlashes('///'), '')
+  })
+
+  it('分隔符变体连 \\ 一起剥（Windows 盘符路径口径）', () => {
+    assert.equal(stripTrailingSeparators('C:\\srv\\app\\'), 'C:\\srv\\app')
+    assert.equal(stripTrailingSeparators('C:\\srv\\app\\/'), 'C:\\srv\\app')
+    assert.equal(stripTrailingSeparators('C:\\'), 'C:')
+  })
+
+  it('「长斜杠串后跟非斜杠」原样返回 —— 这类输入是旧正则的平方级回溯形状', () => {
+    const nasty = '/'.repeat(5000) + 'x'
+    assert.equal(stripTrailingSlashes(nasty), nasty)
+    assert.equal(stripTrailingSeparators(nasty), nasty)
   })
 })
